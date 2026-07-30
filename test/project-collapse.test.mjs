@@ -21,6 +21,22 @@ test('a project whose most recent session is older than the age window is stale'
   assert.equal(isStaleProject(project, 3, NOW), true);
 });
 
+test('one unusable modified timestamp does not mask an otherwise stale project', () => {
+  for (const bad of ['not a date', undefined, null, '']) {
+    const project = { sessions: [{ modified: bad }, { modified: daysAgo(10) }] };
+    assert.equal(isStaleProject(project, 3, NOW), true, `bad timestamp: ${String(bad)}`);
+  }
+});
+
+test('an unusable timestamp is not read as recent activity', () => {
+  const project = { sessions: [{ modified: daysAgo(10) }, { modified: 'not a date' }] };
+  assert.equal(isStaleProject(project, 3, NOW), true);
+});
+
+test('a project whose sessions all have unusable timestamps is not stale', () => {
+  assert.equal(isStaleProject({ sessions: [{ modified: undefined }, { modified: 'nope' }] }, 3, NOW), false);
+});
+
 test('the age window boundary is exclusive', () => {
   const project = { sessions: [{ modified: daysAgo(3) }] };
   assert.equal(isStaleProject(project, 3, NOW), false);
