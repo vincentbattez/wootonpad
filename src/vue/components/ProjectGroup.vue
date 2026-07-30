@@ -151,6 +151,7 @@ import { computed, ref } from 'vue';
 import SessionItem from './SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
+import { isStaleProject } from '../project-collapse.mjs';
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -190,17 +191,20 @@ const worktreeName = computed(() => {
   return match?.[1] || props.project.projectPath.split('/').pop();
 });
 
-// Initial collapse state: auto-collapse stale or project-name-only matches
-const collapsed = ref(() => {
+// null until the user toggles; then it wins over the stale-based default.
+const collapseOverride = ref(null);
+
+const filterActive = computed(() =>
+  !!(props.searchMatchIds || props.showStarredOnly || props.showRunningOnly || props.showTodayOnly)
+);
+
+const collapsed = computed(() => {
   if (props.project._projectMatchedOnly) return true;
-  if (props.searchMatchIds || props.showStarredOnly || props.showRunningOnly) return false;
-  const sessions = props.project.sessions || [];
-  if (sessions.length === 0) return false;
-  const mostRecent = sessions.reduce((a, b) => new Date(b.modified) > new Date(a.modified) ? b : a);
-  return (Date.now() - new Date(mostRecent.modified)) > props.sessionMaxAgeDays * 86400000;
+  if (filterActive.value) return false;
+  return collapseOverride.value ?? isStaleProject(props.project, props.sessionMaxAgeDays, Date.now());
 });
 
-function toggle() { collapsed.value = !collapsed.value; }
+function toggle() { collapseOverride.value = !collapsed.value; }
 
 const showOlder = ref(false);
 
