@@ -1,30 +1,42 @@
-/* ── Radix Colors ─────────────────────────────────────────────────────────
-   Source of truth for every colour token, in both modes. Light and dark are
-   scoped by class (`:root, .light-theme` / `.dark, .dark-theme`); the dark
-   imports must stay *after* their light counterparts — same specificity, so
-   only source order makes them win. The root class is set in index.html. */
+/* Radix Colors — source of truth for every colour token, light and dark. */
+/* Dark imports must stay after the light ones: same specificity, source order decides. */
 @import url('../node_modules/@radix-ui/colors/mauve.css');
 @import url('../node_modules/@radix-ui/colors/mauve-alpha.css');
 @import url('../node_modules/@radix-ui/colors/jade.css');
+@import url('../node_modules/@radix-ui/colors/jade-alpha.css');
 @import url('../node_modules/@radix-ui/colors/indigo.css');
+@import url('../node_modules/@radix-ui/colors/indigo-alpha.css');
 @import url('../node_modules/@radix-ui/colors/orange.css');
+@import url('../node_modules/@radix-ui/colors/orange-alpha.css');
 @import url('../node_modules/@radix-ui/colors/red.css');
+@import url('../node_modules/@radix-ui/colors/red-alpha.css');
 @import url('../node_modules/@radix-ui/colors/amber.css');
+@import url('../node_modules/@radix-ui/colors/amber-alpha.css');
 @import url('../node_modules/@radix-ui/colors/blue.css');
+@import url('../node_modules/@radix-ui/colors/blue-alpha.css');
 @import url('../node_modules/@radix-ui/colors/purple.css');
+@import url('../node_modules/@radix-ui/colors/purple-alpha.css');
 
 @import url('../node_modules/@radix-ui/colors/mauve-dark.css');
 @import url('../node_modules/@radix-ui/colors/mauve-dark-alpha.css');
 @import url('../node_modules/@radix-ui/colors/jade-dark.css');
+@import url('../node_modules/@radix-ui/colors/jade-dark-alpha.css');
 @import url('../node_modules/@radix-ui/colors/indigo-dark.css');
+@import url('../node_modules/@radix-ui/colors/indigo-dark-alpha.css');
 @import url('../node_modules/@radix-ui/colors/orange-dark.css');
+@import url('../node_modules/@radix-ui/colors/orange-dark-alpha.css');
 @import url('../node_modules/@radix-ui/colors/red-dark.css');
+@import url('../node_modules/@radix-ui/colors/red-dark-alpha.css');
 @import url('../node_modules/@radix-ui/colors/amber-dark.css');
+@import url('../node_modules/@radix-ui/colors/amber-dark-alpha.css');
 @import url('../node_modules/@radix-ui/colors/blue-dark.css');
+@import url('../node_modules/@radix-ui/colors/blue-dark-alpha.css');
 @import url('../node_modules/@radix-ui/colors/purple-dark.css');
+@import url('../node_modules/@radix-ui/colors/purple-dark-alpha.css');
 
-/* Scrims and shadows stay black in both modes — not mode-scoped by design. */
+/* Not mode-scoped: scrims stay black, highlights on solid fills stay white. */
 @import url('../node_modules/@radix-ui/colors/black-alpha.css');
+@import url('../node_modules/@radix-ui/colors/white-alpha.css');
 
 /* ── Switchboard Design System Tokens ─────────────────────────────────── */
 @font-face {
@@ -43,9 +55,7 @@
 }
 
 :root {
-  /* Neutrals — legacy ramp names kept as aliases onto the 12 Radix steps, so
-     the ~180 direct `var(--gray-*)` usages follow the theme for free.
-     The direction inverts: legacy grows dark→light, Radix grows bg→fg. */
+  /* Neutrals — legacy names aliased onto the 12 Radix steps; direction inverts (legacy dark→light, Radix bg→fg). */
   --gray-950: var(--mauve-1);
   --gray-925: var(--mauve-2);
   --gray-900: var(--mauve-3);
@@ -62,8 +72,7 @@
   --gray-50:  var(--mauve-12);
   --white:    var(--mauve-12);
 
-  /* Accents — step 11 is the accessible text/icon step used by most call
-     sites; 9/10 are the solid fill steps, 8 the focus/border step. */
+  /* Accents — step 11 is the text/icon step most call sites want; 9/10 are solid fills, 8 the focus ring. */
   --green-400: var(--jade-10);
   --green-500: var(--jade-11);
   --green-600: var(--jade-9);
@@ -85,10 +94,10 @@
   --surface-card: var(--mauve-3);
   --surface-card-hover: var(--mauve-4);
   /* Selected surfaces stay on color-mix until VIN-66 moves them to step 5. */
-  --surface-selected: color-mix(in srgb, var(--jade-9) 9%, var(--surface-panel));
-  --surface-selected-accent: color-mix(in srgb, var(--indigo-9) 16%, var(--surface-panel));
+  --surface-selected: color-mix(in srgb, var(--green-500) 9%, var(--surface-panel));
+  --surface-selected-accent: color-mix(in srgb, var(--indigo-400) 16%, var(--surface-panel));
   --surface-overlay: var(--black-a9);
-  --surface-input: var(--mauve-2);
+  --surface-input: var(--mauve-3);
 
   /* Borders */
   --border-subtle: var(--mauve-6);
@@ -162,7 +171,7 @@
   --shadow-md: 0 6px 20px var(--black-a6);
   --shadow-lg: 0 16px 40px var(--black-a7);
   --shadow-focus-ring: 0 0 0 2px var(--surface-app), 0 0 0 4px var(--border-focus);
-  --shadow-modal: 0 24px 64px var(--black-a7), 0 2px 0 var(--mauve-a3) inset;
+  --shadow-modal: 0 24px 64px var(--black-a7), 0 2px 0 var(--white-a1) inset;
 
   /* Motion */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
@@ -172,12 +181,13 @@
   --duration-slow: 240ms;
 
   /* Gradients & glows */
-  --gradient-primary: linear-gradient(180deg, var(--orange-400), var(--orange-500));
-  --gradient-danger: linear-gradient(180deg, var(--red-400), var(--red-500));
-  --gradient-success: linear-gradient(180deg, var(--green-400), var(--green-600));
-  --glow-orange: 0 1px 0 var(--mauve-a5) inset, 0 0 0 1px color-mix(in srgb, var(--orange-500) 55%, transparent), 0 3px 12px color-mix(in srgb, var(--orange-500) 40%, transparent);
-  --glow-red:    0 1px 0 var(--mauve-a5) inset, 0 0 0 1px color-mix(in srgb, var(--red-500)    55%, transparent), 0 3px 12px color-mix(in srgb, var(--red-500)    40%, transparent);
-  --glow-green:  0 1px 0 var(--mauve-a5) inset, 0 0 0 1px color-mix(in srgb, var(--green-500)  55%, transparent), 0 3px 12px color-mix(in srgb, var(--green-500)  35%, transparent);
+  /* Filled buttons: the solid steps 9 and 10, not the text step the aliases point at. */
+  --gradient-primary: linear-gradient(180deg, var(--orange-9), var(--orange-10));
+  --gradient-danger: linear-gradient(180deg, var(--red-9), var(--red-10));
+  --gradient-success: linear-gradient(180deg, var(--jade-9), var(--jade-10));
+  --glow-orange: 0 1px 0 var(--white-a3) inset, 0 0 0 1px var(--orange-a8), 0 3px 12px var(--orange-a7);
+  --glow-red:    0 1px 0 var(--white-a3) inset, 0 0 0 1px var(--red-a8),    0 3px 12px var(--red-a7);
+  --glow-green:  0 1px 0 var(--white-a3) inset, 0 0 0 1px var(--jade-a8),   0 3px 12px var(--jade-a7);
 
   /* Hit targets (button heights) */
   --hit-xs: 26px;
