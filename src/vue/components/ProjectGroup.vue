@@ -151,6 +151,8 @@ import { computed, ref } from 'vue';
 import SessionItem from './SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
+import { isStaleProject } from '../project-collapse.mjs';
+import { store } from '../store.js';
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -190,17 +192,25 @@ const worktreeName = computed(() => {
   return match?.[1] || props.project.projectPath.split('/').pop();
 });
 
-// Initial collapse state: auto-collapse stale or project-name-only matches
-const collapsed = ref(() => {
+const filterActive = computed(() =>
+  !!(props.searchMatchIds || props.showStarredOnly || props.showRunningOnly || props.showTodayOnly)
+);
+
+// Forced open by a filter, or forced shut for a project matched by name alone.
+const collapseForced = computed(() => props.project._projectMatchedOnly || filterActive.value);
+
+const collapsed = computed(() => {
   if (props.project._projectMatchedOnly) return true;
-  if (props.searchMatchIds || props.showStarredOnly || props.showRunningOnly) return false;
-  const sessions = props.project.sessions || [];
-  if (sessions.length === 0) return false;
-  const mostRecent = sessions.reduce((a, b) => new Date(b.modified) > new Date(a.modified) ? b : a);
-  return (Date.now() - new Date(mostRecent.modified)) > props.sessionMaxAgeDays * 86400000;
+  if (filterActive.value) return false;
+  // Held in the store, not a local ref: a filter can unmount this group.
+  return store.collapsedProjects[props.project.projectPath]
+    ?? isStaleProject(props.project, props.sessionMaxAgeDays, Date.now());
 });
 
-function toggle() { collapsed.value = !collapsed.value; }
+function toggle() {
+  if (collapseForced.value) return;
+  store.collapsedProjects[props.project.projectPath] = !collapsed.value;
+}
 
 const showOlder = ref(false);
 

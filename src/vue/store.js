@@ -21,6 +21,9 @@ export const store = reactive({
   searchMatchIds: null,
   searchMatchProjectPaths: null,
 
+  // Project collapse overrides: projectPath → bool. Absent = fall back to staleness.
+  collapsedProjects: {},
+
   // Visibility settings
   visibleSessionCount: 10,
   sessionMaxAgeDays: 3,
