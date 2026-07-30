@@ -15,75 +15,76 @@
 }
 
 :root {
-  /* Neutrals */
-  --gray-950: #0a0a0c;
-  --gray-925: #0d0d10;
-  --gray-900: #131316;
-  --gray-850: #17171b;
-  --gray-800: #1c1c21;
-  --gray-750: #202027;
-  --gray-700: #26262e;
-  --gray-600: #34343e;
-  --gray-500: #4a4a56;
-  --gray-400: #6b6b78;
-  --gray-300: #8f8f9c;
-  --gray-200: #b4b4c0;
-  --gray-100: #d6d6de;
-  --gray-50:  #eeeef2;
-  --white: #f7f7fa;
+  /* Neutrals — legacy names aliased onto the 12 Radix steps; direction inverts (legacy dark→light, Radix bg→fg). */
+  --gray-950: var(--mauve-1);
+  --gray-925: var(--mauve-2);
+  --gray-900: var(--mauve-3);
+  --gray-850: var(--mauve-3);
+  --gray-800: var(--mauve-4);
+  --gray-750: var(--mauve-6);
+  --gray-700: var(--mauve-7);
+  --gray-600: var(--mauve-8);
+  --gray-500: var(--mauve-9);
+  --gray-400: var(--mauve-10);
+  --gray-300: var(--mauve-11);
+  --gray-200: var(--mauve-11);
+  --gray-100: var(--mauve-12);
+  --gray-50:  var(--mauve-12);
+  --white:    var(--mauve-12);
 
-  /* Accents */
-  --green-400: #5fe5b3;
-  --green-500: #34d399;
-  --green-600: #1fae7c;
-  --amber-500: #f0b429;
-  --red-400:   #f68b86;
-  --red-500:   #f0605a;
-  --yellow-500:#f5c451;
-  --blue-500:  #5b9dff;
-  --purple-400:#b48cf2;
-  --indigo-400:#8b93f8;
-  --indigo-500:#6366f1;
-  --orange-400:#f6a672;
-  --orange-500:#f2884b;
+  /* Accents — step 11 is the text/icon step most call sites want; 9/10 are solid fills, 8 the focus ring. */
+  --green-400: var(--jade-10);
+  --green-500: var(--jade-11);
+  --green-600: var(--jade-9);
+  --amber-500: var(--amber-11);
+  --red-400:   var(--red-10);
+  --red-500:   var(--red-11);
+  --yellow-500:var(--amber-11);
+  --blue-500:  var(--blue-11);
+  --purple-400:var(--purple-11);
+  --indigo-400:var(--indigo-11);
+  --indigo-500:var(--indigo-9);
+  --orange-400:var(--orange-10);
+  --orange-500:var(--orange-11);
 
   /* Semantic surfaces */
-  --surface-app: var(--gray-950);
-  --surface-panel: var(--gray-925);
-  --surface-panel-raised: var(--gray-900);
-  --surface-card: var(--gray-850);
-  --surface-card-hover: var(--gray-800);
+  --surface-app: var(--mauve-1);
+  --surface-panel: var(--mauve-2);
+  --surface-panel-raised: var(--mauve-3);
+  --surface-card: var(--mauve-3);
+  --surface-card-hover: var(--mauve-4);
+  /* Selected surfaces stay on color-mix until VIN-66 moves them to step 5. */
   --surface-selected: color-mix(in srgb, var(--green-500) 9%, var(--surface-panel));
   --surface-selected-accent: color-mix(in srgb, var(--indigo-400) 16%, var(--surface-panel));
-  --surface-overlay: rgba(10, 10, 12, 0.72);
-  --surface-input: var(--gray-900);
+  --surface-overlay: var(--black-a9);
+  --surface-input: var(--mauve-3);
 
   /* Borders */
-  --border-subtle: var(--gray-750);
-  --border-default: var(--gray-700);
-  --border-strong: var(--gray-600);
-  --border-focus: var(--orange-500);
+  --border-subtle: var(--mauve-6);
+  --border-default: var(--mauve-7);
+  --border-strong: var(--mauve-8);
+  --border-focus: var(--orange-8);
 
   /* Text */
-  --text-primary: var(--gray-50);
-  --text-secondary: var(--gray-300);
-  --text-tertiary: var(--gray-400);
-  --text-disabled: var(--gray-500);
-  --text-on-accent: #0a0a0c;
-  --text-link: var(--blue-500);
-  --text-code-emphasis: var(--purple-400);
+  --text-primary: var(--mauve-12);
+  --text-secondary: var(--mauve-11);
+  --text-tertiary: var(--mauve-10);
+  --text-disabled: var(--mauve-9);
+  --text-on-accent: #0a0a0c; /* per-accent `*-contrast` tokens: VIN-66 */
+  --text-link: var(--blue-11);
+  --text-code-emphasis: var(--purple-11);
 
   /* Status */
-  --status-running: var(--green-500);
-  --status-idle: var(--gray-400);
-  --status-warning: var(--amber-500);
-  --status-danger: var(--red-500);
-  --status-info: var(--gray-300);
+  --status-running: var(--jade-11);
+  --status-idle: var(--mauve-10);
+  --status-warning: var(--amber-11);
+  --status-danger: var(--red-11);
+  --status-info: var(--mauve-11);
 
   /* Diff */
-  --diff-added: var(--green-500);
-  --diff-modified: var(--amber-500);
-  --diff-deleted: var(--red-500);
+  --diff-added: var(--jade-11);
+  --diff-modified: var(--amber-11);
+  --diff-deleted: var(--red-11);
 
   /* Typography */
   --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text', sans-serif;
@@ -125,12 +126,12 @@
   --radius-full: 999px;
 
   /* Shadows */
-  --shadow-xs: 0 1px 2px rgba(0,0,0,0.24);
-  --shadow-sm: 0 2px 6px rgba(0,0,0,0.32);
-  --shadow-md: 0 6px 20px rgba(0,0,0,0.40);
-  --shadow-lg: 0 16px 40px rgba(0,0,0,0.48);
+  --shadow-xs: 0 1px 2px var(--black-a4);
+  --shadow-sm: 0 2px 6px var(--black-a5);
+  --shadow-md: 0 6px 20px var(--black-a6);
+  --shadow-lg: 0 16px 40px var(--black-a7);
   --shadow-focus-ring: 0 0 0 2px var(--surface-app), 0 0 0 4px var(--border-focus);
-  --shadow-modal: 0 24px 64px rgba(0,0,0,0.55), 0 2px 0 rgba(255,255,255,0.03) inset;
+  --shadow-modal: 0 24px 64px var(--black-a7), 0 2px 0 var(--white-a1) inset;
 
   /* Motion */
   --ease-standard: cubic-bezier(0.2, 0, 0, 1);
@@ -140,12 +141,13 @@
   --duration-slow: 240ms;
 
   /* Gradients & glows */
-  --gradient-primary: linear-gradient(180deg, var(--orange-400), var(--orange-500));
-  --gradient-danger: linear-gradient(180deg, var(--red-400), var(--red-500));
-  --gradient-success: linear-gradient(180deg, var(--green-400), var(--green-600));
-  --glow-orange: 0 1px 0 rgba(255,255,255,0.16) inset, 0 0 0 1px color-mix(in srgb, var(--orange-500) 55%, transparent), 0 3px 12px color-mix(in srgb, var(--orange-500) 40%, transparent);
-  --glow-red:    0 1px 0 rgba(255,255,255,0.16) inset, 0 0 0 1px color-mix(in srgb, var(--red-500)    55%, transparent), 0 3px 12px color-mix(in srgb, var(--red-500)    40%, transparent);
-  --glow-green:  0 1px 0 rgba(255,255,255,0.14) inset, 0 0 0 1px color-mix(in srgb, var(--green-500)  55%, transparent), 0 3px 12px color-mix(in srgb, var(--green-500)  35%, transparent);
+  /* Filled buttons: the solid steps 9 and 10, not the text step the aliases point at. */
+  --gradient-primary: linear-gradient(180deg, var(--orange-9), var(--orange-10));
+  --gradient-danger: linear-gradient(180deg, var(--red-9), var(--red-10));
+  --gradient-success: linear-gradient(180deg, var(--jade-9), var(--jade-10));
+  --glow-orange: 0 1px 0 var(--white-a3) inset, 0 0 0 1px var(--orange-a8), 0 3px 12px var(--orange-a7);
+  --glow-red:    0 1px 0 var(--white-a3) inset, 0 0 0 1px var(--red-a8),    0 3px 12px var(--red-a7);
+  --glow-green:  0 1px 0 var(--white-a3) inset, 0 0 0 1px var(--jade-a8),   0 3px 12px var(--jade-a7);
 
   /* Hit targets (button heights) */
   --hit-xs: 26px;
