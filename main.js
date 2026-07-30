@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, shell } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
@@ -8,6 +8,7 @@ const log = require('electron-log');
 // getFolderIndexMtimeMs moved to session-cache.js
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
+const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
 log.transports.file.level = app.isPackaged ? 'info' : 'debug';
 log.transports.console.level = app.isPackaged ? 'info' : 'debug';
 
@@ -209,7 +210,44 @@ app.on('open-url', (event, url) => {
   if (filePath) dispatchProjectOpen(filePath, continueSession);
 });
 
+// --- Appearance ---
+// The DB is synchronous, so the resolved appearance is available before the
+// window exists — that's what removes the launch flash.
+function currentAppearance() {
+  const global = getSetting('global') || {};
+  return resolveAppearance(global, { systemPrefersDark: nativeTheme.shouldUseDarkColors });
+}
+
+// Drives the native chrome (scrollbars, context menus, system dialogs).
+function applyThemeSource() {
+  nativeTheme.themeSource = currentAppearance().theme;
+}
+
+// Synchronous so the preload can expose the value before any renderer script runs.
+ipcMain.on('get-appearance-sync', (event) => {
+  event.returnValue = currentAppearance();
+});
+
+function broadcastAppearance() {
+  const appearance = currentAppearance();
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.setBackgroundColor(appearance.backgroundColor);
+    mainWindow.webContents.send('appearance-changed', appearance);
+  }
+  return appearance;
+}
+
+nativeTheme.on('updated', () => broadcastAppearance());
+
+ipcMain.handle('apply-appearance', () => {
+  applyThemeSource();
+  return broadcastAppearance();
+});
+
 function createWindow() {
+  applyThemeSource();
+  const appearance = currentAppearance();
+
   // Restore saved window bounds
   const savedBounds = getSetting('global')?.windowBounds;
   let bounds = { width: 1400, height: 900 };
@@ -238,6 +276,7 @@ function createWindow() {
     minWidth: 800,
     minHeight: 500,
     title: 'Wooton Pad',
+    backgroundColor: appearance.backgroundColor,
     icon: path.join(__dirname, 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -1500,7 +1539,13 @@ const SETTING_DEFAULTS = {
   shellProfile: 'auto',
   showAvatars: true,
   commitMessagePrompt: '',
+  theme: APPEARANCE_DEFAULTS.theme,
+  neutralTone: APPEARANCE_DEFAULTS.neutralTone,
 };
+
+// Appearance is a preference of the person, not a property of a Project:
+// these keys never take a per-project override.
+const GLOBAL_ONLY_SETTINGS = new Set(['theme', 'neutralTone']);
 
 ipcMain.handle('get-shell-profiles', () => {
   _shellProfiles = null; // refresh on each request
@@ -1515,7 +1560,7 @@ ipcMain.handle('get-effective-settings', (_event, projectPath) => {
     if (global[key] !== undefined && global[key] !== null) {
       effective[key] = global[key];
     }
-    if (project[key] !== undefined && project[key] !== null) {
+    if (!GLOBAL_ONLY_SETTINGS.has(key) && project[key] !== undefined && project[key] !== null) {
       effective[key] = project[key];
     }
   }

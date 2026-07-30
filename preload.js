@@ -1,6 +1,20 @@
 const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
+// Resolved synchronously so the root class is posed before the first paint.
+let initialAppearance;
+try {
+  initialAppearance = ipcRenderer.sendSync('get-appearance-sync');
+} catch {
+  initialAppearance = null;
+}
+contextBridge.exposeInMainWorld('appearance', initialAppearance);
+
 contextBridge.exposeInMainWorld('api', {
+  applyAppearance: () => ipcRenderer.invoke('apply-appearance'),
+  onAppearanceChanged: (callback) => {
+    ipcRenderer.on('appearance-changed', (_event, appearance) => callback(appearance));
+  },
+
   // Invoke (request-response)
   getPlans: () => ipcRenderer.invoke('get-plans'),
   readPlan: (filename) => ipcRenderer.invoke('read-plan', filename),
