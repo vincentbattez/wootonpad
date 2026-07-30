@@ -6,6 +6,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - Never `git commit` or `git push` unless the user explicitly asks.
 
+## Agent skills
+
+### Issue tracker
+
+Issues live in Linear (workspace `vincentbattez`, team `Vincentbattez`/`VIN`, project `Wooton`) via the `linear` MCP plugin — not GitHub Issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default five-role vocabulary (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
 ## Commands
 
 ```bash
