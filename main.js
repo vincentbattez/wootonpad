@@ -237,7 +237,10 @@ function broadcastAppearance() {
   return appearance;
 }
 
-nativeTheme.on('updated', () => broadcastAppearance());
+// Only 'system' follows the OS; an explicit choice is already broadcast by apply-appearance.
+nativeTheme.on('updated', () => {
+  if (currentAppearance().theme === 'system') broadcastAppearance();
+});
 
 ipcMain.handle('apply-appearance', () => {
   applyThemeSource();
