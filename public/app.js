@@ -47,6 +47,15 @@ window._applyTerminalTheme = (themeName) => {
     entry.element.style.backgroundColor = TERMINAL_THEME.background;
   }
 };
+window._applyAppearance = (appearance) => {
+  if (!appearance) return;
+  document.documentElement.classList.remove('light-theme', 'dark-theme');
+  document.documentElement.classList.add(appearance.htmlClass);
+  window._applyTerminalTheme(appearance.terminalThemeName);
+};
+
+window.api.onAppearanceChanged?.((appearance) => window._applyAppearance(appearance));
+
 let searchMatchIds = null; // null = no search active; Set<string> = matched session IDs
 let searchMatchProjectPaths = null; // Set<string> of project paths matched by name
 
@@ -773,8 +782,9 @@ setTimeout(() => {
     if (global.sessionMaxAgeDays) {
       sessionMaxAgeDays = global.sessionMaxAgeDays;
     }
-    if (global.terminalTheme && TERMINAL_THEMES[global.terminalTheme]) {
-      currentThemeName = global.terminalTheme;
+    const themeName = window.appearance?.terminalThemeName || global.terminalTheme;
+    if (themeName && TERMINAL_THEMES[themeName]) {
+      currentThemeName = themeName;
       TERMINAL_THEME = getTerminalTheme();
     }
     if (global.monoFont && window.TERMINAL_FONTS?.[global.monoFont]) {

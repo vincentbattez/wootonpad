@@ -130,6 +130,20 @@
 
             <div class="settings-field">
               <div class="settings-field-info">
+                <span class="settings-label">Theme</span>
+                <div class="settings-description">Appearance of the whole application</div>
+              </div>
+              <div class="settings-field-control">
+                <select class="settings-select" v-model="form.theme">
+                  <option value="light">Light</option>
+                  <option value="dark">Dark</option>
+                  <option value="system">System</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-field">
+              <div class="settings-field-info">
                 <span class="settings-label">Terminal Theme</span>
                 <div class="settings-description">Color theme for terminal sessions</div>
               </div>
@@ -346,6 +360,7 @@ const form = reactive({
   visibleSessionCount: 10,
   sessionMaxAgeDays: 3,
   terminalTheme: 'switchboard',
+  theme: 'system',
   mcpEmulation: true,
   shellProfile: 'auto',
   showAvatars: true,
@@ -396,6 +411,7 @@ async function loadSettings() {
     form.visibleSessionCount = current.visibleSessionCount ?? 10;
     form.sessionMaxAgeDays = current.sessionMaxAgeDays ?? 3;
     form.terminalTheme = current.terminalTheme ?? 'switchboard';
+    form.theme = current.theme ?? 'system';
     form.mcpEmulation = current.mcpEmulation !== false;
     form.shellProfile = current.shellProfile ?? 'auto';
     form.showAvatars = current.showAvatars !== false;
@@ -446,6 +462,7 @@ async function save() {
       visibleSessionCount: form.visibleSessionCount || 10,
       sessionMaxAgeDays: form.sessionMaxAgeDays || 3,
       terminalTheme: form.terminalTheme || 'switchboard',
+      theme: form.theme || 'system',
       mcpEmulation: form.mcpEmulation,
       shellProfile: form.shellProfile || 'auto',
       showAvatars: form.showAvatars,
@@ -461,7 +478,7 @@ async function save() {
   if (!isProject.value) {
     window._setVisibleSessionCount?.(settings.visibleSessionCount);
     window._setSessionMaxAge?.(settings.sessionMaxAgeDays);
-    window._applyTerminalTheme?.(settings.terminalTheme);
+    window.api.applyAppearance?.(); // main broadcasts back, the renderer applies it
     window._setShowAvatars?.(settings.showAvatars);
     if (window.TERMINAL_FONTS?.[settings.monoFont]) {
       window._applyTerminalFont?.(window.TERMINAL_FONTS[settings.monoFont].family);
