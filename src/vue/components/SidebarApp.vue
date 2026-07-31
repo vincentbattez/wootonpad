@@ -29,7 +29,7 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue';
 import { store } from '../store.js';
-import { buildSidebarTree } from '../area-tree.mjs';
+import { buildSidebarTree, subtreeAreaIds } from '../area-tree.mjs';
 import { dropOnTarget, isDragging } from '../area-drag.js';
 import ProjectGroup from './ProjectGroup.vue';
 import AreaGroup from './AreaGroup.vue';
@@ -73,23 +73,7 @@ const matchedAreaIds = computed(() => {
 // Every Area id in the subtree of a name-matched Area (matched Areas included). A match reveals its
 // whole subtree, so the Projects filed anywhere under it must be surfaced even when the search would
 // otherwise drop them.
-const revealedAreaIds = computed(() => {
-  const ids = new Set(matchedAreaIds.value);
-  if (ids.size === 0) return ids;
-  const childMap = new Map();
-  for (const a of store.areas) {
-    const parent = a.parentId ?? null;
-    if (!childMap.has(parent)) childMap.set(parent, []);
-    childMap.get(parent).push(a.id);
-  }
-  const stack = [...ids];
-  while (stack.length) {
-    for (const child of childMap.get(stack.pop()) || []) {
-      if (!ids.has(child)) { ids.add(child); stack.push(child); }
-    }
-  }
-  return ids;
-});
+const revealedAreaIds = computed(() => subtreeAreaIds(store.areas, matchedAreaIds.value));
 
 const visibleProjects = computed(() => {
   let projects = store.projects;

@@ -15,6 +15,27 @@ function byPosition(a, b) {
   return (a.position ?? 0) - (b.position ?? 0);
 }
 
+// Every Area id reachable by walking parent→child from `roots` (the roots themselves included).
+// A name match reveals a matched Area's whole subtree (VIN-80): this is that subtree closure,
+// shared by the tree build here and the project filter in the sidebar.
+export function subtreeAreaIds(areas = [], roots = []) {
+  const ids = new Set(roots);
+  if (ids.size === 0) return ids;
+  const childAreaIds = new Map();
+  for (const area of areas) {
+    const parent = area.parentId ?? null;
+    if (!childAreaIds.has(parent)) childAreaIds.set(parent, []);
+    childAreaIds.get(parent).push(area.id);
+  }
+  const stack = [...ids];
+  while (stack.length) {
+    for (const childId of childAreaIds.get(stack.pop()) || []) {
+      if (!ids.has(childId)) { ids.add(childId); stack.push(childId); }
+    }
+  }
+  return ids;
+}
+
 // Builds the ordered sidebar tree: at every level, sub-Areas first in manual order, then
 // Projects in the order they arrive (already sorted by session recency upstream).
 export function buildSidebarTree({ areas = [], assignments = [], projects = [], filters = {} } = {}) {
@@ -22,9 +43,9 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
   // Areas the caller wants on screen whatever the filter says — the one being named, which
   // is empty by construction and would otherwise vanish the moment it is created.
   const kept = new Set(filters.keepAreaIds || []);
-  // Areas matched by name during a search (VIN-80): a matched Area is shown expanded with its
-  // whole subtree, so the reveal propagates down to every descendant, past the empty-shell rule.
-  const matched = new Set(filters.matchedAreaIds || []);
+  // A name match (VIN-80) shows the matched Area expanded with its whole subtree, so every Area in
+  // that subtree is revealed past the empty-shell rule below.
+  const revealed = subtreeAreaIds(areas, filters.matchedAreaIds || []);
 
   const areaById = new Map(areas.map(a => [a.id, a]));
   const childAreas = new Map();
@@ -57,14 +78,12 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
 
   // `seen` breaks cycles left by a corrupt parent chain: an Area is rendered at most once.
   const seen = new Set();
-  function build(area, revealed = false) {
+  function build(area) {
     if (seen.has(area.id)) return null;
     seen.add(area.id);
-    // Once inside a name-matched Area the whole subtree is revealed, so the reveal is inherited.
-    const isRevealed = revealed || matched.has(area.id);
     const node = areaNode(area, filterActive);
     for (const child of childAreas.get(area.id) || []) {
-      const built = build(child, isRevealed);
+      const built = build(child);
       if (built) node.children.push(built);
     }
     for (const project of projectsByArea.get(area.id) || []) {
@@ -72,7 +91,7 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
     }
     // Under a filter an Area with nothing left to show would render as an empty shell — unless it
     // is kept (a fresh one being named) or revealed by a name match, which shows its subtree whole.
-    if (filterActive && node.children.length === 0 && !kept.has(area.id) && !isRevealed) return null;
+    if (filterActive && node.children.length === 0 && !kept.has(area.id) && !revealed.has(area.id)) return null;
     return node;
   }
 

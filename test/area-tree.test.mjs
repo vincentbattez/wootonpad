@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSidebarTree, removeArea, resolveDrop } from '../src/vue/area-tree.mjs';
+import { buildSidebarTree, removeArea, resolveDrop, subtreeAreaIds } from '../src/vue/area-tree.mjs';
 
 const project = (path) => ({ projectPath: path, sessions: [] });
 
@@ -239,6 +239,31 @@ test('matchedAreaIds does not leak the reveal to an unrelated area', () => {
   const tree = buildSidebarTree({ areas, assignments: [], projects: [], filters });
   // Only the matched Work survives; the empty, unmatched Other is hidden by the filter.
   assert.deepEqual(labels(tree), ['area:Work']);
+});
+
+// ── subtreeAreaIds: the reveal closure shared by the tree build and the project filter ────
+
+test('subtreeAreaIds collects a root and every descendant area at any depth', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null },
+    { id: 'c', name: 'Commerce', parentId: 'w' },
+    { id: 'd', name: 'Deep', parentId: 'c' },
+    { id: 'o', name: 'Other', parentId: null },
+  ];
+  assert.deepEqual([...subtreeAreaIds(areas, ['w'])].sort(), ['c', 'd', 'w']);
+});
+
+test('subtreeAreaIds returns an empty set when nothing is matched', () => {
+  const areas = [{ id: 'w', name: 'Work', parentId: null }];
+  assert.equal(subtreeAreaIds(areas, []).size, 0);
+});
+
+test('subtreeAreaIds tolerates a cycle in the parent chain', () => {
+  const areas = [
+    { id: 'a', name: 'A', parentId: 'b' },
+    { id: 'b', name: 'B', parentId: 'a' },
+  ];
+  assert.deepEqual([...subtreeAreaIds(areas, ['a'])].sort(), ['a', 'b']);
 });
 
 test('missing inputs are tolerated', () => {
