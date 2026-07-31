@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { TERMINAL_THEMES } = require('../public/terminal-themes');
+const { TERMINAL_THEMES, getTerminalTheme } = require('../public/terminal-themes');
 
 // The 16-colour ANSI palette plus the two surface colours every preset must carry.
 const REQUIRED_KEYS = [
@@ -32,6 +32,10 @@ test('every preset carries a full ANSI palette, a label, and valid hex colours',
       assert.match(theme[key], /^#[0-9a-fA-F]{6}$/, `${name}.${key} is a 6-digit hex colour`);
     }
   }
+});
+
+test('getTerminalTheme() returns the house dark preset by default', () => {
+  assert.deepEqual(getTerminalTheme(), TERMINAL_THEMES.switchboard);
 });
 
 test('the six third-party presets keep their exact recognisable backgrounds', () => {

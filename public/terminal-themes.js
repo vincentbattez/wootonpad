@@ -2,14 +2,18 @@
 //
 // The `switchboard` key is the house preset and MUST NOT be renamed: a saved
 // `terminalTheme` setting points at it, and a rename without a settings migration
-// would silently reset a user's choice on update. The house presets are re-tuned
-// onto the Radix neutral ramp so the terminal blends with the app chrome — dark
-// background `#121113`, light background `#fdfcfd`. `auto` (the default) resolves
-// to `switchboard` in dark mode and `switchboardLight` in light mode; see appearance.js.
+// would silently reset a user's choice on update.
 //
-// The six third-party presets below (Ghostty, Tokyo Night, Catppuccin Mocha,
-// Dracula, Nord, Solarized Dark) are recognisable themes chosen deliberately and
-// are left untouched — they were never meant to match the chrome.
+// Preset groups, in object order:
+//   • House presets — `switchboard` (dark) and `switchboardLight` (light), tuned
+//     onto the Radix neutral ramp so the terminal blends with the app chrome
+//     (dark background `#121113`, light background `#fdfcfd`). `auto` (the default)
+//     resolves to one of these per mode; see appearance.js.
+//   • Light third-party presets — Solarized Light, Catppuccin Latte — recognisable
+//     light palettes for users who want a named theme in light mode.
+//   • Dark third-party presets — Ghostty, Tokyo Night, Catppuccin Mocha, Dracula,
+//     Nord, Solarized Dark — recognisable themes left untouched; they were never
+//     meant to match the chrome.
 const TERMINAL_THEMES = {
   switchboard: {
     label: 'Switchboard (dark)',
