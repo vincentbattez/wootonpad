@@ -26,15 +26,28 @@ falling back to another tracker.
 - **Close**: `save_issue` with `state: "Done"` (or `Canceled`) plus an explanatory comment.
 - Reference issues by their Linear identifier (e.g. `VIN-42`), never by a bare `#number`.
 
-## Mirror every new issue to Things 3
+## Mirror new work to Things 3
 
-Every issue created in Linear for this repo is also mirrored as a task in the user's Things 3
+New work created in Linear for this repo is also mirrored as a task in the user's Things 3
 to-do list, using the `things3` skill (`things` CLI). Do it in the same run, right after
-`save_issue` succeeds — one Things task per Linear issue created, in dependency order.
+`save_issue` succeeds.
+
+The point is that nothing gets forgotten: everything the user has to do surfaces in Things 3.
+Only the parent surfaces there — never the details.
+
+**Mirror the root of a work item, never its children.** A feature broken into 10
+implementation tickets stays a single Things task, the one named after the feature.
+
+- A spec, feature, or parent issue is published (`/to-spec`) → create the task.
+- A standalone issue with no parent — feature, bug, chore, whatever it is → create the task.
+- Children — `/to-tickets` slices, sub-issues, any ticket under a spec → create nothing. The
+  parent already has its task.
+
+Fields:
 
 - **Project**: `👨‍💻 Wooton` (area `Dev`) — pass the emoji, it is part of the title.
 - **Title**: the feature in French, short and direct (~35 characters) with the ticket ID. The Things title column is narrow
-- **Notes**: `VIN-XX — <one-line French summary>` on the first line, the Linear issue URL on the second.
+- **Notes**: `VIN-XX — <one-line French summary>` on the first line, the Linear spec URL on the second.
 - **Tags**: none by default — the user applies effort/priority tags themselves.
 
 ```bash

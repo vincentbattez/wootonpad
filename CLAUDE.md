@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Issue tracker
 
-Issues live in Linear (workspace `vincentbattez`, team `Vincentbattez`/`VIN`, project `Wooton`) via the `linear` MCP plugin — not GitHub Issues. See `docs/agents/issue-tracker.md`.
+Issues live in Linear (workspace `vincentbattez`, team `Vincentbattez`/`VIN`, project `Wooton`) via the `linear` MCP plugin — not GitHub Issues. New work is also mirrored as a Things 3 task via the `things3` skill — the root of a work item only, never its children. Read `docs/agents/issue-tracker.md` before creating any issue.
 
 ### Triage labels
 
