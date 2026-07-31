@@ -8,6 +8,8 @@
   "scripts": {
     "start": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron .",
     "test": "node --test",
+    "sandcastle": "tsx .sandcastle/main.mts",
+    "sandcastle:build-image": "sandcastle docker build-image --image-name sandcastle-wootonpad",
     "electron": "npm run bundle:radix && npm run bundle:vue && electron .",
     "dev": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && (vite build --watch & electron .) && wait",
     "bundle:codemirror": "esbuild public/codemirror-setup.js --bundle --outfile=public/codemirror-bundle.js --format=iife --platform=browser --minify",
@@ -45,6 +47,7 @@
     "chokidar": "^4.0.0"
   },
   "devDependencies": {
+    "@ai-hero/sandcastle": "^0.12.0",
     "@codemirror/commands": "^6.10.2",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/language-data": "^6.5.2",
@@ -61,6 +64,7 @@
     "electron-reloader": "^1.2.3",
     "esbuild": "^0.28.1",
     "png2icons": "^2.0.1",
+    "tsx": "^4.23.1",
     "vite": "^8.1.5",
     "vue": "^3.5.40"
   },
