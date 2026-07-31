@@ -129,14 +129,14 @@ function locate(nodes, id, areaAncestor = null) {
 }
 
 // Every Area id nested anywhere below an Area node (excluding itself).
-function descendantAreaIds(areaNode) {
+function descendantAreaIds(root) {
   const ids = new Set();
   const walk = (node) => {
     for (const child of node.children || []) {
       if (child.type === 'area') { ids.add(child.id); walk(child); }
     }
   };
-  walk(areaNode);
+  walk(root);
   return ids;
 }
 
