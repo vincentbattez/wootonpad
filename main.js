@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, Menu, nativeTheme, screen, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, Menu, nativeImage, nativeTheme, screen, shell } = require('electron');
 const { Worker } = require('worker_threads');
 const path = require('path');
 const fs = require('fs');
@@ -838,7 +838,6 @@ ipcMain.handle('get-area-avatar', (_event, areaId) => {
 // downscales the longest side to 128px via Electron's nativeImage, and stores it as PNG.
 ipcMain.handle('set-area-image', (_event, areaId, filePath) => {
   if (!areaId || !filePath) return null;
-  const { nativeImage } = require('electron');
   let img = nativeImage.createFromPath(filePath);
   if (img.isEmpty()) return null;
   const { width, height } = img.getSize();

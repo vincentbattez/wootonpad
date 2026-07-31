@@ -1,5 +1,5 @@
 <template>
-  <img v-if="dataUrl" v-bind="$attrs" :src="dataUrl" :alt="name" style="object-fit:cover;display:inline-block;">
+  <img v-if="dataUrl" v-bind="$attrs" :src="dataUrl" :alt="props.name" style="object-fit:cover;display:inline-block;">
   <span v-else v-bind="$attrs" :style="{ background: fallback.color }">{{ fallback.initials }}</span>
 </template>
 
@@ -17,7 +17,6 @@ const props = defineProps({
   name: { type: String, default: '' },
 });
 
-const name = computed(() => props.name || '');
 const dataUrl = computed(() => store.areaAvatarDataUrls[props.areaId] || null);
 const fallback = computed(() => avatarFromName(props.name));
 
