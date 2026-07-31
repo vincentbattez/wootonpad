@@ -35,13 +35,15 @@ If applicable, use RGR to complete the task.
 
 # FEEDBACK LOOPS
 
-Before committing, run `npm run typecheck` and `npm run test` to ensure the tests pass.
+Before committing, run each of these and make sure they pass:
+
+{{VERIFY_COMMANDS}}
 
 # COMMIT
 
 Make a git commit. The commit message must:
 
-1. Start with `RALPH:` prefix
+1. Start with the `{{COMMIT_PREFIX}}` prefix
 2. Include task completed + PRD reference
 3. Key decisions made
 4. Files changed

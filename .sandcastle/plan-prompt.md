@@ -1,42 +1,56 @@
-# ISSUES
+# CONTEXT
 
-Here are the open issues in the repo:
+You are planning the work for a single feature: **{{ROOT_ID}} — {{ROOT_TITLE}}**.
+
+The set of issues to work has already been decided. Your job is **not** to choose
+what gets worked on — it is to decide **in which order** the issues below can be
+worked so that concurrent agents don't collide.
+
+## Issues remaining for this feature
 
 <issues-json>
-
-!`linear api 'query($project:String!,$label:String!){issues(first:100,filter:{project:{name:{eq:$project}},state:{type:{nin:["completed","canceled"]}},labels:{name:{eq:$label}}}){nodes{identifier title description url priority state{name} parent{identifier}}}}' --variable project=Wooton --variable label=ready-for-agent > /tmp/issues.json && jq '[.data.issues.nodes[] | {id: .identifier, title, body: (.description // ""), url, state: .state.name, parent: (.parent.identifier // null)}]' /tmp/issues.json`
-
+{{REMAINING_ISSUES}}
 </issues-json>
 
-The list above has already been filtered to issues ready for work (Linear project `Wooton`,
-label `ready-for-agent`, state not Done or Canceled).
+Each entry carries `id`, `title`, `body` and `branch`. Use the branch name exactly
+as given — it is deterministic so that a re-run resumes the accumulated progress.
 
-Each entry carries its `parent` (the spec it belongs to, if any), and many bodies end with a
-`## Blocked by` section listing the issues that must land first. Use both when building the
-dependency graph.
+## Already landed in an earlier iteration
+
+{{LANDED_ISSUES}}
+
+These are done. Do **not** include them in your output.
 
 # TASK
 
-Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
+Group the remaining issues into **waves**. All issues inside a wave run
+concurrently, in separate sandboxes, each branched from `{{BASE_BRANCH}}`. Waves
+run one after another.
 
-An issue B is **blocked by** issue A if:
+Put issue B in a later wave than issue A when:
 
+- B's body has a `## Blocked by` section naming A
 - B requires code or infrastructure that A introduces
-- B and A modify overlapping files or modules, making concurrent work likely to produce merge conflicts
-- B's requirements depend on a decision or API shape that A will establish
+- B's requirements depend on an API shape or a decision A establishes
+- A and B modify overlapping files, so working them concurrently would produce
+  merge conflicts
 
-An issue is **unblocked** if it has zero blocking dependencies on other open issues.
+Independent issues belong in the same wave — do not serialize work that has no
+reason to be serialized.
 
-For each unblocked issue, assign a branch name using the exact format `sandcastle/issue-{id}` (no slug or other suffix). This must be deterministic so that re-planning the same issue always produces the same branch name and accumulated progress is preserved.
+If every remaining issue is independent, emit a single wave containing all of them.
 
 # OUTPUT
 
-Output your plan as a JSON object wrapped in `<plan>` tags:
+Output your plan as a JSON object wrapped in `<plan>` tags. `waves` is an array
+of arrays; the outer array is ordered, the inner arrays are not.
 
 <plan>
-{"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42"}]}
+{"waves": [[{"id": "ABC-1", "title": "First issue", "branch": "sandcastle/issue-ABC-1"}], [{"id": "ABC-9", "title": "Second issue", "branch": "sandcastle/issue-ABC-9"}]]}
 </plan>
 
-Include only unblocked issues. If every issue is blocked, include the single highest-priority candidate (the one with the fewest or weakest dependencies).
+Always emit the `<plan>` tags. If there is nothing left to do, output
+`<plan>{"waves": []}</plan>` so the run can exit cleanly.
 
-Always emit the `<plan>` tags, even when there is nothing to do. If there are no issues to work on at all, output `<plan>{"issues": []}</plan>` so the run can exit cleanly.
+Every remaining issue must appear in exactly one wave. Never invent issues that
+are not in the list above.

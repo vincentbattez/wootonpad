@@ -1,226 +1,462 @@
-// Parallel Planner with Review — four-phase orchestration loop
+// Feature-scoped orchestration — one Linear issue tree in, one pull request out.
 //
-// This template drives a multi-phase workflow:
-//   Phase 1 (Plan):             An opus agent analyzes open issues, builds a
-//                               dependency graph, and outputs a <plan> JSON
-//                               listing unblocked issues with branch names.
-//   Phase 2 (Execute + Review): For each issue, a sandbox is created via
-//                               createSandbox(). The implementer runs first
-//                               (100 iterations). If it produces commits, a
-//                               reviewer runs in the same sandbox on the same
-//                               branch (1 iteration). All issue pipelines run
-//                               concurrently via Promise.allSettled().
-//   Phase 3 (Merge):            A single agent merges all completed branches
-//                               into the current branch.
+//   npm run sandcastle ABC-1 ABC-9
 //
-// The outer loop repeats up to MAX_ITERATIONS times so that newly unblocked
-// issues are picked up after each round of merges.
+// Project-specific settings live in `.sandcastle/config.json`.
 //
-// Usage:
-//   npx tsx .sandcastle/main.mts
-// Or add to package.json:
-//   "scripts": { "sandcastle": "npx tsx .sandcastle/main.mts" }
+// Each argument is a *root* issue. Its leaves (recursively) are the work items;
+// intermediate nodes are specs, not tasks. A root with no children is its own
+// leaf. With no arguments, every eligible root in the project is worked.
+//
+// Per root, independently of the others:
+//   1. Plan     — an opus agent groups the remaining leaves into dependency waves.
+//   2. Execute  — one sandbox per leaf, branched from the base branch.
+//                 Implementer, then reviewer if the implementer committed.
+//                 Waves run in order, leaves inside a wave run concurrently.
+//   3. Retry    — up to `agent.retryRounds` rounds, re-planning what is left.
+//   4. Ship     — only when every eligible leaf landed: an agent assembles the
+//                 integration branch, then the host pushes it and opens a PR.
+//
+// A root that never completes ships nothing; the other roots are unaffected.
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
+import { config, checkedPromptArgs } from "./lib/config.mts";
+import {
+  branchHasCommits,
+  createPullRequest,
+  nextIntegrationBranch,
+  pushBranch,
+  supersedePreviousPrs,
+} from "./lib/github.mts";
+import {
+  discoverRootIds,
+  fetchIssueTree,
+  descendantIds,
+  isEligible,
+  leavesOf,
+  setState,
+  type Issue,
+} from "./lib/linear.mts";
 
-// The planner emits its plan as JSON inside <plan> tags; Output.object extracts
-// and validates it against this schema. We use Zod here, but any Standard
-// Schema validator works just as well — Valibot, ArkType, etc. See
-// https://standardschema.dev.
 const planSchema = z.object({
-  issues: z.array(
-    z.object({ id: z.string(), title: z.string(), branch: z.string() }),
+  waves: z.array(
+    z.array(z.object({ id: z.string(), title: z.string(), branch: z.string() })),
   ),
 });
 
 // ---------------------------------------------------------------------------
-// Configuration
+// Configuration — everything project-specific lives in .sandcastle/config.json
 // ---------------------------------------------------------------------------
 
-// Maximum number of plan→execute→merge cycles before stopping.
-// Raise this if your backlog is large; lower it for a quick smoke-test run.
-const MAX_ITERATIONS = 10;
+const MODEL = config.agent.model;
+const BASE_BRANCH = config.git.baseBranch;
 
-// Hooks run inside the sandbox before the agent starts each iteration.
-// npm install ensures the sandbox always has fresh dependencies.
 const hooks = {
-  sandbox: { onSandboxReady: [{ command: "npm install" }] },
+  sandbox: { onSandboxReady: [{ command: config.sandbox.installCommand }] },
 };
 
-// Copy node_modules from the host into the worktree before each sandbox
-// starts. Avoids a full npm install from scratch; the hook above handles
-// platform-specific binaries and any packages added since the last copy.
-const copyToWorktree = ["node_modules"];
+const copyToWorktree = config.sandbox.copyToWorktree;
+
+/** Deterministic, so a re-run resumes the branch instead of starting over. */
+const leafBranch = (id: string) => `${config.git.branchPrefix}${id}`;
+
+/** Shared by every prompt that tells an agent how to check its own work. */
+const projectPromptArgs = {
+  VERIFY_COMMANDS: config.project.verifyCommands
+    .map((command) => `- \`${command}\``)
+    .join("\n"),
+  COMMIT_PREFIX: config.project.commitPrefix,
+  CODING_STANDARDS: config.project.codingStandardsFile,
+};
+
+const PROMPTS = {
+  plan: "./.sandcastle/plan-prompt.md",
+  implement: "./.sandcastle/implement-prompt.md",
+  review: "./.sandcastle/review-prompt.md",
+  integrate: "./.sandcastle/integrate-prompt.md",
+};
 
 // ---------------------------------------------------------------------------
-// Main loop
+// Root resolution
 // ---------------------------------------------------------------------------
 
-for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
-  console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
+interface Root {
+  issue: Issue;
+  eligibleLeaves: Issue[];
+  skippedLeaves: Issue[];
+}
 
-  // -------------------------------------------------------------------------
-  // Phase 1: Plan
-  //
-  // The planning agent (opus, for deeper reasoning) reads the open issue list,
-  // builds a dependency graph, and selects the issues that can be worked in
-  // parallel right now (i.e., no blocking dependencies on other open issues).
-  //
-  // It outputs a <plan> JSON block — Output.object parses and validates it.
-  // -------------------------------------------------------------------------
+function parseArgs(): string[] {
+  const ids = process.argv.slice(2);
+  const malformed = ids.filter((id) => !/^[A-Za-z]+-\d+$/.test(id));
+
+  if (malformed.length > 0) {
+    throw new Error(
+      `Not a Linear issue identifier: ${malformed.join(", ")}. Expected e.g. ABC-1.`,
+    );
+  }
+
+  return ids.map((id) => id.toUpperCase());
+}
+
+/**
+ * Passing both a parent and one of its descendants would put two agents on the
+ * same issue. It is almost always a typo, so refuse rather than guess.
+ */
+function assertNoNesting(roots: Root[]): void {
+  for (const root of roots) {
+    const descendants = descendantIds(root.issue);
+    for (const other of roots) {
+      if (other !== root && descendants.has(other.issue.id)) {
+        throw new Error(
+          `${other.issue.id} is a descendant of ${root.issue.id} — pick one or the other.`,
+        );
+      }
+    }
+  }
+}
+
+async function resolveRoot(id: string): Promise<Root> {
+  const issue = await fetchIssueTree(id);
+  const leaves = leavesOf(issue);
+
+  return {
+    issue,
+    eligibleLeaves: leaves.filter(isEligible),
+    skippedLeaves: leaves.filter((leaf) => !isEligible(leaf)),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Execution
+// ---------------------------------------------------------------------------
+
+/**
+ * An agent that ran out of iterations returns normally — only `completionSignal`
+ * distinguishes "finished" from "gave up". Without this check the all-or-nothing
+ * gate would pass on unfinished work.
+ */
+const signalledDone = (result: { completionSignal?: string }) =>
+  result.completionSignal !== undefined;
+
+async function runLeaf(leaf: Issue, branch: string): Promise<boolean> {
+  const sandbox = await sandcastle.createSandbox({
+    branch,
+    baseBranch: BASE_BRANCH,
+    sandbox: docker(),
+    hooks,
+    copyToWorktree,
+  });
+
+  try {
+    const implement = await sandbox.run({
+      name: "implementer",
+      maxIterations: config.agent.implementIterations,
+      agent: sandcastle.claudeCode(MODEL),
+      promptFile: PROMPTS.implement,
+      promptArgs: checkedPromptArgs(PROMPTS.implement, {
+        ...projectPromptArgs,
+        TASK_ID: leaf.id,
+        ISSUE_TITLE: leaf.title,
+        BRANCH: branch,
+      }),
+    });
+
+    if (implement.commits.length > 0) {
+      await sandbox.run({
+        name: "reviewer",
+        maxIterations: 1,
+        agent: sandcastle.claudeCode(MODEL),
+        promptFile: PROMPTS.review,
+        promptArgs: checkedPromptArgs(PROMPTS.review, {
+          ...projectPromptArgs,
+          BRANCH: branch,
+          TARGET_BRANCH: BASE_BRANCH,
+        }),
+      });
+    }
+
+    return signalledDone(implement);
+  } finally {
+    await sandbox.close();
+  }
+}
+
+async function planWaves(
+  root: Root,
+  remaining: Issue[],
+  landed: string[],
+): Promise<Issue[][]> {
   const plan = await sandcastle.run({
     hooks,
     sandbox: docker(),
-    name: "planner",
-    // One iteration is enough: the planner just needs to read and reason,
-    // not write code. (Structured output requires maxIterations: 1.)
+    name: `planner-${root.issue.id}`,
     maxIterations: 1,
-    // Opus for planning: dependency analysis benefits from deeper reasoning.
-    agent: sandcastle.claudeCode("claude-opus-4-8"),
-    promptFile: "./.sandcastle/plan-prompt.md",
-    // Extract and validate the <plan> JSON into a typed object. Throws
-    // StructuredOutputError if the tag is missing, the JSON is malformed, or
-    // validation fails — which aborts the loop.
+    agent: sandcastle.claudeCode(MODEL),
+    promptFile: PROMPTS.plan,
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
+    promptArgs: checkedPromptArgs(PROMPTS.plan, {
+      BASE_BRANCH,
+      ROOT_ID: root.issue.id,
+      ROOT_TITLE: root.issue.title,
+      REMAINING_ISSUES: JSON.stringify(
+        remaining.map((leaf) => ({
+          id: leaf.id,
+          title: leaf.title,
+          body: leaf.description,
+          branch: leafBranch(leaf.id),
+        })),
+        null,
+        2,
+      ),
+      LANDED_ISSUES: landed.length
+        ? landed.map((id) => `- ${id}`).join("\n")
+        : "_(none)_",
+    }),
   });
 
-  const issues = plan.output.issues;
+  const byId = new Map(remaining.map((leaf) => [leaf.id, leaf]));
+  const planned: z.infer<typeof planSchema> = plan.output;
 
-  if (issues.length === 0) {
-    // No unblocked work — either everything is done or everything is blocked.
-    console.log("No unblocked issues to work on. Exiting.");
-    break;
-  }
+  // The planner occasionally drops or invents an entry; trust our own leaf list.
+  const seen = new Set<string>();
+  const waves = planned.waves
+    .map((wave) =>
+      wave
+        .map((entry) => byId.get(entry.id))
+        .filter((leaf): leaf is Issue => {
+          if (!leaf || seen.has(leaf.id)) return false;
+          seen.add(leaf.id);
+          return true;
+        }),
+    )
+    .filter((wave) => wave.length > 0);
 
-  console.log(
-    `Planning complete. ${issues.length} issue(s) to work in parallel:`,
-  );
-  for (const issue of issues) {
-    console.log(`  ${issue.id}: ${issue.title} → ${issue.branch}`);
-  }
+  const forgotten = remaining.filter((leaf) => !seen.has(leaf.id));
+  if (forgotten.length > 0) waves.push(forgotten);
 
-  // -------------------------------------------------------------------------
-  // Phase 2: Execute + Review
-  //
-  // For each issue, create a sandbox via createSandbox() so the implementer
-  // and reviewer share the same sandbox instance per branch. The implementer
-  // runs first; if it produces commits, the reviewer runs in the same sandbox.
-  //
-  // Promise.allSettled means one failing pipeline doesn't cancel the others.
-  // -------------------------------------------------------------------------
+  return waves;
+}
 
-  const settled = await Promise.allSettled(
-    issues.map(async (issue) => {
-      const sandbox = await sandcastle.createSandbox({
-        branch: issue.branch,
-        sandbox: docker(),
-        hooks,
-        copyToWorktree,
-      });
+// ---------------------------------------------------------------------------
+// Shipping
+// ---------------------------------------------------------------------------
 
-      try {
-        // Run the implementer
-        const implement = await sandbox.run({
-          name: "implementer",
-          maxIterations: 100,
-          agent: sandcastle.claudeCode("claude-opus-4-8"),
-          promptFile: "./.sandcastle/implement-prompt.md",
-          promptArgs: {
-            TASK_ID: issue.id,
-            ISSUE_TITLE: issue.title,
-            BRANCH: issue.branch,
-          },
-        });
+/** Root first, then the leaves — deduped, since a childless root is its own leaf. */
+function issuesToClose(root: Root, worked: Issue[]): Issue[] {
+  const seen = new Set<string>();
+  return [root.issue, ...worked].filter((issue) => {
+    if (seen.has(issue.id)) return false;
+    seen.add(issue.id);
+    return true;
+  });
+}
 
-        // Only review if the implementer produced commits
-        if (implement.commits.length > 0) {
-          const review = await sandbox.run({
-            name: "reviewer",
-            maxIterations: 1,
-            agent: sandcastle.claudeCode("claude-opus-4-8"),
-            promptFile: "./.sandcastle/review-prompt.md",
-            promptArgs: {
-              BRANCH: issue.branch,
-            },
-          });
+function pullRequestBody(root: Root, worked: Issue[]): string {
+  const sections = [root.issue.description.trim() || `See ${root.issue.url}.`];
 
-          // Merge commits from both runs so the merge phase sees all of them.
-          // Each sandbox.run() only returns commits from its own run.
-          return {
-            ...review,
-            commits: [...implement.commits, ...review.commits],
-          };
-        }
-
-        return implement;
-      } finally {
-        await sandbox.close();
-      }
-    }),
+  sections.push(
+    ["## Issues", ...worked.map((leaf) => `- ${leaf.id}: ${leaf.title}`)].join(
+      "\n",
+    ),
   );
 
-  // Log any agents that threw (network error, sandbox crash, etc.).
-  for (const [i, outcome] of settled.entries()) {
-    if (outcome.status === "rejected") {
-      console.error(
-        `  ✗ ${issues[i]!.id} (${issues[i]!.branch}) failed: ${outcome.reason}`,
+  if (root.skippedLeaves.length > 0) {
+    sections.push(
+      [
+        "## Not included",
+        "These sub-issues were not eligible when this run started, so their work is not in this PR:",
+        ...root.skippedLeaves.map(
+          (leaf) => `- ${leaf.id}: ${leaf.title} (${leaf.stateName})`,
+        ),
+      ].join("\n"),
+    );
+  }
+
+  sections.push(
+    issuesToClose(root, worked)
+      .map((issue) => `Closes ${issue.id}`)
+      .join("\n"),
+  );
+
+  return sections.join("\n\n");
+}
+
+async function ship(root: Root, branches: string[], worked: Issue[]) {
+  const branch = await nextIntegrationBranch(root.issue.id);
+  console.log(`[${root.issue.id}] assembling ${branch}`);
+
+  const sandbox = await sandcastle.createSandbox({
+    branch,
+    baseBranch: BASE_BRANCH,
+    sandbox: docker(),
+    hooks,
+    copyToWorktree,
+  });
+
+  try {
+    const integration = await sandbox.run({
+      name: `integrator-${root.issue.id}`,
+      maxIterations: 1,
+      agent: sandcastle.claudeCode(MODEL),
+      promptFile: PROMPTS.integrate,
+      promptArgs: checkedPromptArgs(PROMPTS.integrate, {
+        ...projectPromptArgs,
+        ROOT_ID: root.issue.id,
+        ROOT_TITLE: root.issue.title,
+        INTEGRATION_BRANCH: branch,
+        BASE_BRANCH,
+        BRANCHES: branches.map((b) => `- ${b}`).join("\n"),
+      }),
+    });
+
+    if (!signalledDone(integration)) {
+      throw new Error(
+        `integration of ${branch} did not complete — conflicts or failing tests left behind. Nothing pushed.`,
       );
+    }
+  } finally {
+    await sandbox.close();
+  }
+
+  await pushBranch(branch);
+
+  const url = await createPullRequest({
+    branch,
+    title: `${root.issue.id}: ${root.issue.title}`,
+    body: pullRequestBody(root, worked),
+  });
+
+  const superseded = await supersedePreviousPrs(root.issue.id, branch, url);
+  for (const number of superseded) {
+    console.log(`[${root.issue.id}] closed superseded PR #${number}`);
+  }
+
+  for (const issue of issuesToClose(root, worked)) {
+    await setState(issue.id, config.linear.reviewState);
+  }
+
+  return url;
+}
+
+// ---------------------------------------------------------------------------
+// Per-root pipeline
+// ---------------------------------------------------------------------------
+
+async function runRoot(root: Root): Promise<string | null> {
+  const { id } = root.issue;
+
+  for (const leaf of root.skippedLeaves) {
+    console.log(`[${id}] skipping ${leaf.id} — ${leaf.stateName}, not eligible`);
+  }
+
+  if (root.eligibleLeaves.length === 0) {
+    console.log(
+      `[${id}] 0 eligible issue (${root.skippedLeaves.length} leaf/leaves filtered out). Nothing to do.`,
+    );
+    return null;
+  }
+
+  const landed = new Set<string>();
+
+  for (let iteration = 1; iteration <= config.agent.retryRounds; iteration++) {
+    const remaining = root.eligibleLeaves.filter((leaf) => !landed.has(leaf.id));
+    if (remaining.length === 0) break;
+
+    console.log(
+      `\n[${id}] iteration ${iteration}/${config.agent.retryRounds} — ${remaining.length} issue(s) left`,
+    );
+
+    const waves = await planWaves(root, remaining, [...landed]);
+    const landedBefore = landed.size;
+
+    for (const [index, wave] of waves.entries()) {
+      console.log(
+        `[${id}] wave ${index + 1}/${waves.length}: ${wave.map((l) => l.id).join(", ")}`,
+      );
+
+      const settled = await Promise.allSettled(
+        wave.map((leaf) => runLeaf(leaf, leafBranch(leaf.id))),
+      );
+
+      for (const [i, outcome] of settled.entries()) {
+        const leaf = wave[i]!;
+        if (outcome.status === "rejected") {
+          console.error(`[${id}]   ✗ ${leaf.id}: ${outcome.reason}`);
+        } else if (outcome.value) {
+          landed.add(leaf.id);
+        } else {
+          console.error(`[${id}]   ✗ ${leaf.id}: ran out of iterations`);
+        }
+      }
+    }
+
+    if (landed.size === landedBefore) {
+      console.log(`[${id}] no progress this iteration — giving up.`);
+      break;
     }
   }
 
-  // Only pass branches that actually produced commits to the merge phase.
-  // An agent that ran successfully but made no commits has nothing to merge.
-  const completedIssues = settled
-    .map((outcome, i) => ({ outcome, issue: issues[i]! }))
-    .filter(
-      (entry) =>
-        entry.outcome.status === "fulfilled" &&
-        entry.outcome.value.commits.length > 0,
-    )
-    .map((entry) => entry.issue);
+  const missing = root.eligibleLeaves.filter((leaf) => !landed.has(leaf.id));
 
-  const completedBranches = completedIssues.map((i) => i.branch);
+  if (missing.length > 0) {
+    console.error(
+      `[${id}] incomplete — blocked on ${missing.map((l) => l.id).join(", ")}. No branch pushed, no PR opened.`,
+    );
+    return null;
+  }
 
-  console.log(
-    `\nExecution complete. ${completedBranches.length} branch(es) with commits:`,
+  const worked = root.eligibleLeaves;
+  const mergeable = await Promise.all(
+    worked.map(async (leaf) => ({
+      branch: leafBranch(leaf.id),
+      keep: await branchHasCommits(leafBranch(leaf.id)),
+    })),
   );
-  for (const branch of completedBranches) {
-    console.log(`  ${branch}`);
+  const branches = mergeable.filter((b) => b.keep).map((b) => b.branch);
+
+  if (branches.length === 0) {
+    console.log(`[${id}] every issue completed without producing commits.`);
+    return null;
   }
 
-  if (completedBranches.length === 0) {
-    // All agents ran but none made commits — nothing to merge this cycle.
-    console.log("No commits produced. Nothing to merge.");
-    continue;
-  }
-
-  // -------------------------------------------------------------------------
-  // Phase 3: Merge
-  //
-  // One agent merges all completed branches into the current branch,
-  // resolving any conflicts and running tests to confirm everything works.
-  //
-  // The {{BRANCHES}} and {{ISSUES}} prompt arguments are lists that the agent
-  // uses to know which branches to merge and which issues to close.
-  // -------------------------------------------------------------------------
-  await sandcastle.run({
-    hooks,
-    sandbox: docker(),
-    name: "merger",
-    maxIterations: 1,
-    agent: sandcastle.claudeCode("claude-opus-4-8"),
-    promptFile: "./.sandcastle/merge-prompt.md",
-    promptArgs: {
-      // A markdown list of branch names, one per line.
-      BRANCHES: completedBranches.map((b) => `- ${b}`).join("\n"),
-      // A markdown list of issue IDs and titles, one per line.
-      ISSUES: completedIssues.map((i) => `- ${i.id}: ${i.title}`).join("\n"),
-    },
-  });
-
-  console.log("\nBranches merged.");
+  return ship(root, branches, worked);
 }
 
-console.log("\nAll done.");
+// ---------------------------------------------------------------------------
+// Entry point
+// ---------------------------------------------------------------------------
+
+const requested = parseArgs();
+const rootIds = requested.length > 0 ? requested : await discoverRootIds();
+
+if (rootIds.length === 0) {
+  console.log("No eligible root issue. Nothing to do.");
+  process.exit(0);
+}
+
+const roots = await Promise.all(rootIds.map(resolveRoot));
+assertNoNesting(roots);
+
+console.log(`Working ${roots.length} feature(s):`);
+for (const root of roots) {
+  console.log(
+    `  ${root.issue.id}: ${root.issue.title} — ${root.eligibleLeaves.length} eligible, ${root.skippedLeaves.length} skipped`,
+  );
+}
+
+const settled = await Promise.allSettled(roots.map(runRoot));
+
+console.log("\n=== Summary ===");
+for (const [i, outcome] of settled.entries()) {
+  const { id } = roots[i]!.issue;
+  if (outcome.status === "rejected") {
+    console.error(`  ✗ ${id}: ${outcome.reason}`);
+  } else if (outcome.value) {
+    console.log(`  ✓ ${id}: ${outcome.value}`);
+  } else {
+    console.log(`  – ${id}: no pull request`);
+  }
+}
