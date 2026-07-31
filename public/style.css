@@ -4754,7 +4754,7 @@ body { display: flex; flex-direction: column; }
 .fp-toolbar-btn {
   background: transparent;
   border: 1px solid var(--neutral-a3);
-  color: #9090a8;
+  color: var(--text-tertiary);
   font-size: 11px;
   padding: 3px 10px;
   border-radius: 5px;
@@ -4772,8 +4772,8 @@ body { display: flex; flex-direction: column; }
 
 .fp-toolbar-btn.active {
   border-color: var(--border-focus);
-  color: #8088ff;
-  background: rgba(120,130,255,0.12);
+  color: var(--indigo-400);
+  background: color-mix(in srgb, var(--indigo-400) 12%, transparent);
 }
 
 .fp-icon-btn {
@@ -4786,18 +4786,18 @@ body { display: flex; flex-direction: column; }
 }
 
 .fp-save-btn:hover {
-  border-color: rgba(62,207,90,0.3);
-  color: #3ecf5a;
-  background: rgba(62,207,90,0.06);
+  border-color: color-mix(in srgb, var(--green-500) 30%, transparent);
+  color: var(--green-500);
+  background: color-mix(in srgb, var(--green-500) 6%, transparent);
 }
 
 .fp-close-btn {
 }
 
 .fp-close-btn:hover {
-  border-color: rgba(224,80,112,0.3);
-  color: #e05070;
-  background: rgba(224,80,112,0.06);
+  border-color: color-mix(in srgb, var(--red-500) 30%, transparent);
+  color: var(--red-500);
+  background: color-mix(in srgb, var(--red-500) 6%, transparent);
 }
 
 #file-panel-content {
@@ -4835,18 +4835,18 @@ body { display: flex; flex-direction: column; }
 /* Diff line backgrounds */
 #file-panel-body .cm-merge-a .cm-changedLine,
 #file-panel-body .cm-deletedChunk {
-  background-color: rgba(248, 81, 73, 0.12) !important;
+  background-color: color-mix(in srgb, var(--diff-deleted) 12%, transparent) !important;
 }
 #file-panel-body .cm-merge-b .cm-changedLine {
-  background-color: rgba(63, 185, 80, 0.12) !important;
+  background-color: color-mix(in srgb, var(--diff-added) 12%, transparent) !important;
 }
 /* Inner word-level change highlighting (replace underlines with backgrounds) */
 #file-panel-body .cm-merge-a .cm-changedText,
 #file-panel-body .cm-deletedChunk .cm-deletedText {
-  background: rgba(248, 81, 73, 0.35) !important;
+  background: color-mix(in srgb, var(--diff-deleted) 35%, transparent) !important;
 }
 #file-panel-body .cm-merge-b .cm-changedText {
-  background: rgba(63, 185, 80, 0.35) !important;
+  background: color-mix(in srgb, var(--diff-added) 35%, transparent) !important;
 }
 
 #file-panel-actions {
@@ -4884,31 +4884,31 @@ body { display: flex; flex-direction: column; }
 }
 
 .file-panel-accept-btn {
-  background: rgba(62,207,90,0.1);
-  color: #3ecf5a;
-  border-color: rgba(62,207,90,0.3) !important;
+  background: color-mix(in srgb, var(--green-500) 10%, transparent);
+  color: var(--green-500);
+  border-color: color-mix(in srgb, var(--green-500) 30%, transparent) !important;
 }
 
 .file-panel-accept-btn:hover {
-  background: rgba(62,207,90,0.2);
+  background: color-mix(in srgb, var(--green-500) 20%, transparent);
 }
 
 .file-panel-reject-btn {
   background: transparent;
-  color: #e05070;
-  border-color: rgba(224,80,112,0.3) !important;
+  color: var(--red-500);
+  border-color: color-mix(in srgb, var(--red-500) 30%, transparent) !important;
 }
 
 .file-panel-reject-btn:hover {
-  background: rgba(224,80,112,0.1);
+  background: color-mix(in srgb, var(--red-500) 10%, transparent);
 }
 
 /* Account badge in terminal header */
 .terminal-account-badge {
   font-size: 10px;
-  color: #8088ff;
-  background: rgba(128,136,255,0.12);
-  border: 1px solid rgba(128,136,255,0.25);
+  color: var(--indigo-400);
+  background: color-mix(in srgb, var(--indigo-400) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--indigo-400) 25%, transparent);
   padding: 1px 6px;
   border-radius: 3px;
   margin-left: 6px;
@@ -4917,7 +4917,7 @@ body { display: flex; flex-direction: column; }
 /* MCP toggle in terminal header */
 .mcp-toggle {
   font-size: 10px;
-  color: #7a7a90;
+  color: var(--text-tertiary);
   margin-right: 8px;
 }
 
@@ -4946,7 +4946,7 @@ body { display: flex; flex-direction: column; }
   border-radius: 5px;
   font-size: 8px;
   font-weight: 700;
-  color: white;
+  color: var(--white-a12);
   flex-shrink: 0;
   user-select: none;
   letter-spacing: 0.02em;
@@ -4969,7 +4969,7 @@ body { display: flex; flex-direction: column; }
   border-radius: 5px;
   font-size: 8px;
   font-weight: 700;
-  color: white;
+  color: var(--white-a12);
   flex-shrink: 0;
   user-select: none;
   letter-spacing: 0.02em;
@@ -5018,7 +5018,7 @@ body.hide-avatars .area-header-avatar { display: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: white;
+  color: var(--white-a12);
   font-weight: 700;
   font-size: 16px;
   letter-spacing: 0.02em;
@@ -5094,7 +5094,7 @@ body.hide-avatars .grid-card-avatar {
   background: var(--neutral-a2);
   border: 1px solid var(--neutral-a3);
   border-radius: 5px;
-  color: #5a5a7a;
+  color: var(--text-disabled);
   font-size: 11px;
   padding: 4px 8px;
   cursor: pointer;
@@ -5102,8 +5102,8 @@ body.hide-avatars .grid-card-avatar {
   white-space: nowrap;
 }
 
-.projects-sort-btn:hover { color: #aaa; border-color: var(--neutral-a5); }
-.projects-sort-btn.active { color: #ccc; background: var(--neutral-a3); border-color: var(--neutral-a5); }
+.projects-sort-btn:hover { color: var(--text-secondary); border-color: var(--neutral-a5); }
+.projects-sort-btn.active { color: var(--text-primary); background: var(--neutral-a3); border-color: var(--neutral-a5); }
 
 /* .project-item inherits session-item layout; only override what differs */
 .project-item {
@@ -5136,7 +5136,7 @@ body.hide-avatars .grid-card-avatar {
   justify-content: center;
   font-size: 10px;
   font-weight: 700;
-  color: white;
+  color: var(--white-a12);
   flex-shrink: 0;
   letter-spacing: 0.04em;
   user-select: none;
@@ -5197,11 +5197,11 @@ body.hide-avatars .grid-card-avatar {
 
 
 .project-env-added {
-  color: #4ade80;
+  color: var(--diff-added);
 }
 
 .project-env-deleted {
-  color: #f87171;
+  color: var(--diff-deleted);
 }
 
 .project-env-containers-box {
@@ -5240,8 +5240,8 @@ body.hide-avatars .grid-card-avatar {
   background: var(--neutral-a5);
 }
 
-.project-env-dot.running { background: #4ade80; }
-.project-env-dot.starting { background: #f59e0b; }
+.project-env-dot.running { background: var(--status-running); }
+.project-env-dot.starting { background: var(--status-warning); }
 
 .project-env-cname {
   font-weight: 600;
@@ -5262,8 +5262,8 @@ body.hide-avatars .grid-card-avatar {
 }
 
 .project-env-cbadge.starting {
-  color: #f59e0b;
-  background: rgba(245,158,11,0.1);
+  color: var(--status-warning);
+  background: color-mix(in srgb, var(--status-warning) 10%, transparent);
 }
 
 .project-card-actions {
@@ -5294,8 +5294,8 @@ body.hide-avatars .grid-card-avatar {
 }
 
 .project-card-new-btn:hover {
-  background: rgba(59,130,246,0.15);
-  color: #3b82f6;
+  background: color-mix(in srgb, var(--blue-500) 15%, transparent);
+  color: var(--blue-500);
 }
 
 .project-card-del-btn {
@@ -5311,8 +5311,8 @@ body.hide-avatars .grid-card-avatar {
 }
 
 .project-card-del-btn:hover {
-  background: rgba(239,68,68,0.14);
-  color: #ef4444;
+  background: color-mix(in srgb, var(--red-500) 14%, transparent);
+  color: var(--red-500);
 }
 
 .projects-empty-hint {
@@ -5348,6 +5348,7 @@ body.hide-avatars .grid-card-avatar {
 }
 
 
+/* ========== PROJECT VIEWER ========== */
 /* ── Project Viewer Panel ── */
 
 #project-viewer {
