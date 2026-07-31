@@ -47,15 +47,29 @@
   --orange-400:var(--orange-10);
   --orange-500:var(--orange-11);
 
+  /* Text on accent — Radix `*-contrast`, one value per accent. Step 9 (the
+     solid button fill) is identical in light and dark, so contrast is a single
+     mode-independent value: white on the saturated accents, dark on amber. */
+  --jade-contrast: #fff;
+  --indigo-contrast: #fff;
+  --orange-contrast: #fff;
+  --red-contrast: #fff;
+  --blue-contrast: #fff;
+  --purple-contrast: #fff;
+  --amber-contrast: #21201c;
+
   /* Semantic surfaces */
   --surface-app: var(--mauve-1);
   --surface-panel: var(--mauve-2);
   --surface-panel-raised: var(--mauve-3);
   --surface-card: var(--mauve-3);
   --surface-card-hover: var(--mauve-4);
-  /* Selected surfaces stay on color-mix until VIN-66 moves them to step 5. */
-  --surface-selected: color-mix(in srgb, var(--green-500) 9%, var(--surface-panel));
-  --surface-selected-accent: color-mix(in srgb, var(--indigo-400) 16%, var(--surface-panel));
+  /* Step 5 is the documented "selected element" surface: it inverts with the
+     theme and stays distinct from panel (2), card (3) and hover (4). Each
+     selection keeps its accent — jade for active session/account/project,
+     indigo for the archive filter. */
+  --surface-selected: var(--jade-5);
+  --surface-selected-accent: var(--indigo-5);
   --surface-overlay: var(--black-a9);
   --surface-input: var(--mauve-3);
 
@@ -70,7 +84,6 @@
   --text-secondary: var(--mauve-11);
   --text-tertiary: var(--mauve-10);
   --text-disabled: var(--mauve-9);
-  --text-on-accent: #0a0a0c; /* per-accent `*-contrast` tokens: VIN-66 */
   --text-link: var(--blue-11);
   --text-code-emphasis: var(--purple-11);
 
@@ -218,7 +231,7 @@ body { display: flex; flex-direction: column; }
   background: var(--gradient-primary);
   box-shadow: var(--glow-orange);
   border: 1px solid color-mix(in srgb, var(--orange-500) 60%, black);
-  color: var(--text-on-accent);
+  color: var(--orange-contrast);
   border: none;
   border-radius: 4px;
   padding: 3px 10px;
@@ -739,7 +752,7 @@ body { display: flex; flex-direction: column; }
   background: var(--gradient-primary);
   box-shadow: var(--glow-orange);
   border: 1px solid color-mix(in srgb, var(--orange-500) 60%, black);
-  color: var(--text-on-accent);
+  color: var(--orange-contrast);
   border: none;
   border-radius: 5px;
   padding: 5px 14px;
@@ -4065,7 +4078,7 @@ body { display: flex; flex-direction: column; }
 
 .sb-btn--primary {
   background: var(--gradient-primary);
-  color: var(--text-on-accent);
+  color: var(--orange-contrast);
   border-color: color-mix(in srgb, var(--orange-500) 70%, black);
   box-shadow: var(--glow-orange);
 }
@@ -4084,7 +4097,7 @@ body { display: flex; flex-direction: column; }
 
 .sb-btn--danger {
   background: var(--gradient-danger);
-  color: var(--text-on-accent);
+  color: var(--red-contrast);
   border-color: color-mix(in srgb, var(--red-500) 70%, black);
   box-shadow: var(--glow-red);
 }
@@ -4339,7 +4352,7 @@ body { display: flex; flex-direction: column; }
   background: var(--gradient-success);
   border: 1px solid color-mix(in srgb, var(--green-500) 60%, black);
   box-shadow: var(--glow-green);
-  color: var(--text-on-accent);
+  color: var(--jade-contrast);
   font-size: var(--text-sm);
   padding: 0 24px;
   height: var(--hit-sm);
