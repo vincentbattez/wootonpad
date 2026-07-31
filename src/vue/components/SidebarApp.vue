@@ -1,5 +1,11 @@
 <template>
-  <div>
+  <div
+    class="sidebar-tree"
+    :class="{ 'root-drop-target': rootHover }"
+    @dragover.prevent="onRootDragOver"
+    @dragleave="rootHover = false"
+    @drop.prevent="onRootDrop"
+  >
     <template v-for="node in tree" :key="node.type === 'area' ? 'area-' + node.id : node.projectPath">
       <AreaGroup
         v-if="node.type === 'area'"
@@ -15,13 +21,16 @@
         v-bind="shared"
       />
     </template>
+    <!-- Empty space below the list: an obvious target for taking a row back out to the root. -->
+    <div class="sidebar-root-drop-zone"></div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { store } from '../store.js';
 import { buildSidebarTree } from '../area-tree.mjs';
+import { dropOnTarget, isDragging } from '../area-drag.js';
 import ProjectGroup from './ProjectGroup.vue';
 import AreaGroup from './AreaGroup.vue';
 
@@ -138,6 +147,15 @@ const listeners = {
   onArchiveSessions: (sessions) => props.callbacks.archiveSessions?.(sessions),
   onRemoveProject: (path) => props.callbacks.removeProject?.(path),
 };
+
+// The root drop zone: a drop that reaches this outer element (not caught by an Area or Project
+// header) unfiles the dragged row. Header handlers stopPropagation, so only gaps land here.
+const rootHover = ref(false);
+function onRootDragOver() { if (isDragging()) rootHover.value = true; }
+async function onRootDrop() {
+  rootHover.value = false;
+  await dropOnTarget(null);
+}
 
 onMounted(async () => {
   const data = await window.api.getAreas?.().catch(() => null);

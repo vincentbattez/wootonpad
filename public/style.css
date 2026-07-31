@@ -1236,6 +1236,29 @@ body { display: flex; flex-direction: column; }
   display: none;
 }
 
+/* Drag-and-drop filing (VIN-78): the row a drop would land on is outlined; the whole sidebar
+   lights a subtle root drop zone so unfiling into the empty space below has an obvious target. */
+.area-header.drop-target,
+.project-header.drop-target {
+  outline: 2px solid var(--accent-8, var(--border-strong));
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+.sidebar-tree {
+  min-height: 100%;
+}
+
+.sidebar-root-drop-zone {
+  min-height: 40px;
+}
+
+.sidebar-tree.root-drop-target {
+  outline: 2px dashed var(--accent-7, var(--border-subtle));
+  outline-offset: -4px;
+  border-radius: var(--radius-md);
+}
+
 /* Worktree nested groups */
 .worktree-group {
   margin-left: 12px;

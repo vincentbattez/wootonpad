@@ -83,6 +83,7 @@ const {
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
   getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
+  moveArea, fileProject,
   closeDb,
 } = require('./db');
 
@@ -816,6 +817,11 @@ ipcMain.handle('set-area-collapsed', (_event, id, collapsed) => {
 // Re-parents the Area's children one level up, then removes it — the promotion decided in
 // src/vue/area-tree.mjs, done here as one transaction. No confirmation: the caller just deletes.
 ipcMain.handle('delete-area', (_event, id) => deleteArea(id));
+
+// Drag and drop filing (VIN-78). The renderer resolves the drop target through the pure module,
+// but the cycle guard is re-checked here on the move — the main process is the source of truth.
+ipcMain.handle('move-area', (_event, id, parentId) => moveArea(id, parentId ?? null));
+ipcMain.handle('file-project', (_event, projectPath, areaId) => fileProject(projectPath, areaId ?? null));
 
 // --- IPC: project avatar (GitLab) ---
 ipcMain.handle('get-project-avatar', (_event, projectPath) => {

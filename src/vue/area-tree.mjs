@@ -113,3 +113,54 @@ export function removeArea(areas = [], assignments = [], areaId) {
 
   return { areas: nextAreas, assignments: nextAssignments };
 }
+
+// Locate a node in a built tree by its id — an Area's `id` or a Project's `projectPath` — and
+// report the id of its nearest Area ancestor (null at the root). Returns null when nothing matches.
+function locate(nodes, id, areaAncestor = null) {
+  for (const node of nodes) {
+    const nodeId = node.type === 'area' ? node.id : node.projectPath;
+    if (nodeId === id) return { node, areaAncestor };
+    if (node.type === 'area') {
+      const hit = locate(node.children, id, node.id);
+      if (hit) return hit;
+    }
+  }
+  return null;
+}
+
+// Every Area id nested anywhere below an Area node (excluding itself).
+function descendantAreaIds(areaNode) {
+  const ids = new Set();
+  const walk = (node) => {
+    for (const child of node.children || []) {
+      if (child.type === 'area') { ids.add(child.id); walk(child); }
+    }
+  };
+  walk(areaNode);
+  return ids;
+}
+
+// Filing is direct manipulation (VIN-78): a drop resolves to where the dragged row lands, not to
+// the exact pixel it hit. `resolveDrop` reads the built tree and answers with the enclosing Area:
+//   { areaId }         — file the dragged Project, or re-parent the dragged Area, here (null = root)
+//   { rejected: true } — an Area dropped onto itself or into its own descendant would form a cycle
+// A drop always resolves upward to the nearest enclosing Area rather than being rejected — in a
+// dense tree non-target rows are most of the surface. Dropping on a Session, Slug or Worktree row
+// is expressed by passing that row's Project (or Area) as the target; a target the renderer could
+// not map to a tree node, and the empty space below the list, both resolve to the root. The cycle
+// guard here is the first line of defence and is re-checked in the main process on the move call.
+export function resolveDrop({ tree = [], draggedId, targetId } = {}) {
+  let areaId = null;
+  if (targetId != null) {
+    const hit = locate(tree, targetId);
+    if (hit) areaId = hit.node.type === 'area' ? hit.node.id : hit.areaAncestor;
+  }
+
+  const dragged = draggedId != null ? locate(tree, draggedId) : null;
+  if (dragged && dragged.node.type === 'area') {
+    if (areaId === draggedId) return { rejected: true };
+    if (areaId != null && descendantAreaIds(dragged.node).has(areaId)) return { rejected: true };
+  }
+
+  return { areaId };
+}

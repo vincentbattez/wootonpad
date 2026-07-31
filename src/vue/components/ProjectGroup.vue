@@ -10,7 +10,19 @@
     </div>
 
     <!-- Project header -->
-    <div v-else class="project-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle">
+    <div
+      v-else
+      class="project-header"
+      :class="{ collapsed, 'drop-target': dropHover }"
+      :id="'ph-' + folderId"
+      draggable="true"
+      @click.self="toggle"
+      @dragstart.stop="onDragStart"
+      @dragend="onDragEnd"
+      @dragover.prevent.stop="onDragOver"
+      @dragleave="dropHover = false"
+      @drop.prevent.stop="onDrop"
+    >
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <ProjectAvatar class="project-header-avatar" :project-path="project.projectPath" @click.stop="toggle" />
       <span class="project-name" @click.stop="toggle">{{ shortName }}</span>
@@ -153,6 +165,7 @@ import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
 import { isStaleProject } from '../project-collapse.mjs';
 import { store } from '../store.js';
+import { startDrag, endDrag, dropOnTarget, isDragging } from '../area-drag.js';
 
 const props = defineProps({
   project: { type: Object, required: true },
@@ -178,6 +191,17 @@ const emit = defineEmits([
 ]);
 
 const folderId = computed(() => 'project-' + props.project.projectPath.replace(/[^a-zA-Z0-9_-]/g, '_'));
+
+// Drag a Project into an Area; drop another row on this Project files it into the Project's own
+// Area (its nearest enclosing Area), resolved in the pure module (VIN-78).
+const dropHover = ref(false);
+function onDragStart(ev) { startDrag('project', props.project.projectPath, ev); }
+function onDragEnd() { endDrag(); dropHover.value = false; }
+function onDragOver() { if (isDragging()) dropHover.value = true; }
+async function onDrop() {
+  dropHover.value = false;
+  await dropOnTarget(props.project.projectPath);
+}
 
 const avatar = computed(() =>
   window.getProjectAvatar ? window.getProjectAvatar(props.project.projectPath) : { initials: '?', color: '#666' }

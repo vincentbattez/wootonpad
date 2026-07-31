@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSidebarTree, removeArea } from '../src/vue/area-tree.mjs';
+import { buildSidebarTree, removeArea, resolveDrop } from '../src/vue/area-tree.mjs';
 
 const project = (path) => ({ projectPath: path, sessions: [] });
 
@@ -292,4 +292,100 @@ test('removeArea does not mutate its inputs', () => {
 test('removeArea tolerates missing inputs', () => {
   assert.deepEqual(removeArea(), { areas: [], assignments: [] });
   assert.deepEqual(removeArea([], [], 'x'), { areas: [], assignments: [] });
+});
+
+// ── resolveDrop: filing by drag and drop (VIN-78) ─────────────────────────
+// resolveDrop reads the built tree and answers where a drop lands: the id of the enclosing
+// Area, null for the root, or a rejection when an Area would become its own descendant. A drop
+// always resolves upward to the nearest enclosing Area rather than being rejected.
+
+// A small filed tree: Work ⊃ Commerce ⊃ /leaf, plus /shop directly in Work and /free ungrouped.
+function filedTree() {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0 },
+  ];
+  const projects = [project('/leaf'), project('/shop'), project('/free')];
+  const assignments = [
+    { projectPath: '/leaf', areaId: 'c' },
+    { projectPath: '/shop', areaId: 'w' },
+  ];
+  return buildSidebarTree({ areas, assignments, projects });
+}
+
+test('dropping a project on an area files it into that area', () => {
+  const tree = filedTree();
+  assert.deepEqual(resolveDrop({ tree, draggedId: '/free', targetId: 'w' }), { areaId: 'w' });
+});
+
+test('dropping a project on the root unfiles it', () => {
+  const tree = filedTree();
+  assert.deepEqual(resolveDrop({ tree, draggedId: '/leaf', targetId: null }), { areaId: null });
+});
+
+test('dropping an area on another area nests it under that area', () => {
+  const tree = filedTree();
+  // Commerce dropped onto the root-sibling target is a fresh root area, but onto Work it nests.
+  assert.deepEqual(resolveDrop({ tree, draggedId: 'c', targetId: 'w' }), { areaId: 'w' });
+});
+
+test('dropping an area on the root promotes it to a root area', () => {
+  const tree = filedTree();
+  assert.deepEqual(resolveDrop({ tree, draggedId: 'c', targetId: null }), { areaId: null });
+});
+
+test('a drop on a project resolves to that project nearest area ancestor', () => {
+  const tree = filedTree();
+  // /leaf lives in Commerce, so a drop on it files into Commerce, not the root.
+  assert.deepEqual(resolveDrop({ tree, draggedId: '/free', targetId: '/leaf' }), { areaId: 'c' });
+});
+
+test('a drop on a project with no area ancestor resolves to the root', () => {
+  const tree = filedTree();
+  assert.deepEqual(resolveDrop({ tree, draggedId: '/shop', targetId: '/free' }), { areaId: null });
+});
+
+test('a drop on a target absent from the tree resolves to the root', () => {
+  const tree = filedTree();
+  // A Session, Slug or Worktree row the renderer could not map to a tree node lands at the root.
+  assert.deepEqual(resolveDrop({ tree, draggedId: '/free', targetId: '/unknown' }), { areaId: null });
+});
+
+test('dropping an area into its own descendant is refused', () => {
+  const tree = filedTree();
+  // Work dropped onto Commerce (its sub-area) would make Work its own descendant.
+  assert.deepEqual(resolveDrop({ tree, draggedId: 'w', targetId: 'c' }), { rejected: true });
+});
+
+test('dropping an area onto a project inside its own descendant is refused', () => {
+  const tree = filedTree();
+  // /leaf resolves to Commerce, a descendant of Work — the cycle guard still catches it.
+  assert.deepEqual(resolveDrop({ tree, draggedId: 'w', targetId: '/leaf' }), { rejected: true });
+});
+
+test('dropping an area onto itself is refused', () => {
+  const tree = filedTree();
+  assert.deepEqual(resolveDrop({ tree, draggedId: 'w', targetId: 'w' }), { rejected: true });
+});
+
+test('an area dropped onto a project directly inside itself is refused as a self-drop', () => {
+  const tree = filedTree();
+  // /shop resolves to Work; Work onto Work is a no-op cycle.
+  assert.deepEqual(resolveDrop({ tree, draggedId: 'w', targetId: '/shop' }), { rejected: true });
+});
+
+test('a sub-area may be dropped onto a root sibling area', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'p', name: 'Perso', parentId: null, position: 1 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0 },
+  ];
+  const tree = buildSidebarTree({ areas, assignments: [], projects: [] });
+  // Commerce (under Work) onto Perso — Perso is not a descendant of Commerce, so it is allowed.
+  assert.deepEqual(resolveDrop({ tree, draggedId: 'c', targetId: 'p' }), { areaId: 'p' });
+});
+
+test('resolveDrop tolerates missing inputs', () => {
+  assert.deepEqual(resolveDrop(), { areaId: null });
+  assert.deepEqual(resolveDrop({ tree: [], draggedId: 'x', targetId: 'y' }), { areaId: null });
 });

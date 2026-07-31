@@ -562,6 +562,9 @@ function ar() {
     dropAssignments: db.prepare('DELETE FROM project_area WHERE areaId = ?'),
     deleteAvatar: db.prepare('DELETE FROM area_avatars WHERE areaId = ?'),
     del: db.prepare('DELETE FROM areas WHERE id = ?'),
+    reparent: db.prepare('UPDATE areas SET parentId = ?, position = ? WHERE id = ?'),
+    assignProject: db.prepare('INSERT INTO project_area (projectPath, areaId) VALUES (?, ?) ON CONFLICT(projectPath) DO UPDATE SET areaId = excluded.areaId'),
+    unassignProject: db.prepare('DELETE FROM project_area WHERE projectPath = ?'),
   };
   return _ar;
 }
@@ -609,6 +612,41 @@ function deleteArea(id) {
   return { ok: true, parentId: newParent };
 }
 
+// Would making `id` a child of `newParentId` form a cycle? True if the new parent is the Area
+// itself or already sits below it. Walks the parent chain up from newParentId; a bounded guard
+// counter keeps a pre-existing corrupt chain from looping forever.
+function wouldCycleArea(id, newParentId) {
+  let cursor = newParentId ?? null;
+  let guard = 0;
+  while (cursor != null && guard++ < 10000) {
+    if (cursor === id) return true;
+    cursor = ar().byId.get(cursor)?.parentId ?? null;
+  }
+  return false;
+}
+
+// Re-parent an Area by drag and drop (VIN-78). The target parent (null = root) is decided in
+// src/vue/area-tree.mjs, and the cycle guard is re-checked here — the renderer is not trusted.
+// The Area is appended after the new parent's existing sub-Areas, matching createArea's ordering.
+function moveArea(id, newParentId) {
+  const a = ar();
+  const parent = newParentId ?? null;
+  if (!a.byId.get(id)) return { ok: false };
+  if (parent != null && !a.byId.get(parent)) return { ok: false };
+  if (wouldCycleArea(id, parent)) return { ok: false, reason: 'cycle' };
+  const position = a.nextPosition.get(parent).pos;
+  a.reparent.run(parent, position, id);
+  return { ok: true, parentId: parent, position };
+}
+
+// File or unfile a Project by drag and drop (VIN-78). A Project lives in exactly one Area, so
+// assignment is an upsert keyed by path; a null Area unfiles it (drops the assignment row).
+function fileProject(projectPath, areaId) {
+  if (areaId == null) ar().unassignProject.run(projectPath);
+  else ar().assignProject.run(projectPath, areaId);
+  return { ok: true, projectPath, areaId: areaId ?? null };
+}
+
 // --- Settings functions ---
 
 function getSetting(key) {
@@ -640,5 +678,6 @@ module.exports = {
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
   getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
+  moveArea, fileProject,
   closeDb,
 };

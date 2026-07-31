@@ -1,6 +1,16 @@
 <template>
   <div class="area-group">
-    <div class="area-header" :class="{ collapsed: node.collapsed }" @click.self="toggle">
+    <div
+      class="area-header"
+      :class="{ collapsed: node.collapsed, 'drop-target': dropHover }"
+      draggable="true"
+      @click.self="toggle"
+      @dragstart.stop="onDragStart"
+      @dragend="onDragEnd"
+      @dragover.prevent.stop="onDragOver"
+      @dragleave="dropHover = false"
+      @drop.prevent.stop="onDrop"
+    >
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <input
         v-if="isRenaming"
@@ -41,6 +51,7 @@
 import { computed, nextTick, ref, watch } from 'vue';
 import { store } from '../store.js';
 import { removeArea } from '../area-tree.mjs';
+import { startDrag, endDrag, dropOnTarget, isDragging } from '../area-drag.js';
 import ProjectGroup from './ProjectGroup.vue';
 
 defineOptions({ inheritAttrs: false });
@@ -61,6 +72,16 @@ function toggle() {
   area.collapsed = collapsed;
   // Persist so a collapsed Area stays collapsed across restarts.
   window.api.setAreaCollapsed(props.node.id, collapsed).catch(() => {});
+}
+
+// Drag to re-parent this Area; drop another row here to file it into this Area (VIN-78).
+const dropHover = ref(false);
+function onDragStart(ev) { startDrag('area', props.node.id, ev); }
+function onDragEnd() { endDrag(); dropHover.value = false; }
+function onDragOver() { if (isDragging()) dropHover.value = true; }
+async function onDrop() {
+  dropHover.value = false;
+  await dropOnTarget(props.node.id);
 }
 
 const nameInput = ref(null);
