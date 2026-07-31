@@ -5,9 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Wooton Pad</title>
   <script>
-    // Pose the theme class before the stylesheets land — no flash at launch.
+    // Pose the theme class and neutral tone before the stylesheets land — no flash at launch.
     const fallback = matchMedia('(prefers-color-scheme: dark)').matches ? 'dark-theme' : 'light-theme';
     document.documentElement.classList.add(window.appearance?.htmlClass || fallback);
+    if (window.appearance?.neutralTone) {
+      document.documentElement.setAttribute('data-neutral-tone', window.appearance.neutralTone);
+    }
   </script>
   <link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
   <link rel="stylesheet" href="fonts.css">
