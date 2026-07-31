@@ -554,6 +554,7 @@ function ar() {
     insert: db.prepare('INSERT INTO areas (id, name, parentId, position, collapsed, createdAt) VALUES (?, ?, ?, ?, 0, ?)'),
     nextPosition: db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM areas WHERE parentId IS ?'),
     rename: db.prepare('UPDATE areas SET name = ? WHERE id = ?'),
+    setCollapsed: db.prepare('UPDATE areas SET collapsed = ? WHERE id = ?'),
     assignments: db.prepare('SELECT projectPath, areaId FROM project_area'),
   };
   return _ar;
@@ -575,6 +576,11 @@ function createArea(id, name, parentId = null) {
 
 function renameArea(id, name) {
   ar().rename.run(name, id);
+}
+
+// Only Areas persist their collapsed state; Projects deliberately do not.
+function setAreaCollapsed(id, collapsed) {
+  ar().setCollapsed.run(collapsed ? 1 : 0, id);
 }
 
 // --- Settings functions ---
@@ -607,6 +613,6 @@ module.exports = {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
-  getAreas, getAreaAssignments, createArea, renameArea,
+  getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed,
   closeDb,
 };

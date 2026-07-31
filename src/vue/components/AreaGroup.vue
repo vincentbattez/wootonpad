@@ -53,7 +53,11 @@ const props = defineProps({
 function toggle() {
   if (props.filterActive) return;
   const area = store.areas.find(a => a.id === props.node.id);
-  if (area) area.collapsed = props.node.collapsed ? 0 : 1;
+  if (!area) return;
+  const collapsed = props.node.collapsed ? 0 : 1;
+  area.collapsed = collapsed;
+  // Persist through so putting a world away is a one-time gesture, remembered across restarts.
+  window.api.setAreaCollapsed(props.node.id, collapsed).catch(() => {});
 }
 
 const nameInput = ref(null);

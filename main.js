@@ -82,7 +82,7 @@ const {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
-  getAreas, getAreaAssignments, createArea, renameArea,
+  getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed,
   closeDb,
 } = require('./db');
 
@@ -805,6 +805,12 @@ ipcMain.handle('rename-area', (_event, id, name) => {
   if (!trimmed) return { ok: false };
   renameArea(id, trimmed);
   return { ok: true, name: trimmed };
+});
+
+// Written through the moment the header is toggled, so a collapse survives a restart.
+ipcMain.handle('set-area-collapsed', (_event, id, collapsed) => {
+  setAreaCollapsed(id, collapsed);
+  return { ok: true };
 });
 
 // --- IPC: project avatar (GitLab) ---

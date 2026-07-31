@@ -166,6 +166,26 @@ test('the persisted collapsed flag is honoured in normal view and ignored under 
   assert.equal(filtered.collapsed, false);
 });
 
+test('a sub-area collapse is computed independently of its parent', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0, collapsed: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0, collapsed: 1 },
+  ];
+  const [work] = buildSidebarTree({ areas, assignments: [], projects: [] });
+  assert.equal(work.collapsed, false);
+  assert.equal(work.children[0].collapsed, true);
+});
+
+test('a collapsed parent leaves an expanded sub-area expanded', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0, collapsed: 1 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0, collapsed: 0 },
+  ];
+  const [work] = buildSidebarTree({ areas, assignments: [], projects: [] });
+  assert.equal(work.collapsed, true);
+  assert.equal(work.children[0].collapsed, false);
+});
+
 test('missing inputs are tolerated', () => {
   assert.deepEqual(buildSidebarTree({}), []);
   assert.deepEqual(buildSidebarTree(), []);

@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('api', {
   getAreas: () => ipcRenderer.invoke('get-areas'),
   createArea: (name, parentId) => ipcRenderer.invoke('create-area', name, parentId),
   renameArea: (id, name) => ipcRenderer.invoke('rename-area', id, name),
+  setAreaCollapsed: (id, collapsed) => ipcRenderer.invoke('set-area-collapsed', id, collapsed),
   getProjectAvatar: (projectPath) => ipcRenderer.invoke('get-project-avatar', projectPath),
   fetchGitlabAvatar: (projectPath, remoteUrl) => ipcRenderer.invoke('fetch-gitlab-avatar', projectPath, remoteUrl),
   gitGenerateCommitMsg: (projectPath, style) => ipcRenderer.invoke('git-generate-commit-msg', projectPath, style),
