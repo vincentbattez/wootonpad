@@ -79,11 +79,7 @@ async function commit(value) {
   const name = (value || '').trim();
   // An empty name keeps the placeholder the Area was created with.
   if (!name || name === props.node.name) return;
-  const result = await window.api.renameArea(props.node.id, name).catch(() => null);
-  if (result?.ok) {
-    const area = store.areas.find(a => a.id === props.node.id);
-    if (area) area.name = result.name;
-  }
+  await applyRename(name);
 }
 
 function cancel() {
