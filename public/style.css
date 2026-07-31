@@ -182,7 +182,6 @@
   --neutral-a12: var(--sand-a12);
 }
 
-
 :root {
   /* Neutrals — legacy names aliased onto the 12 Radix steps; direction inverts (legacy dark→light, Radix bg→fg). */
   --gray-950: var(--neutral-1);
