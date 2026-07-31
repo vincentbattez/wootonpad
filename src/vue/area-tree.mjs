@@ -35,17 +35,17 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
     }
   }
 
-  // Only the last assignment for a path counts; one pointing at an unknown Area unfiles it.
+  // An assignment pointing at an Area that is gone leaves its Project ungrouped.
   const areaOfProject = new Map();
   for (const { projectPath, areaId } of assignments) {
     if (areaById.has(areaId)) areaOfProject.set(projectPath, areaId);
   }
 
   const projectsByArea = new Map();
-  const unfiled = [];
+  const ungrouped = [];
   for (const project of projects) {
     const areaId = areaOfProject.get(project.projectPath);
-    if (!areaId) { unfiled.push(project); continue; }
+    if (!areaId) { ungrouped.push(project); continue; }
     if (!projectsByArea.has(areaId)) projectsByArea.set(areaId, []);
     projectsByArea.get(areaId).push(project);
   }
@@ -75,6 +75,6 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
     const node = build(area);
     if (node) tree.push(node);
   }
-  for (const project of unfiled) tree.push(projectNode(project));
+  for (const project of ungrouped) tree.push(projectNode(project));
   return tree;
 }

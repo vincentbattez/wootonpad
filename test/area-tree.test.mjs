@@ -14,7 +14,7 @@ test('with no areas the projects stay flat, in the order they came in', () => {
   assert.deepEqual(labels(tree), ['project:/a', 'project:/b', 'project:/c']);
 });
 
-test('areas render before the unfiled projects at the root', () => {
+test('areas render before the ungrouped projects at the root', () => {
   const areas = [{ id: 'w', name: 'Work', parentId: null, position: 0 }];
   const projects = [project('/a'), project('/b')];
   const tree = buildSidebarTree({ areas, assignments: [], projects });
@@ -61,13 +61,13 @@ test('an area holds sub-areas and projects side by side at arbitrary depth', () 
   assert.deepEqual(labels(commerce.children[0].children), ['project:/leaf']);
 });
 
-test('a filed project is not repeated among the unfiled ones', () => {
+test('a grouped project is not repeated among the ungrouped ones', () => {
   const areas = [{ id: 'w', name: 'Work', parentId: null, position: 0 }];
-  const projects = [project('/filed'), project('/loose')];
-  const assignments = [{ projectPath: '/filed', areaId: 'w' }];
+  const projects = [project('/grouped'), project('/ungrouped')];
+  const assignments = [{ projectPath: '/grouped', areaId: 'w' }];
   const tree = buildSidebarTree({ areas, assignments, projects });
-  assert.deepEqual(labels(tree), ['area:Work', 'project:/loose']);
-  assert.deepEqual(labels(tree[0].children), ['project:/filed']);
+  assert.deepEqual(labels(tree), ['area:Work', 'project:/ungrouped']);
+  assert.deepEqual(labels(tree[0].children), ['project:/grouped']);
 });
 
 test('an empty area stays visible in normal view', () => {
@@ -133,7 +133,7 @@ test('an assignment pointing at an absent project does not appear and does not t
   assert.deepEqual(labels(tree[0].children), ['project:/here']);
 });
 
-test('an assignment pointing at an absent area leaves its project unfiled', () => {
+test('an assignment pointing at an absent area leaves its project ungrouped', () => {
   const projects = [project('/orphan')];
   const assignments = [{ projectPath: '/orphan', areaId: 'nope' }];
   const tree = buildSidebarTree({ areas: [], assignments, projects });

@@ -157,12 +157,14 @@ const migrations = [
   // v8: Areas — a user-authored tree above Projects in the sidebar. Membership is explicit
   // (ADR 0001): project_area is keyed by path and survives a Project leaving the scan.
   // Images live in their own table so reading the tree never carries image bytes.
+  // No ON DELETE clauses: foreign keys are not enforced on this connection, and deleting an
+  // Area must re-parent its children rather than cascade (VIN-81), so nothing may be implied.
   (db) => {
     db.exec(`
       CREATE TABLE IF NOT EXISTS areas (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        parentId TEXT REFERENCES areas(id) ON DELETE SET NULL,
+        parentId TEXT,
         position INTEGER NOT NULL DEFAULT 0,
         collapsed INTEGER NOT NULL DEFAULT 0,
         createdAt INTEGER
@@ -170,11 +172,11 @@ const migrations = [
       CREATE INDEX IF NOT EXISTS idx_areas_parent ON areas(parentId);
       CREATE TABLE IF NOT EXISTS project_area (
         projectPath TEXT PRIMARY KEY,
-        areaId TEXT NOT NULL REFERENCES areas(id) ON DELETE CASCADE
+        areaId TEXT NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_project_area_area ON project_area(areaId);
       CREATE TABLE IF NOT EXISTS area_avatars (
-        areaId TEXT PRIMARY KEY REFERENCES areas(id) ON DELETE CASCADE,
+        areaId TEXT PRIMARY KEY,
         avatarData BLOB,
         mimeType TEXT,
         fetchedAt INTEGER
