@@ -82,6 +82,7 @@ const {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
+  getAreas, getAreaAssignments, createArea, renameArea,
   closeDb,
 } = require('./db');
 
@@ -788,6 +789,22 @@ ipcMain.handle('git-create-branch', (_event, projectPath, branchName, checkout) 
     }
     return { ok: true };
   } catch (e) { return { ok: false, error: e.stderr || e.message }; }
+});
+
+// --- IPC: areas ---
+// Thin CRUD. Ordering and visibility are decided in src/vue/area-tree.mjs, not here.
+ipcMain.handle('get-areas', () => ({ areas: getAreas(), assignments: getAreaAssignments() }));
+
+ipcMain.handle('create-area', (_event, name, parentId) => {
+  const id = 'area-' + require('crypto').randomUUID().replace(/-/g, '').slice(0, 12);
+  return createArea(id, (name || '').trim() || 'New Area', parentId || null);
+});
+
+ipcMain.handle('rename-area', (_event, id, name) => {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return { ok: false };
+  renameArea(id, trimmed);
+  return { ok: true, name: trimmed };
 });
 
 // --- IPC: project avatar (GitLab) ---
