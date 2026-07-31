@@ -1,42 +1,29 @@
 <template>
   <div>
-    <ProjectGroup
-      v-for="project in visibleProjects"
-      :key="project.projectPath"
-      :project="project"
-      :worktrees="worktreeMap.get(project.projectPath) || []"
-      :active-pty-ids="store.activePtyIds"
-      :active-session-id="store.activeSessionId"
-      :session-busy-state="store.sessionBusyState"
-      :attention-sessions="store.attentionSessions"
-      :response-ready-sessions="store.responseReadySessions"
-      :search-match-ids="store.searchMatchIds"
-      :show-archived="store.showArchived"
-      :show-starred-only="store.showStarredOnly"
-      :show-running-only="store.showRunningOnly"
-      :show-today-only="store.showTodayOnly"
-      :visible-session-count="store.visibleSessionCount"
-      :session-max-age-days="store.sessionMaxAgeDays"
-      @open="onOpen"
-      @stop="onStop"
-      @star="onStar"
-      @archive="onArchive"
-      @fork="onFork"
-      @jsonl="onJsonl"
-      @launch-config="onLaunchConfig"
-      @rename="onRename"
-      @new-session="onNewSession"
-      @settings="onSettings"
-      @archive-sessions="onArchiveSessions"
-      @remove-project="onRemoveProject"
-    />
+    <template v-for="node in tree" :key="node.type === 'area' ? 'area-' + node.id : node.projectPath">
+      <AreaGroup
+        v-if="node.type === 'area'"
+        :node="node"
+        :worktree-map="worktreeMap"
+        :filter-active="filterActive"
+        v-bind="shared"
+      />
+      <ProjectGroup
+        v-else
+        :project="node.project"
+        :worktrees="worktreeMap.get(node.projectPath) || []"
+        v-bind="shared"
+      />
+    </template>
   </div>
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { store } from '../store.js';
+import { buildSidebarTree } from '../area-tree.mjs';
 import ProjectGroup from './ProjectGroup.vue';
+import AreaGroup from './AreaGroup.vue';
 
 const props = defineProps({
   callbacks: { type: Object, required: true },
@@ -104,16 +91,61 @@ const visibleProjects = computed(() => {
   return projects.filter(p => !worktreeSet.value.has(p.projectPath));
 });
 
-function onOpen(session) { props.callbacks.openSession?.(session); }
-function onStop(id) { props.callbacks.stopSession?.(id); }
-function onStar(id) { props.callbacks.toggleStar?.(id); }
-function onArchive(id) { props.callbacks.archiveSession?.(id); }
-function onFork(id) { props.callbacks.forkSession?.(id); }
-function onJsonl(id) { props.callbacks.showJsonl?.(id); }
-function onLaunchConfig(id) { props.callbacks.launchConfig?.(id); }
-function onRename(id, name) { props.callbacks.renameSession?.(id, name); }
-function onNewSession(project, btn) { props.callbacks.newSession?.(project, btn); }
-function onSettings(path) { props.callbacks.openSettings?.(path); }
-function onArchiveSessions(sessions) { props.callbacks.archiveSessions?.(sessions); }
-function onRemoveProject(path) { props.callbacks.removeProject?.(path); }
+const filterActive = computed(() =>
+  !!(store.searchMatchIds !== null || store.showStarredOnly || store.showRunningOnly || store.showTodayOnly)
+);
+
+// Grouping and ordering live in the pure module; this component only feeds it the
+// projects that survived the filters, already sorted by recency upstream.
+const tree = computed(() => buildSidebarTree({
+  areas: store.areas,
+  assignments: store.areaAssignments,
+  projects: visibleProjects.value,
+  filters: {
+    active: filterActive.value,
+    keepAreaIds: store.renamingAreaId ? [store.renamingAreaId] : [],
+  },
+}));
+
+// Props and handlers passed through unchanged to every Project row, however deep it sits.
+const shared = computed(() => ({
+  ...listeners,
+  activePtyIds: store.activePtyIds,
+  activeSessionId: store.activeSessionId,
+  sessionBusyState: store.sessionBusyState,
+  attentionSessions: store.attentionSessions,
+  responseReadySessions: store.responseReadySessions,
+  searchMatchIds: store.searchMatchIds,
+  showArchived: store.showArchived,
+  showStarredOnly: store.showStarredOnly,
+  showRunningOnly: store.showRunningOnly,
+  showTodayOnly: store.showTodayOnly,
+  visibleSessionCount: store.visibleSessionCount,
+  sessionMaxAgeDays: store.sessionMaxAgeDays,
+}));
+
+const listeners = {
+  onOpen: (session) => props.callbacks.openSession?.(session),
+  onStop: (id) => props.callbacks.stopSession?.(id),
+  onStar: (id) => props.callbacks.toggleStar?.(id),
+  onArchive: (id) => props.callbacks.archiveSession?.(id),
+  onFork: (id) => props.callbacks.forkSession?.(id),
+  onJsonl: (id) => props.callbacks.showJsonl?.(id),
+  onLaunchConfig: (id) => props.callbacks.launchConfig?.(id),
+  onRename: (id, name) => props.callbacks.renameSession?.(id, name),
+  onNewSession: (project, btn) => props.callbacks.newSession?.(project, btn),
+  onSettings: (path) => props.callbacks.openSettings?.(path),
+  onArchiveSessions: (sessions) => props.callbacks.archiveSessions?.(sessions),
+  onRemoveProject: (path) => props.callbacks.removeProject?.(path),
+};
+
+onMounted(async () => {
+  const data = await window.api.getAreas?.().catch(() => null);
+  if (!data) return;
+  // An Area created while this load was in flight must survive the response.
+  const fetched = data.areas || [];
+  const fetchedIds = new Set(fetched.map(a => a.id));
+  store.areas = [...fetched, ...store.areas.filter(a => !fetchedIds.has(a.id))];
+  store.areaAssignments = data.assignments || [];
+});
 </script>

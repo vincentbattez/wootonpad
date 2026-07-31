@@ -1103,6 +1103,78 @@ body { display: flex; flex-direction: column; }
   display: none;
 }
 
+/* Areas — the user-authored level above Projects */
+.area-group {
+  margin: 10px 0 0;
+}
+
+.area-group:first-child {
+  margin-top: 4px;
+}
+
+.area-header {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: var(--weight-medium);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  transition: color var(--duration-fast) var(--ease-standard);
+}
+
+.area-header:hover {
+  background: var(--surface-panel-raised);
+  color: var(--gray-200);
+}
+
+.area-header .arrow {
+  font-size: 9px;
+  transition: transform 0.2s;
+  display: inline-block;
+  color: var(--text-tertiary);
+}
+
+.area-header.collapsed .arrow {
+  transform: rotate(-90deg);
+}
+
+.area-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.area-name-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--text-primary);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  outline: none;
+}
+
+.area-children {
+  margin-left: 10px;
+  border-left: 1px solid var(--border-subtle);
+}
+
+.area-header.collapsed + .area-children {
+  display: none;
+}
+
 /* Worktree nested groups */
 .worktree-group {
   margin-left: 12px;
@@ -3480,6 +3552,7 @@ body { display: flex; flex-direction: column; }
 /* ========== ADD PROJECT BUTTON ========== */
 #grid-toggle-btn,
 #resort-btn,
+#add-area-btn,
 #add-project-btn {
   background: transparent;
   border: none;
@@ -3497,10 +3570,12 @@ body { display: flex; flex-direction: column; }
 
 #grid-toggle-btn { margin-left: auto; }
 #resort-btn { margin-left: 2px; }
+#add-area-btn { margin-left: 2px; }
 #add-project-btn { margin-left: 2px; }
 
 #grid-toggle-btn:hover,
 #resort-btn:hover,
+#add-area-btn:hover,
 #add-project-btn:hover {
   background: var(--surface-card);
   color: var(--text-secondary);

@@ -154,6 +154,35 @@ const migrations = [
       )
     `);
   },
+  // v8: Areas — a user-authored tree above Projects in the sidebar. Membership is explicit
+  // (ADR 0001): project_area is keyed by path and survives a Project leaving the scan.
+  // Images live in their own table so reading the tree never carries image bytes.
+  // No ON DELETE clauses: foreign keys are not enforced on this connection, and deleting an
+  // Area must re-parent its children rather than cascade (VIN-81), so nothing may be implied.
+  (db) => {
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS areas (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        parentId TEXT,
+        position INTEGER NOT NULL DEFAULT 0,
+        collapsed INTEGER NOT NULL DEFAULT 0,
+        createdAt INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_areas_parent ON areas(parentId);
+      CREATE TABLE IF NOT EXISTS project_area (
+        projectPath TEXT PRIMARY KEY,
+        areaId TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_project_area_area ON project_area(areaId);
+      CREATE TABLE IF NOT EXISTS area_avatars (
+        areaId TEXT PRIMARY KEY,
+        avatarData BLOB,
+        mimeType TEXT,
+        fetchedAt INTEGER
+      );
+    `);
+  },
 ];
 
 const currentDbVersion = (() => {
@@ -514,6 +543,40 @@ function setStoredAvatar(projectPath, avatarData, mimeType) {
   }
 }
 
+// --- Areas ---
+// Lazy-initialized so the tables are guaranteed to exist (migration runs first).
+
+let _ar = null;
+function ar() {
+  if (_ar) return _ar;
+  _ar = {
+    all: db.prepare('SELECT id, name, parentId, position, collapsed FROM areas'),
+    insert: db.prepare('INSERT INTO areas (id, name, parentId, position, collapsed, createdAt) VALUES (?, ?, ?, ?, 0, ?)'),
+    nextPosition: db.prepare('SELECT COALESCE(MAX(position), -1) + 1 AS pos FROM areas WHERE parentId IS ?'),
+    rename: db.prepare('UPDATE areas SET name = ? WHERE id = ?'),
+    assignments: db.prepare('SELECT projectPath, areaId FROM project_area'),
+  };
+  return _ar;
+}
+
+function getAreas() {
+  return ar().all.all();
+}
+
+function getAreaAssignments() {
+  return ar().assignments.all();
+}
+
+function createArea(id, name, parentId = null) {
+  const position = ar().nextPosition.get(parentId ?? null).pos;
+  ar().insert.run(id, name, parentId ?? null, position, Date.now());
+  return { id, name, parentId: parentId ?? null, position, collapsed: 0 };
+}
+
+function renameArea(id, name) {
+  ar().rename.run(name, id);
+}
+
 // --- Settings functions ---
 
 function getSetting(key) {
@@ -544,5 +607,6 @@ module.exports = {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
+  getAreas, getAreaAssignments, createArea, renameArea,
   closeDb,
 };

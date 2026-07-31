@@ -24,6 +24,11 @@ export const store = reactive({
   // Project collapse overrides: projectPath → bool. Absent = fall back to staleness.
   collapsedProjects: {},
 
+  // Areas: the user-authored tree above Projects in the sidebar.
+  areas: [],
+  areaAssignments: [],
+  renamingAreaId: null,
+
   // Visibility settings
   visibleSessionCount: 10,
   sessionMaxAgeDays: 3,

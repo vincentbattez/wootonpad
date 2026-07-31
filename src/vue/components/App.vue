@@ -31,6 +31,7 @@
         <span id="loading-status" v-show="store.loadingStatus">{{ store.loadingStatus }}</span>
         <button id="grid-toggle-btn" :class="{ active: store.gridViewActive }" data-tooltip="Session overview" @click="onToggleGrid" v-html="GRID_SVG"></button>
         <button id="resort-btn" data-tooltip="Re-sort sessions" @click="onResort" v-html="RESORT_SVG"></button>
+        <button id="add-area-btn" data-tooltip="New area" @click="onAddArea" v-html="ADD_AREA_SVG"></button>
         <button id="add-project-btn" data-tooltip="Add project" @click="onAddProject" v-html="ADD_PROJECT_SVG"></button>
       </div>
     </div>
@@ -227,6 +228,7 @@ const TODAY_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" s
 const ARCHIVE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="m21.706 5.292-2.999-2.999A.996.996 0 0 0 18 2H6a.996.996 0 0 0-.707.293L2.294 5.292A.994.994 0 0 0 2 6v13c0 1.103.897 2 2 2h16c1.103 0 2-.897 2-2V6a.994.994 0 0 0-.294-.708zM6.414 4h11.172l1 1H5.414l1-1zM4 19V7h16l.002 12H4z"/><path d="M14 9h-4v3H7l5 5 5-5h-3z"/></svg>';
 const GRID_SVG = '<svg width="14" height="14" stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>';
 const RESORT_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
+const ADD_AREA_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>';
 const ADD_PROJECT_SVG = '<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="M512 416c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 96C0 60.7 28.7 32 64 32l128 0c20.1 0 39.1 9.5 51.2 25.6l19.2 25.6c6 8.1 15.5 12.8 25.6 12.8l160 0c35.3 0 64 28.7 64 64l0 256zM232 376c0 13.3 10.7 24 24 24s24-10.7 24-24l0-64 64 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-64 0 0-64c0-13.3-10.7-24-24-24s-24 10.7-24 24l0 64-64 0c-13.3 0-24 10.7-24 24s10.7 24 24 24l64 0 0 64z"/></svg>';
 
 // ── Search ───────────────────────────────────────────────────────
@@ -296,6 +298,15 @@ function toggleFilter(filterName) {
 function onGlobalSettings() { window.__sb?.openGlobalSettings?.(); }
 function onResort() { window.__sb?.resort?.(); }
 function onAddProject() { window.__sb?.addProject?.(); }
+
+// Creation and inline naming are one gesture: the row is persisted, then focused for typing.
+async function onAddArea() {
+  const area = await window.api.createArea('New Area', null).catch(() => null);
+  if (!area) return;
+  store.areas = [...store.areas, area];
+  store.renamingAreaId = area.id;
+}
+
 function onToggleGrid() { window.__sb?.toggleGridView?.(); }
 
 // ── Component callbacks ───────────────────────────────────────────
