@@ -22,6 +22,9 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
   // Areas the caller wants on screen whatever the filter says — the one being named, which
   // is empty by construction and would otherwise vanish the moment it is created.
   const kept = new Set(filters.keepAreaIds || []);
+  // Areas matched by name during a search (VIN-80): a matched Area is shown expanded with its
+  // whole subtree, so the reveal propagates down to every descendant, past the empty-shell rule.
+  const matched = new Set(filters.matchedAreaIds || []);
 
   const areaById = new Map(areas.map(a => [a.id, a]));
   const childAreas = new Map();
@@ -54,19 +57,22 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
 
   // `seen` breaks cycles left by a corrupt parent chain: an Area is rendered at most once.
   const seen = new Set();
-  function build(area) {
+  function build(area, revealed = false) {
     if (seen.has(area.id)) return null;
     seen.add(area.id);
+    // Once inside a name-matched Area the whole subtree is revealed, so the reveal is inherited.
+    const isRevealed = revealed || matched.has(area.id);
     const node = areaNode(area, filterActive);
     for (const child of childAreas.get(area.id) || []) {
-      const built = build(child);
+      const built = build(child, isRevealed);
       if (built) node.children.push(built);
     }
     for (const project of projectsByArea.get(area.id) || []) {
       node.children.push(projectNode(project));
     }
-    // Under a filter an Area with nothing left to show would render as an empty shell.
-    if (filterActive && node.children.length === 0 && !kept.has(area.id)) return null;
+    // Under a filter an Area with nothing left to show would render as an empty shell — unless it
+    // is kept (a fresh one being named) or revealed by a name match, which shows its subtree whole.
+    if (filterActive && node.children.length === 0 && !kept.has(area.id) && !isRevealed) return null;
     return node;
   }
 

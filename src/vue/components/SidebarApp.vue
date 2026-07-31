@@ -61,20 +61,56 @@ const worktreeSet = computed(() => {
   return s;
 });
 
+// Areas whose own name matches the live query. Area names live in the client (not the FTS index
+// the session search hits), so the match is computed here and revealed by area-tree.mjs (VIN-80).
+const matchedAreaIds = computed(() => {
+  if (store.searchMatchIds === null) return [];
+  const q = store.searchQuery.trim().toLowerCase();
+  if (!q) return [];
+  return store.areas.filter(a => (a.name || '').toLowerCase().includes(q)).map(a => a.id);
+});
+
+// Every Area id in the subtree of a name-matched Area (matched Areas included). A match reveals its
+// whole subtree, so the Projects filed anywhere under it must be surfaced even when the search would
+// otherwise drop them.
+const revealedAreaIds = computed(() => {
+  const ids = new Set(matchedAreaIds.value);
+  if (ids.size === 0) return ids;
+  const childMap = new Map();
+  for (const a of store.areas) {
+    const parent = a.parentId ?? null;
+    if (!childMap.has(parent)) childMap.set(parent, []);
+    childMap.get(parent).push(a.id);
+  }
+  const stack = [...ids];
+  while (stack.length) {
+    for (const child of childMap.get(stack.pop()) || []) {
+      if (!ids.has(child)) { ids.add(child); stack.push(child); }
+    }
+  }
+  return ids;
+});
+
 const visibleProjects = computed(() => {
   let projects = store.projects;
 
   if (store.searchMatchIds !== null) {
     // Search: show all projects that match by session or by project name
+    const revealed = revealedAreaIds.value;
+    const areaOfProject = revealed.size
+      ? new Map(store.areaAssignments.map(a => [a.projectPath, a.areaId]))
+      : null;
     projects = projects
       .map(p => {
         const hasMatchingSessions = p.sessions.some(s => store.searchMatchIds.has(s.sessionId));
         const projectMatched = store.searchMatchProjectPaths?.has(p.projectPath);
-        if (!hasMatchingSessions && !projectMatched) return null;
+        // A Project filed under a name-matched Area is part of that Area's revealed subtree.
+        const areaRevealed = areaOfProject ? revealed.has(areaOfProject.get(p.projectPath)) : false;
+        if (!hasMatchingSessions && !projectMatched && !areaRevealed) return null;
         return {
           ...p,
           sessions: hasMatchingSessions ? p.sessions.filter(s => store.searchMatchIds.has(s.sessionId)) : [],
-          _projectMatchedOnly: projectMatched && !hasMatchingSessions,
+          _projectMatchedOnly: (projectMatched || areaRevealed) && !hasMatchingSessions,
         };
       })
       .filter(Boolean);
@@ -113,6 +149,7 @@ const tree = computed(() => buildSidebarTree({
   filters: {
     active: filterActive.value,
     keepAreaIds: store.renamingAreaId ? [store.renamingAreaId] : [],
+    matchedAreaIds: matchedAreaIds.value,
   },
 }));
 
