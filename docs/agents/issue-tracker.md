@@ -26,6 +26,31 @@ falling back to another tracker.
 - **Close**: `save_issue` with `state: "Done"` (or `Canceled`) plus an explanatory comment.
 - Reference issues by their Linear identifier (e.g. `VIN-42`), never by a bare `#number`.
 
+## Mirror every new issue to Things 3
+
+Every issue created in Linear for this repo is also mirrored as a task in the user's Things 3
+to-do list, using the `things3` skill (`things` CLI). Do it in the same run, right after
+`save_issue` succeeds — one Things task per Linear issue created, in dependency order.
+
+- **Project**: `👨‍💻 Wooton` (area `Dev`) — pass the emoji, it is part of the title.
+- **Title**: the feature in French, short and direct (~35 characters) with the ticket ID. The Things title column is narrow
+- **Notes**: `VIN-XX — <one-line French summary>` on the first line, the Linear issue URL on the second.
+- **Tags**: none by default — the user applies effort/priority tags themselves.
+
+```bash
+things add "[VIN-60] Thème clair / sombre" --list "👨‍💻 Wooton" \
+  --notes "VIN-60 — Thème clair/sombre/système normalisé sur Radix Colors
+https://linear.app/vincentbattez/issue/VIN-60/theme-clair-sombre-systeme-normalise-sur-radix-colors"
+```
+
+Check for an existing task first to avoid duplicates. `--project` requires a `--query`; `title:/./` is the catch-all:
+
+```bash
+things search --query=title:/./ --project="👨‍💻 Wooton" --select="uuid,title,notes" --json
+```
+
+The first result is the project row itself (title `👨‍💻 Wooton`, empty notes), not a duplicate.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature
