@@ -145,10 +145,11 @@
             <div class="settings-field">
               <div class="settings-field-info">
                 <span class="settings-label">Terminal Theme</span>
-                <div class="settings-description">Color theme for terminal sessions</div>
+                <div class="settings-description">Color theme for terminal sessions. Auto follows the app's light/dark theme.</div>
               </div>
               <div class="settings-field-control">
                 <select class="settings-select" v-model="form.terminalTheme">
+                  <option value="auto">Auto (match app theme)</option>
                   <option v-for="(theme, key) in terminalThemes" :key="key" :value="key">{{ theme.label }}</option>
                 </select>
               </div>
@@ -359,7 +360,7 @@ const form = reactive({
   addDirs: '',
   visibleSessionCount: 10,
   sessionMaxAgeDays: 3,
-  terminalTheme: 'switchboard',
+  terminalTheme: 'auto',
   theme: 'system',
   mcpEmulation: true,
   shellProfile: 'auto',
@@ -410,7 +411,7 @@ async function loadSettings() {
   if (!isProject.value) {
     form.visibleSessionCount = current.visibleSessionCount ?? 10;
     form.sessionMaxAgeDays = current.sessionMaxAgeDays ?? 3;
-    form.terminalTheme = current.terminalTheme ?? 'switchboard';
+    form.terminalTheme = current.terminalTheme ?? 'auto';
     form.theme = current.theme ?? 'system';
     form.mcpEmulation = current.mcpEmulation !== false;
     form.shellProfile = current.shellProfile ?? 'auto';
@@ -461,7 +462,7 @@ async function save() {
       addDirs: form.addDirs,
       visibleSessionCount: form.visibleSessionCount || 10,
       sessionMaxAgeDays: form.sessionMaxAgeDays || 3,
-      terminalTheme: form.terminalTheme || 'switchboard',
+      terminalTheme: form.terminalTheme || 'auto',
       theme: form.theme || 'system',
       mcpEmulation: form.mcpEmulation,
       shellProfile: form.shellProfile || 'auto',
