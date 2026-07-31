@@ -1554,7 +1554,7 @@ const SETTING_DEFAULTS = {
   addDirs: '',
   visibleSessionCount: 5,
   sidebarWidth: 340,
-  terminalTheme: 'switchboard',
+  terminalTheme: APPEARANCE_DEFAULTS.terminalTheme,
   mcpEmulation: false,
   shellProfile: 'auto',
   showAvatars: true,

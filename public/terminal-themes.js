@@ -1,10 +1,39 @@
 // --- Terminal themes ---
+//
+// The `switchboard` key is the house preset and MUST NOT be renamed: a saved
+// `terminalTheme` setting points at it, and a rename without a settings migration
+// would silently reset a user's choice on update. The house presets are re-tuned
+// onto the Radix neutral ramp so the terminal blends with the app chrome — dark
+// background `#121113`, light background `#fdfcfd`. `auto` (the default) resolves
+// to `switchboard` in dark mode and `switchboardLight` in light mode; see appearance.js.
+//
+// The six third-party presets below (Ghostty, Tokyo Night, Catppuccin Mocha,
+// Dracula, Nord, Solarized Dark) are recognisable themes chosen deliberately and
+// are left untouched — they were never meant to match the chrome.
 const TERMINAL_THEMES = {
   switchboard: {
-    label: 'Switchboard',
-    background: '#1a1a2e', foreground: '#e0e0e0', cursor: '#e94560', selectionBackground: '#3a3a5e',
-    black: '#1a1a2e', red: '#e94560', green: '#0dff00', yellow: '#f5a623', blue: '#7b68ee', magenta: '#c678dd', cyan: '#56b6c2', white: '#c5c8c6',
-    brightBlack: '#555568', brightRed: '#ff6b81', brightGreen: '#69ff69', brightYellow: '#ffd93d', brightBlue: '#8fa8ff', brightMagenta: '#d19afc', brightCyan: '#7ee8e8', brightWhite: '#eaeaea',
+    label: 'Switchboard (dark)',
+    background: '#121113', foreground: '#eeeef0', cursor: '#e93d51', selectionBackground: '#3a3550',
+    black: '#211f26', red: '#e5484d', green: '#30a46c', yellow: '#ffc53d', blue: '#5472e4', magenta: '#8e4ec6', cyan: '#3db9cf', white: '#b9bbc6',
+    brightBlack: '#6f6d78', brightRed: '#ff6369', brightGreen: '#3dd68c', brightYellow: '#ffe066', brightBlue: '#8da4ef', brightMagenta: '#bf7af0', brightCyan: '#7ce3f0', brightWhite: '#eeeef0',
+  },
+  switchboardLight: {
+    label: 'Switchboard (light)',
+    background: '#fdfcfd', foreground: '#211f26', cursor: '#e5484d', cursorAccent: '#fdfcfd', selectionBackground: '#d3d1f5', selectionForeground: '#211f26',
+    black: '#211f26', red: '#ce2c31', green: '#2a7e3b', yellow: '#9a6700', blue: '#3a5ccc', magenta: '#8145b5', cyan: '#0c7792', white: '#8b8d98',
+    brightBlack: '#6f6d78', brightRed: '#e5484d', brightGreen: '#30a46c', brightYellow: '#b8860b', brightBlue: '#5472e4', brightMagenta: '#9c5fd0', brightCyan: '#107d98', brightWhite: '#1c2024',
+  },
+  solarizedLight: {
+    label: 'Solarized Light',
+    background: '#fdf6e3', foreground: '#657b83', cursor: '#657b83', cursorAccent: '#fdf6e3', selectionBackground: '#eee8d5', selectionForeground: '#586e75',
+    black: '#073642', red: '#dc322f', green: '#859900', yellow: '#b58900', blue: '#268bd2', magenta: '#d33682', cyan: '#2aa198', white: '#eee8d5',
+    brightBlack: '#002b36', brightRed: '#cb4b16', brightGreen: '#586e75', brightYellow: '#657b83', brightBlue: '#839496', brightMagenta: '#6c71c4', brightCyan: '#93a1a1', brightWhite: '#fdf6e3',
+  },
+  catppuccinLatte: {
+    label: 'Catppuccin Latte',
+    background: '#eff1f5', foreground: '#4c4f69', cursor: '#dc8a78', cursorAccent: '#eff1f5', selectionBackground: '#acb0be', selectionForeground: '#4c4f69',
+    black: '#5c5f77', red: '#d20f39', green: '#40a02b', yellow: '#df8e1d', blue: '#1e66f5', magenta: '#ea76cb', cyan: '#179299', white: '#acb0be',
+    brightBlack: '#6c6f85', brightRed: '#d20f39', brightGreen: '#40a02b', brightYellow: '#df8e1d', brightBlue: '#1e66f5', brightMagenta: '#ea76cb', brightCyan: '#179299', brightWhite: '#bcc0cc',
   },
   ghostty: {
     label: 'Ghostty',
@@ -44,10 +73,17 @@ const TERMINAL_THEMES = {
   },
 };
 
-window.TERMINAL_THEMES = TERMINAL_THEMES;
+if (typeof window !== 'undefined') {
+  window.TERMINAL_THEMES = TERMINAL_THEMES;
+}
 
 let currentThemeName = 'switchboard';
 function getTerminalTheme() {
   return TERMINAL_THEMES[currentThemeName] || TERMINAL_THEMES.switchboard;
 }
 let TERMINAL_THEME = getTerminalTheme();
+
+// Consumed by the node:test runner, which has no `window`.
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = { TERMINAL_THEMES, getTerminalTheme };
+}
