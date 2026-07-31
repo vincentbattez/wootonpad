@@ -92,10 +92,13 @@ test('the only surviving raw colours are the documented .cm- MergeView rules', (
     'expected the out-of-scope CodeMirror MergeView backgrounds to still be ' +
       'present as the single documented exception',
   );
-  const cmLines = stylesheetBody()
+  // Every raw colour left in the body must live on a `.cm-` rule — the single
+  // documented exception. (`RAW_COLOUR` is a global regex, so match by line
+  // rather than `.test()`, which would carry `lastIndex` between calls.)
+  const rawColourLines = stylesheetBody()
     .split('\n')
-    .filter((line) => line.includes('.cm-') && RAW_COLOUR.test(line));
-  for (const line of cmLines) {
+    .filter((line) => (line.match(RAW_COLOUR) || []).length > 0);
+  for (const line of rawColourLines) {
     assert.match(
       line,
       /\.cm-/,
