@@ -63,4 +63,6 @@ export const store = reactive({
 
   // Project avatars: projectPath → data: URL string
   avatarDataUrls: {},
+  // Area avatars: areaId → data: URL string (null/absent = fall back to initials and colour)
+  areaAvatarDataUrls: {},
 });

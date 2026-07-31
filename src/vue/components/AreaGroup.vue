@@ -9,9 +9,10 @@
       @dragend="onDragEnd"
       @dragover.prevent.stop="onDragOver"
       @dragleave="dropHover = false"
-      @drop.prevent.stop="onDrop"
+      @drop.prevent.stop="onDrop($event)"
     >
       <span class="arrow" @click.stop="toggle">&#9660;</span>
+      <AreaAvatar class="area-header-avatar" :area-id="node.id" :name="node.name" @click.stop="toggle" />
       <input
         v-if="isRenaming"
         ref="nameInput"
@@ -52,6 +53,8 @@ import { computed, nextTick, ref, watch } from 'vue';
 import { store } from '../store.js';
 import { removeArea } from '../area-tree.mjs';
 import { startDrag, endDrag, dropOnTarget, isDragging } from '../area-drag.js';
+import { setAreaImageFromFile } from '../area-image.js';
+import AreaAvatar from './AreaAvatar.vue';
 import ProjectGroup from './ProjectGroup.vue';
 
 defineOptions({ inheritAttrs: false });
@@ -75,12 +78,17 @@ function toggle() {
 }
 
 // Drag to re-parent this Area; drop another row here to file it into this Area (VIN-78).
+// An image file dropped from the OS onto the header sets the Area's image instead (VIN-82),
+// reusing the terminal's file-drop pattern (window.api.getPathForFile).
 const dropHover = ref(false);
 function onDragStart(ev) { startDrag('area', props.node.id, ev); }
 function onDragEnd() { endDrag(); dropHover.value = false; }
-function onDragOver() { if (isDragging()) dropHover.value = true; }
-async function onDrop() {
+function onDragOver() { dropHover.value = true; }
+async function onDrop(ev) {
   dropHover.value = false;
+  const file = [...(ev?.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
+  if (file) { await setAreaImageFromFile(props.node.id, file); return; }
+  if (!isDragging()) return;
   await dropOnTarget(props.node.id);
 }
 

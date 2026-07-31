@@ -543,6 +543,42 @@ function setStoredAvatar(projectPath, avatarData, mimeType) {
   }
 }
 
+// --- Area avatar ---
+// Mirrors project avatars, keyed by Area id. Kept in its own table (area_avatars) so reading the
+// Area tree never carries image bytes (VIN-82).
+
+let _aa = null;
+function aa() {
+  if (_aa) return _aa;
+  _aa = {
+    get: db.prepare('SELECT avatarData, mimeType FROM area_avatars WHERE areaId = ?'),
+    upsert: db.prepare(`
+      INSERT INTO area_avatars (areaId, avatarData, mimeType, fetchedAt)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(areaId) DO UPDATE SET
+        avatarData = excluded.avatarData,
+        mimeType = excluded.mimeType,
+        fetchedAt = excluded.fetchedAt
+    `),
+    del: db.prepare('DELETE FROM area_avatars WHERE areaId = ?'),
+  };
+  return _aa;
+}
+
+function getAreaAvatar(areaId) {
+  const row = aa().get.get(areaId);
+  if (!row || !row.avatarData) return null;
+  return { avatarData: row.avatarData, mimeType: row.mimeType || 'image/png' };
+}
+
+function setAreaAvatar(areaId, avatarData, mimeType) {
+  if (!avatarData) {
+    aa().del.run(areaId);
+  } else {
+    aa().upsert.run(areaId, avatarData, mimeType || 'image/png', Date.now());
+  }
+}
+
 // --- Areas ---
 // Lazy-initialized so the tables are guaranteed to exist (migration runs first).
 
@@ -677,6 +713,7 @@ module.exports = {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
+  getAreaAvatar, setAreaAvatar,
   getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
   moveArea, fileProject,
   closeDb,

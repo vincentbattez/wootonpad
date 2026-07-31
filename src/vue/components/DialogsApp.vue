@@ -153,6 +153,19 @@
             placeholder="Area name" autocomplete="off" spellcheck="false"
             @keydown.enter="saveAreaDialog">
         </div>
+        <!-- Image: drop an image file onto the zone; a preview shows the current image or the
+             initials-and-colour fallback, with a clear-image action to return to the fallback. -->
+        <div class="area-dialog-image">
+          <div class="area-image-dropzone" :class="{ 'drop-target': areaImageHover }"
+            @dragover.prevent="areaImageHover = true"
+            @dragleave="areaImageHover = false"
+            @drop.prevent="onAreaImageDrop">
+            <img v-if="areaImageUrl" class="area-image-preview" :src="areaImageUrl" alt="">
+            <span v-else class="area-image-fallback" :style="{ background: areaFallback.color }">{{ areaFallback.initials }}</span>
+            <div class="area-image-hint">Drop an image here</div>
+          </div>
+          <button v-if="areaImageUrl" class="area-image-clear-btn" @click="clearAreaImageDialog">Clear image</button>
+        </div>
         <div class="area-dialog-actions">
           <!-- No confirmation: deleting an Area is reversible (its contents move up a level). -->
           <button class="area-dialog-delete-btn" @click="deleteAreaDialog">Delete Area</button>
@@ -189,6 +202,9 @@
 <script setup>
 import { ref, computed, nextTick, onMounted, onUnmounted } from 'vue';
 import SbSwitch from './SbSwitch.vue';
+import { store } from '../store.js';
+import { avatarFromName } from '../avatar.mjs';
+import { setAreaImageFromFile, clearAreaImage } from '../area-image.js';
 
 const PERM_MODES = [
   { value: null, label: 'Default', desc: 'Prompt for all actions' },
@@ -395,15 +411,40 @@ async function doAddProject() {
 const areaDialog = ref(null);
 const areaName = ref('');
 const areaNameInputRef = ref(null);
+const areaImageHover = ref(false);
 let areaCbs = null;
+
+// The preview follows the store cache, so it updates the instant a drop or clear resolves; the
+// fallback initials/colour track the name being edited so clearing the image shows what returns.
+const areaImageUrl = computed(() => (areaDialog.value && store.areaAvatarDataUrls[areaDialog.value.id]) || null);
+const areaFallback = computed(() => avatarFromName(areaName.value || areaDialog.value?.name || ''));
 
 async function openAreaDialog(area, cbs) {
   areaDialog.value = { id: area.id, name: area.name };
   areaName.value = area.name || '';
+  areaImageHover.value = false;
   areaCbs = cbs || {};
+  // Fetch the stored image once so the preview reflects it even if no AreaAvatar loaded it yet.
+  if (!store.areaAvatarDataUrls[area.id] && window.api?.getAreaAvatar) {
+    const url = await window.api.getAreaAvatar(area.id).catch(() => null);
+    if (url && areaDialog.value?.id === area.id) store.areaAvatarDataUrls[area.id] = url;
+  }
   await nextTick();
   areaNameInputRef.value?.focus();
   areaNameInputRef.value?.select();
+}
+
+async function onAreaImageDrop(ev) {
+  areaImageHover.value = false;
+  const id = areaDialog.value?.id;
+  if (!id) return;
+  const file = [...(ev?.dataTransfer?.files || [])].find(f => f.type.startsWith('image/'));
+  if (file) await setAreaImageFromFile(id, file);
+}
+
+async function clearAreaImageDialog() {
+  const id = areaDialog.value?.id;
+  if (id) await clearAreaImage(id);
 }
 
 function closeAreaDialog() { areaDialog.value = null; areaCbs = null; }
