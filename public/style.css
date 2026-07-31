@@ -3118,14 +3118,14 @@ body { display: flex; flex-direction: column; }
 .jsonl-text ul, .jsonl-text ol { margin: 0.3em 0; padding-left: 1.5em; }
 .jsonl-text li { margin: 0.1em 0; }
 .jsonl-text hr { border: none; border-top: 1px solid var(--mauve-a3); margin: 0.5em 0; }
-.jsonl-text pre { background: var(--mauve-a7); border-radius: 4px; padding: 8px 10px; overflow-x: auto; font-size: 12px; line-height: 1.4; }
+.jsonl-text pre { background: var(--black-a5); border-radius: 4px; padding: 8px 10px; overflow-x: auto; font-size: 12px; line-height: 1.4; }
 .jsonl-text code { font-family: var(--font-mono); font-size: 12px; }
 .jsonl-text :not(pre) > code { background: var(--mauve-a3); padding: 1px 5px; border-radius: 4px; color: #c8b0e0; }
 .jsonl-text a { color: #6cb6ff; }
 .jsonl-text a:hover { color: #8ccbff; }
 
 .jsonl-code-block {
-  background: var(--mauve-a7);
+  background: var(--black-a5);
   border-radius: 4px;
   padding: 8px 10px;
   margin: 4px 0;
@@ -3338,7 +3338,7 @@ body { display: flex; flex-direction: column; }
   line-height: 1.4;
   color: #909098;
   padding: 6px 10px;
-  background: var(--mauve-a6);
+  background: var(--black-a4);
   white-space: pre-wrap;
   word-wrap: break-word;
   max-height: 300px;
@@ -4847,7 +4847,7 @@ body.hide-avatars .grid-card-avatar {
 
 .project-env-containers-box {
   margin-top: 10px;
-  background: var(--mauve-a7);
+  background: var(--black-a4);
   border: 1px solid var(--mauve-a3);
   border-radius: 8px;
   padding: 8px 11px 7px;
@@ -5670,7 +5670,7 @@ body.hide-avatars .grid-card-avatar {
 .pv-commit-input {
   width: 100%;
   box-sizing: border-box;
-  background: var(--mauve-a6);
+  background: var(--black-a4);
   border: 1px solid var(--mauve-a3);
   border-radius: 6px;
   color: var(--mauve-a11);
@@ -6096,7 +6096,7 @@ body.hide-avatars .grid-card-avatar {
 .pv-tree-search-input {
   width: 100%;
   box-sizing: border-box;
-  background: var(--mauve-a6);
+  background: var(--black-a4);
   border: 1px solid var(--mauve-a3);
   border-radius: 6px;
   color: var(--mauve-a11);
@@ -6170,7 +6170,7 @@ body.hide-avatars .grid-card-avatar {
 }
 .pv-generating-wrap {
   min-height: 66px;
-  background: var(--mauve-a5);
+  background: var(--black-a3);
   border: 1px solid rgba(99,102,241,0.2);
   border-radius: 6px;
   display: flex;
@@ -6300,7 +6300,7 @@ body.hide-avatars .grid-card-avatar {
   font-family: var(--mono-font, monospace);
 }
 .pv-readme pre {
-  background: var(--mauve-a7);
+  background: var(--black-a5);
   border: 1px solid var(--border-subtle);
   border-radius: 6px;
   padding: 12px 14px;
