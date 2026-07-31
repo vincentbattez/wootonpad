@@ -140,9 +140,12 @@ const listeners = {
 };
 
 onMounted(async () => {
-  const data = await window.api.getAreas?.();
+  const data = await window.api.getAreas?.().catch(() => null);
   if (!data) return;
-  store.areas = data.areas || [];
+  // An Area created while this load was in flight must survive the response.
+  const fetched = data.areas || [];
+  const fetchedIds = new Set(fetched.map(a => a.id));
+  store.areas = [...fetched, ...store.areas.filter(a => !fetchedIds.has(a.id))];
   store.areaAssignments = data.assignments || [];
 });
 </script>
