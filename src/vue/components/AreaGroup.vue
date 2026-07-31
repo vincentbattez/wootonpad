@@ -56,7 +56,7 @@ function toggle() {
   if (!area) return;
   const collapsed = props.node.collapsed ? 0 : 1;
   area.collapsed = collapsed;
-  // Persist through so putting a world away is a one-time gesture, remembered across restarts.
+  // Persist so a collapsed Area stays collapsed across restarts.
   window.api.setAreaCollapsed(props.node.id, collapsed).catch(() => {});
 }
 
