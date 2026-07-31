@@ -100,6 +100,18 @@ test('an area kept by a deeply nested project survives the filter along with its
   assert.deepEqual(labels(tree[0].children), ['area:Commerce']);
 });
 
+test('an empty area named in keepAreaIds survives a filter, along with its ancestors', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'n', name: 'New Area', parentId: 'w', position: 0 },
+    { id: 'x', name: 'Nothing', parentId: null, position: 1 },
+  ];
+  const filters = { active: true, keepAreaIds: ['n'] };
+  const tree = buildSidebarTree({ areas, assignments: [], projects: [], filters });
+  assert.deepEqual(labels(tree), ['area:Work']);
+  assert.deepEqual(labels(tree[0].children), ['area:New Area']);
+});
+
 test('two areas under different parents may carry the same name', () => {
   const areas = [
     { id: 'w', name: 'Work', parentId: null, position: 0 },

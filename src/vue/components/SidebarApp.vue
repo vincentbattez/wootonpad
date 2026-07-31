@@ -5,6 +5,7 @@
         v-if="node.type === 'area'"
         :node="node"
         :worktree-map="worktreeMap"
+        :filter-active="filterActive"
         v-bind="shared"
       />
       <ProjectGroup
@@ -100,7 +101,10 @@ const tree = computed(() => buildSidebarTree({
   areas: store.areas,
   assignments: store.areaAssignments,
   projects: visibleProjects.value,
-  filters: { active: filterActive.value },
+  filters: {
+    active: filterActive.value,
+    keepAreaIds: store.renamingAreaId ? [store.renamingAreaId] : [],
+  },
 }));
 
 // Props and handlers passed through unchanged to every Project row, however deep it sits.

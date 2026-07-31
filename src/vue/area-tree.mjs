@@ -19,6 +19,9 @@ function byPosition(a, b) {
 // Projects in the order they arrive (already sorted by session recency upstream).
 export function buildSidebarTree({ areas = [], assignments = [], projects = [], filters = {} } = {}) {
   const filterActive = !!filters.active;
+  // Areas the caller wants on screen whatever the filter says — the one being named, which
+  // is empty by construction and would otherwise vanish the moment it is created.
+  const kept = new Set(filters.keepAreaIds || []);
 
   const areaById = new Map(areas.map(a => [a.id, a]));
   const childAreas = new Map();
@@ -63,7 +66,7 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
       node.children.push(projectNode(project));
     }
     // Under a filter an Area with nothing left to show would render as an empty shell.
-    if (filterActive && node.children.length === 0) return null;
+    if (filterActive && node.children.length === 0 && !kept.has(area.id)) return null;
     return node;
   }
 

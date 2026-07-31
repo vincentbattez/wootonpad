@@ -17,12 +17,18 @@
 
     <div class="area-children">
       <template v-for="child in node.children" :key="child.type === 'area' ? 'area-' + child.id : child.projectPath">
-        <AreaGroup v-if="child.type === 'area'" :node="child" v-bind="$attrs" />
+        <AreaGroup
+          v-if="child.type === 'area'"
+          :node="child"
+          :worktree-map="worktreeMap"
+          :filter-active="filterActive"
+          v-bind="$attrs"
+        />
         <ProjectGroup
           v-else
           :project="child.project"
-          :worktrees="worktreesFor(child.projectPath)"
-          v-bind="projectBindings"
+          :worktrees="worktreeMap.get(child.projectPath) || []"
+          v-bind="$attrs"
         />
       </template>
     </div>
@@ -30,31 +36,22 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch, useAttrs } from 'vue';
+import { computed, nextTick, ref, watch } from 'vue';
 import { store } from '../store.js';
 import ProjectGroup from './ProjectGroup.vue';
 
 defineOptions({ inheritAttrs: false });
 
+// Everything else the Project rows need arrives as attrs and is passed through untouched.
 const props = defineProps({
   node: { type: Object, required: true },
+  worktreeMap: { type: Map, default: () => new Map() },
+  filterActive: Boolean,
 });
 
-const attrs = useAttrs();
-
-// Everything the Project rows need arrives as attrs and is passed through untouched;
-// only the worktree lookup is consumed here.
-const projectBindings = computed(() => {
-  const { worktreeMap, ...rest } = attrs;
-  return rest;
-});
-
-function worktreesFor(projectPath) {
-  return attrs.worktreeMap?.get(projectPath) || [];
-}
-
-// Session-local for now; persisting the collapsed flag is VIN-79.
+// A filter forces every Area open; a click then must not overwrite the user's arrangement.
 function toggle() {
+  if (props.filterActive) return;
   const area = store.areas.find(a => a.id === props.node.id);
   if (area) area.collapsed = props.node.collapsed ? 0 : 1;
 }
