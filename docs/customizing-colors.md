@@ -6,6 +6,28 @@
 
 ---
 
+> ## ⚠️ Note de renvoi — ce guide est désormais largement obsolète
+>
+> Depuis, Switchboard possède un **réglage de thème natif**. Ouvrez le panneau
+> de **Réglages**, section **Application** : le réglage **Thème** propose
+> **Clair**, **Sombre** et **Système** (qui suit macOS et bascule en direct),
+> et un réglage **Neutral tone** ajuste la teinte des gris. Le changement
+> s'applique instantanément à toute l'interface — barre latérale, panneaux,
+> dialogs, visionneuse de fichiers et de diff, terminaux — sans redémarrage.
+> Les deux modes sont normalisés sur Radix Colors et respectent les contrastes
+> WCAG AA.
+>
+> **Vous n'avez donc plus besoin de dépaqueter `app.asar` ni d'éditer la CSS à
+> la main** pour obtenir un thème clair : passez par le réglage natif. Sa grande
+> qualité par rapport à la méthode manuelle décrite ci-dessous est que **votre
+> choix survit aux mises à jour** — il n'est plus écrasé à chaque *update*.
+>
+> Les sections suivantes ne restent utiles que pour une personnalisation qui
+> sort du cadre des thèmes fournis (par exemple une couleur de fond ou un accent
+> sur mesure). Pour un simple passage en clair, servez-vous du réglage.
+
+---
+
 ## 1. Présentation
 
 **Switchboard** (dépôt : `doctly/switchboard`, licence MIT) est une application de bureau qui centralise toutes vos sessions Claude Code dans une seule fenêtre : navigateur de sessions par projet, recherche plein texte, terminal intégré, fork/reprise de session, édition des fichiers `CLAUDE.md`, statistiques d'activité.
