@@ -52,6 +52,9 @@ window._applyAppearance = (appearance) => {
   document.documentElement.classList.remove('light-theme', 'dark-theme');
   document.documentElement.classList.add(appearance.htmlClass);
   window._applyTerminalTheme(appearance.terminalThemeName);
+  // Re-theme any open CodeMirror editor or diff so an already-open file follows
+  // the toggle without being closed and reopened.
+  window._applyCMTheme?.(appearance.mode);
 };
 
 window.api.onAppearanceChanged?.((appearance) => window._applyAppearance(appearance));
