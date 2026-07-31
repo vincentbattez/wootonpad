@@ -82,7 +82,7 @@ const {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
-  getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed,
+  getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
   closeDb,
 } = require('./db');
 
@@ -812,6 +812,10 @@ ipcMain.handle('set-area-collapsed', (_event, id, collapsed) => {
   setAreaCollapsed(id, collapsed);
   return { ok: true };
 });
+
+// Re-parents the Area's children one level up, then removes it — the promotion decided in
+// src/vue/area-tree.mjs, done here as one transaction. No confirmation: the caller just deletes.
+ipcMain.handle('delete-area', (_event, id) => deleteArea(id));
 
 // --- IPC: project avatar (GitLab) ---
 ipcMain.handle('get-project-avatar', (_event, projectPath) => {

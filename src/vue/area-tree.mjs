@@ -78,3 +78,38 @@ export function buildSidebarTree({ areas = [], assignments = [], projects = [], 
   for (const project of ungrouped) tree.push(projectNode(project));
   return tree;
 }
+
+// Deleting an Area is never destructive (VIN-81): its direct children move up exactly one level
+// to become siblings of what contained the Area — its parent, or the root if it was a root Area —
+// in the same result. Nothing cascades. Sub-Areas are appended after the new parent's existing
+// sub-Areas, in their own manual order. A Project promoted to the root has no Area, so its
+// assignment is dropped: the Project is unfiled, not lost. Fresh arrays out; inputs untouched.
+export function removeArea(areas = [], assignments = [], areaId) {
+  const target = areas.find(a => a.id === areaId);
+  if (!target) return { areas: areas.map(a => ({ ...a })), assignments: assignments.map(a => ({ ...a })) };
+  const newParent = target.parentId ?? null;
+
+  // Promoted sub-Areas land after the new parent's existing sub-Areas, keeping their own order.
+  let nextPos = areas
+    .filter(a => a.id !== areaId && (a.parentId ?? null) === newParent)
+    .reduce((max, a) => Math.max(max, a.position ?? 0), -1) + 1;
+  const promoted = new Map();
+  for (const child of areas
+    .filter(a => (a.parentId ?? null) === areaId)
+    .sort(byPosition)) {
+    promoted.set(child.id, nextPos++);
+  }
+
+  const nextAreas = areas
+    .filter(a => a.id !== areaId)
+    .map(a => promoted.has(a.id) ? { ...a, parentId: newParent, position: promoted.get(a.id) } : { ...a });
+
+  const nextAssignments = [];
+  for (const assignment of assignments) {
+    if (assignment.areaId !== areaId) { nextAssignments.push({ ...assignment }); continue; }
+    // Promoting into a parent Area re-files the Project there; promoting to the root unfiles it.
+    if (newParent !== null) nextAssignments.push({ ...assignment, areaId: newParent });
+  }
+
+  return { areas: nextAreas, assignments: nextAssignments };
+}

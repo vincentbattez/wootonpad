@@ -556,6 +556,12 @@ function ar() {
     rename: db.prepare('UPDATE areas SET name = ? WHERE id = ?'),
     setCollapsed: db.prepare('UPDATE areas SET collapsed = ? WHERE id = ?'),
     assignments: db.prepare('SELECT projectPath, areaId FROM project_area'),
+    byId: db.prepare('SELECT parentId FROM areas WHERE id = ?'),
+    reparentChildren: db.prepare('UPDATE areas SET parentId = ?, position = position + ? WHERE parentId = ?'),
+    reassignProjects: db.prepare('UPDATE project_area SET areaId = ? WHERE areaId = ?'),
+    dropAssignments: db.prepare('DELETE FROM project_area WHERE areaId = ?'),
+    deleteAvatar: db.prepare('DELETE FROM area_avatars WHERE areaId = ?'),
+    del: db.prepare('DELETE FROM areas WHERE id = ?'),
   };
   return _ar;
 }
@@ -581,6 +587,26 @@ function renameArea(id, name) {
 // Only Areas persist their collapsed state; Projects deliberately do not.
 function setAreaCollapsed(id, collapsed) {
   ar().setCollapsed.run(collapsed ? 1 : 0, id);
+}
+
+// Deleting an Area re-parents its children one level up in the same transaction; nothing cascades
+// (VIN-81). Sub-Areas move to the deleted Area's parent (or the root), appended after that
+// parent's existing sub-Areas. Projects follow: re-filed into the parent Area, or unfiled when
+// the parent is the root, since a root Project has no Area. The Area and its avatar then go.
+function deleteArea(id) {
+  const a = ar();
+  const row = a.byId.get(id);
+  if (!row) return { ok: false };
+  const newParent = row.parentId ?? null;
+  const base = a.nextPosition.get(newParent).pos;
+  db.transaction(() => {
+    a.reparentChildren.run(newParent, base, id);
+    if (newParent === null) a.dropAssignments.run(id);
+    else a.reassignProjects.run(newParent, id);
+    a.deleteAvatar.run(id);
+    a.del.run(id);
+  })();
+  return { ok: true, parentId: newParent };
 }
 
 // --- Settings functions ---
@@ -613,6 +639,6 @@ module.exports = {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
-  getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed,
+  getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
   closeDb,
 };

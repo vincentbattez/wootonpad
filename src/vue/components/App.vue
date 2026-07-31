@@ -421,6 +421,7 @@ onMounted(async () => {
     openResumeSession: (...args) => dialogsRef.value?.openResumeSession(...args),
     openAddProject: (...args) => dialogsRef.value?.openAddProject(...args),
     openPopover: (...args) => dialogsRef.value?.openPopover(...args),
+    openAreaDialog: (...args) => dialogsRef.value?.openAreaDialog(...args),
   });
 
   Object.assign(window.vuePlanViewer, {

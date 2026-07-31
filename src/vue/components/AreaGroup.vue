@@ -13,6 +13,8 @@
         @blur="commit($event.target.value)"
       />
       <span v-else class="area-name" @click.stop="toggle">{{ node.name }}</span>
+      <button v-if="!isRenaming" class="area-edit-btn" data-tooltip="Edit area"
+        @click.stop="openDialog">&#9998;</button>
     </div>
 
     <div class="area-children">
@@ -38,6 +40,7 @@
 <script setup>
 import { computed, nextTick, ref, watch } from 'vue';
 import { store } from '../store.js';
+import { removeArea } from '../area-tree.mjs';
 import ProjectGroup from './ProjectGroup.vue';
 
 defineOptions({ inheritAttrs: false });
@@ -85,5 +88,31 @@ async function commit(value) {
 
 function cancel() {
   store.renamingAreaId = null;
+}
+
+// The Area dialog is the durable path to rename or delete, opened from the header; inline naming
+// at creation stays a shortcut. Deleting asks nothing: the contents just move up one level.
+function openDialog() {
+  window.vueDialogs?.openAreaDialog(
+    { id: props.node.id, name: props.node.name },
+    { onRename: applyRename, onDelete: applyDelete },
+  );
+}
+
+async function applyRename(name) {
+  const result = await window.api.renameArea(props.node.id, name).catch(() => null);
+  if (result?.ok) {
+    const area = store.areas.find(a => a.id === props.node.id);
+    if (area) area.name = result.name;
+  }
+}
+
+async function applyDelete() {
+  const result = await window.api.deleteArea(props.node.id).catch(() => null);
+  if (!result?.ok) return;
+  // Mirror the main-process one-level promotion locally so the sidebar reflects it at once.
+  const next = removeArea(store.areas, store.areaAssignments, props.node.id);
+  store.areas = next.areas;
+  store.areaAssignments = next.assignments;
 }
 </script>

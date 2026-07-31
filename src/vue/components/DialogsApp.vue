@@ -143,6 +143,28 @@
     </div>
   </Teleport>
 
+  <!-- Area Dialog: rename and delete (VIN-81) -->
+  <Teleport to="body">
+    <div v-if="areaDialog" class="add-project-overlay" @mousedown.self="closeAreaDialog">
+      <div class="add-project-dialog area-dialog">
+        <h3>Area</h3>
+        <div class="folder-input-row">
+          <input ref="areaNameInputRef" type="text" class="settings-input" v-model="areaName"
+            placeholder="Area name" autocomplete="off" spellcheck="false"
+            @keydown.enter="saveAreaDialog">
+        </div>
+        <div class="area-dialog-actions">
+          <!-- No confirmation: deleting an Area is reversible (its contents move up a level). -->
+          <button class="area-dialog-delete-btn" @click="deleteAreaDialog">Delete Area</button>
+          <div class="area-dialog-actions-right">
+            <button class="add-project-cancel-btn" @click="closeAreaDialog">Cancel</button>
+            <button class="add-project-add-btn" @click="saveAreaDialog">Save</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
+
   <!-- Add Project Dialog -->
   <Teleport to="body">
     <div v-if="addProjectOpen" class="add-project-overlay" @mousedown.self="closeAddProject">
@@ -369,6 +391,38 @@ async function doAddProject() {
   cb?.();
 }
 
+// ── Area Dialog (rename + delete) ─────────────────────────────────
+const areaDialog = ref(null);
+const areaName = ref('');
+const areaNameInputRef = ref(null);
+let areaCbs = null;
+
+async function openAreaDialog(area, cbs) {
+  areaDialog.value = { id: area.id, name: area.name };
+  areaName.value = area.name || '';
+  areaCbs = cbs || {};
+  await nextTick();
+  areaNameInputRef.value?.focus();
+  areaNameInputRef.value?.select();
+}
+
+function closeAreaDialog() { areaDialog.value = null; areaCbs = null; }
+
+function saveAreaDialog() {
+  const name = areaName.value.trim();
+  const area = areaDialog.value;
+  const cbs = areaCbs;
+  closeAreaDialog();
+  // A free-form, non-unique name; an empty or unchanged name is a no-op, not a rejection.
+  if (name && name !== area.name) cbs?.onRename?.(name);
+}
+
+function deleteAreaDialog() {
+  const cbs = areaCbs;
+  closeAreaDialog();
+  cbs?.onDelete?.();
+}
+
 // ── Shared helpers ────────────────────────────────────────────────
 function shortPath(p) { return (p || '').split('/').filter(Boolean).slice(-2).join('/'); }
 
@@ -378,16 +432,18 @@ function onDocKeydown(e) {
     if (newSessionProject.value) { closeNewSession(); return; }
     if (resumeSession.value) { closeResumeSession(); return; }
     if (addProjectOpen.value) { closeAddProject(); return; }
+    if (areaDialog.value) { closeAreaDialog(); return; }
   }
   if (e.key === 'Enter' && !e.target.matches('input, select, textarea')) {
     if (newSessionProject.value) { startNewSession(); return; }
     if (resumeSession.value) { doResume(); return; }
     if (addProjectOpen.value) { doAddProject(); return; }
+    if (areaDialog.value) { saveAreaDialog(); return; }
   }
 }
 
 onMounted(() => document.addEventListener('keydown', onDocKeydown));
 onUnmounted(() => document.removeEventListener('keydown', onDocKeydown));
 
-defineExpose({ openNewSession, openResumeSession, openAddProject, openPopover });
+defineExpose({ openNewSession, openResumeSession, openAddProject, openPopover, openAreaDialog });
 </script>

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildSidebarTree } from '../src/vue/area-tree.mjs';
+import { buildSidebarTree, removeArea } from '../src/vue/area-tree.mjs';
 
 const project = (path) => ({ projectPath: path, sessions: [] });
 
@@ -189,4 +189,107 @@ test('a collapsed parent leaves an expanded sub-area expanded', () => {
 test('missing inputs are tolerated', () => {
   assert.deepEqual(buildSidebarTree({}), []);
   assert.deepEqual(buildSidebarTree(), []);
+});
+
+// ── removeArea: one-level promotion (VIN-81) ──────────────────────────────
+// Deleting an Area is never destructive: its sub-Areas and Projects move up one level to
+// become siblings of what contained the Area, in the same result. Nothing cascades.
+
+const byId = (areas) => new Map(areas.map(a => [a.id, a]));
+
+test('deleting a mid-level area promotes its sub-areas to its own parent', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0 },
+    { id: 'd', name: 'Deep', parentId: 'c', position: 0 },
+  ];
+  const { areas: next } = removeArea(areas, [], 'c');
+  assert.equal(next.find(a => a.id === 'c'), undefined);
+  // Deep moves up to Work, Commerce's parent.
+  assert.equal(byId(next).get('d').parentId, 'w');
+});
+
+test('deleting a mid-level area re-files its projects into its own parent', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0 },
+  ];
+  const assignments = [
+    { projectPath: '/shop', areaId: 'c' },
+    { projectPath: '/other', areaId: 'w' },
+  ];
+  const { assignments: next } = removeArea(areas, assignments, 'c');
+  assert.deepEqual(
+    next.sort((a, b) => a.projectPath.localeCompare(b.projectPath)),
+    [{ projectPath: '/other', areaId: 'w' }, { projectPath: '/shop', areaId: 'w' }],
+  );
+});
+
+test('deleting a root area promotes its sub-areas to the root', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0 },
+  ];
+  const { areas: next } = removeArea(areas, [], 'w');
+  assert.equal(next.find(a => a.id === 'w'), undefined);
+  assert.equal(byId(next).get('c').parentId, null);
+});
+
+test('deleting a root area unfiles its projects (no assignment survives at the root)', () => {
+  const areas = [{ id: 'w', name: 'Work', parentId: null, position: 0 }];
+  const assignments = [{ projectPath: '/shop', areaId: 'w' }];
+  const { areas: nextAreas, assignments: next } = removeArea(areas, assignments, 'w');
+  assert.deepEqual(nextAreas, []);
+  // A root Project has no Area, so the assignment is dropped — the Project is not lost, it is unfiled.
+  assert.deepEqual(next, []);
+});
+
+test('promotion is one level only: a deeper project keeps its area', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0 },
+    { id: 'd', name: 'Deep', parentId: 'c', position: 0 },
+  ];
+  const assignments = [{ projectPath: '/leaf', areaId: 'd' }];
+  const { assignments: next } = removeArea(areas, assignments, 'c');
+  // Deleting Commerce does not touch Deep's project — only Commerce's direct children move.
+  assert.deepEqual(next, [{ projectPath: '/leaf', areaId: 'd' }]);
+});
+
+test('promoted sub-areas are appended after the new parent existing sub-areas, in manual order', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'k', name: 'Kept', parentId: 'w', position: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 1 },
+    { id: 'a', name: 'Alpha', parentId: 'c', position: 0 },
+    { id: 'b', name: 'Beta', parentId: 'c', position: 1 },
+  ];
+  const { areas: next } = removeArea(areas, [], 'c');
+  const work = buildSidebarTree({ areas: next, assignments: [], projects: [] })[0];
+  assert.deepEqual(work.children.map(n => n.name), ['Kept', 'Alpha', 'Beta']);
+});
+
+test('removing an unknown area changes nothing and does not throw', () => {
+  const areas = [{ id: 'w', name: 'Work', parentId: null, position: 0 }];
+  const assignments = [{ projectPath: '/a', areaId: 'w' }];
+  const { areas: nextAreas, assignments: nextAssignments } = removeArea(areas, assignments, 'nope');
+  assert.deepEqual(nextAreas, areas);
+  assert.deepEqual(nextAssignments, assignments);
+});
+
+test('removeArea does not mutate its inputs', () => {
+  const areas = [
+    { id: 'w', name: 'Work', parentId: null, position: 0 },
+    { id: 'c', name: 'Commerce', parentId: 'w', position: 0 },
+  ];
+  const assignments = [{ projectPath: '/shop', areaId: 'c' }];
+  removeArea(areas, assignments, 'c');
+  assert.equal(areas.find(a => a.id === 'c').parentId, 'w');
+  assert.equal(byId(areas).get('c').parentId, 'w');
+  assert.deepEqual(assignments, [{ projectPath: '/shop', areaId: 'c' }]);
+});
+
+test('removeArea tolerates missing inputs', () => {
+  assert.deepEqual(removeArea(), { areas: [], assignments: [] });
+  assert.deepEqual(removeArea([], [], 'x'), { areas: [], assignments: [] });
 });

@@ -1166,9 +1166,57 @@ body { display: flex; flex-direction: column; }
   outline: none;
 }
 
+.area-edit-btn {
+  flex: none;
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--text-tertiary);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+}
+
+.area-header:hover .area-edit-btn {
+  opacity: 1;
+}
+
+.area-edit-btn:hover {
+  color: var(--gray-200);
+}
+
 .area-children {
   margin-left: 10px;
   border-left: 1px solid var(--border-subtle);
+}
+
+.area-dialog-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.area-dialog-actions-right {
+  display: flex;
+  gap: 8px;
+}
+
+.area-dialog-delete-btn {
+  background: none;
+  border: 1px solid var(--red-7, var(--border-subtle));
+  color: var(--red-11, var(--text-secondary));
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.area-dialog-delete-btn:hover {
+  background: var(--red-a3, var(--surface-panel-raised));
 }
 
 .area-header.collapsed + .area-children {
