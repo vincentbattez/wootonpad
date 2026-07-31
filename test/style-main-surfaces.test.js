@@ -25,7 +25,8 @@ function section(title) {
   );
   const start = styleCss.search(banner);
   assert.notEqual(start, -1, `section "${title}" not found`);
-  const after = styleCss.slice(start + styleCss.slice(start).indexOf('*/') + 2);
+  const headerEnd = styleCss.indexOf('*/', start) + 2;
+  const after = styleCss.slice(headerEnd);
   const nextBanner = after.search(/\/\* =+ [A-Z]/);
   return nextBanner === -1 ? after : after.slice(0, nextBanner);
 }
