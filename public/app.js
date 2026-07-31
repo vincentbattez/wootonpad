@@ -51,6 +51,10 @@ window._applyAppearance = (appearance) => {
   if (!appearance) return;
   document.documentElement.classList.remove('light-theme', 'dark-theme');
   document.documentElement.classList.add(appearance.htmlClass);
+  // Neutral tone remaps every --neutral-* step onto the chosen Radix ramp.
+  if (appearance.neutralTone) {
+    document.documentElement.setAttribute('data-neutral-tone', appearance.neutralTone);
+  }
   window._applyTerminalTheme(appearance.terminalThemeName);
   // Re-theme any open CodeMirror editor or diff so an already-open file follows
   // the toggle without being closed and reopened.

@@ -142,6 +142,23 @@
               </div>
             </div>
 
+            <div class="settings-field settings-field-secondary">
+              <div class="settings-field-info">
+                <span class="settings-label">Neutral tone</span>
+                <div class="settings-description">Tint of the greys. Mauve is the default; the others are provided as-is.</div>
+              </div>
+              <div class="settings-field-control">
+                <select class="settings-select" v-model="form.neutralTone">
+                  <option value="mauve">Mauve</option>
+                  <option value="gray">Gray</option>
+                  <option value="slate">Slate</option>
+                  <option value="sage">Sage</option>
+                  <option value="olive">Olive</option>
+                  <option value="sand">Sand</option>
+                </select>
+              </div>
+            </div>
+
             <div class="settings-field">
               <div class="settings-field-info">
                 <span class="settings-label">Terminal Theme</span>
@@ -362,6 +379,7 @@ const form = reactive({
   sessionMaxAgeDays: 3,
   terminalTheme: 'auto',
   theme: 'system',
+  neutralTone: 'mauve',
   mcpEmulation: true,
   shellProfile: 'auto',
   showAvatars: true,
@@ -413,6 +431,7 @@ async function loadSettings() {
     form.sessionMaxAgeDays = current.sessionMaxAgeDays ?? 3;
     form.terminalTheme = current.terminalTheme ?? 'auto';
     form.theme = current.theme ?? 'system';
+    form.neutralTone = current.neutralTone ?? 'mauve';
     form.mcpEmulation = current.mcpEmulation !== false;
     form.shellProfile = current.shellProfile ?? 'auto';
     form.showAvatars = current.showAvatars !== false;
@@ -464,6 +483,7 @@ async function save() {
       sessionMaxAgeDays: form.sessionMaxAgeDays || 3,
       terminalTheme: form.terminalTheme || 'auto',
       theme: form.theme || 'system',
+      neutralTone: form.neutralTone || 'mauve',
       mcpEmulation: form.mcpEmulation,
       shellProfile: form.shellProfile || 'auto',
       showAvatars: form.showAvatars,
