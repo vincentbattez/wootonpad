@@ -7,6 +7,9 @@ RUN apt-get update && apt-get install -y \
   jq \
   && rm -rf /var/lib/apt/lists/*
 
+# Issue tracker: Linear, via schpet/linear-cli. Auth comes from LINEAR_API_KEY (.sandcastle/.env).
+RUN npm install -g @schpet/linear-cli@2
+
 # Build-args for UID/GID alignment: sandcastle docker build-image
 # defaults these to the host user's UID/GID so image-built files
 # and bind-mounted files share an owner without runtime chown.
