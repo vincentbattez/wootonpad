@@ -82,6 +82,7 @@ const {
   searchByType, isSearchIndexPopulated, searchFtsRecreated,
   getSetting, setSetting, deleteSetting,
   getStoredAvatar, setStoredAvatar,
+  getAreaAvatar, setAreaAvatar,
   getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
   moveArea, fileProject,
   closeDb,
@@ -822,6 +823,41 @@ ipcMain.handle('delete-area', (_event, id) => deleteArea(id));
 // but the cycle guard is re-checked here on the move — the main process is the source of truth.
 ipcMain.handle('move-area', (_event, id, parentId) => moveArea(id, parentId ?? null));
 ipcMain.handle('file-project', (_event, projectPath, areaId) => fileProject(projectPath, areaId ?? null));
+
+// --- IPC: area image (VIN-82) ---
+// Areas carry a custom image alongside the initials-and-colour fallback. The image is stored as
+// bytes (its own table), so it survives the source file being deleted or moved; it is resized to
+// ~128px before storing so the sidebar never holds a full-resolution photo.
+ipcMain.handle('get-area-avatar', (_event, areaId) => {
+  const result = getAreaAvatar(areaId);
+  if (!result) return null;
+  return `data:${result.mimeType};base64,${result.avatarData.toString('base64')}`;
+});
+
+// Reads the dropped/selected file (the renderer passes its OS path, as the terminal drop does),
+// downscales the longest side to 128px via Electron's nativeImage, and stores it as PNG.
+ipcMain.handle('set-area-image', (_event, areaId, filePath) => {
+  if (!areaId || !filePath) return null;
+  const { nativeImage } = require('electron');
+  let img = nativeImage.createFromPath(filePath);
+  if (img.isEmpty()) return null;
+  const { width, height } = img.getSize();
+  const longest = Math.max(width, height);
+  if (longest > 128) {
+    const scale = 128 / longest;
+    img = img.resize({ width: Math.round(width * scale), height: Math.round(height * scale), quality: 'good' });
+  }
+  const buffer = img.toPNG();
+  if (!buffer || !buffer.length) return null;
+  setAreaAvatar(areaId, buffer, 'image/png');
+  return `data:image/png;base64,${buffer.toString('base64')}`;
+});
+
+// Clearing returns the Area to its initials and colour without deleting and recreating it.
+ipcMain.handle('clear-area-image', (_event, areaId) => {
+  setAreaAvatar(areaId, null, null);
+  return { ok: true };
+});
 
 // --- IPC: project avatar (GitLab) ---
 ipcMain.handle('get-project-avatar', (_event, projectPath) => {

@@ -6,6 +6,7 @@
 <script setup>
 import { computed, onMounted } from 'vue';
 import { store } from '../store.js';
+import { avatarFromPath } from '../avatar.mjs';
 
 defineOptions({ inheritAttrs: false });
 
@@ -15,9 +16,7 @@ const props = defineProps({
 
 const name = computed(() => props.projectPath.split('/').filter(Boolean).pop() || '');
 const dataUrl = computed(() => store.avatarDataUrls[props.projectPath] || null);
-const fallback = computed(() =>
-  window.getProjectAvatar ? window.getProjectAvatar(props.projectPath) : { initials: '?', color: '#666' }
-);
+const fallback = computed(() => avatarFromPath(props.projectPath));
 
 onMounted(async () => {
   if (dataUrl.value || !props.projectPath || !window.api?.getProjectAvatar) return;

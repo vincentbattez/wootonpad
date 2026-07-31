@@ -4768,6 +4768,93 @@ body { display: flex; flex-direction: column; }
   display: inline-block;
 }
 
+/* Area avatar in the header (VIN-82): same footprint as the project avatar, so Areas and Projects
+   line up. Kept beside .project-header-avatar since the two share their look. */
+.area-header-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  font-size: 8px;
+  font-weight: 700;
+  color: white;
+  flex-shrink: 0;
+  user-select: none;
+  letter-spacing: 0.02em;
+  opacity: 0.88;
+}
+
+body.hide-avatars .area-header-avatar { display: none; }
+
+/* Area dialog image zone (VIN-82): a drop target holding the preview (stored image or the
+   initials-and-colour fallback) plus a clear-image action beside it. */
+.area-dialog-image {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.area-image-dropzone {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-sm);
+  cursor: copy;
+  transition: border-color var(--duration-fast) var(--ease-standard), background var(--duration-fast) var(--ease-standard);
+}
+
+.area-image-dropzone.drop-target {
+  border-color: var(--accent-8, var(--border-strong));
+  background: var(--surface-panel-raised);
+}
+
+.area-image-preview,
+.area-image-fallback {
+  width: 48px;
+  height: 48px;
+  border-radius: 10px;
+  flex-shrink: 0;
+  object-fit: cover;
+}
+
+.area-image-fallback {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
+
+.area-image-hint {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.area-image-clear-btn {
+  flex: none;
+  background: none;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  padding: 6px 12px;
+  cursor: pointer;
+  transition: background var(--duration-fast) var(--ease-standard);
+}
+
+.area-image-clear-btn:hover {
+  background: var(--surface-panel-raised);
+}
+
 body.hide-avatars .project-header-avatar { display: none; }
 body.hide-avatars .grid-card-avatar {
   font-size: 0;
