@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+#MISE description="Launch the Electron app"
+#MISE depends=["check"]
+set -euo pipefail
+
+gum style --bold --foreground 212 "🚀  Launching app..."
+exec npm start

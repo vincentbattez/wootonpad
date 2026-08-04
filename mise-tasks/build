@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+#MISE description="Build distributables with electron-builder"
+set -euo pipefail
+
+gum style --bold --foreground 212 "📦  Building..."
+exec npm run build

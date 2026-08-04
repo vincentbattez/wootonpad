@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+#MISE description="Bootstrap the project from a fresh clone"
+#MISE alias=["i"]
+set -euo pipefail
+
+gum style --bold --foreground 212 "🚀  Initializing project..."
+
+# npm install compiles the native modules (node-pty, better-sqlite3) against
+# the node version mise pins — re-run it after any runtime switch.
+npm install
+
+gum log --level info "Project ready — run 'mise run dev' to start"

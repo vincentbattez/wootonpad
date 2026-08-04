@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+#MISE description="Verify dependencies are installed"
+set -euo pipefail
+
+if [ ! -d node_modules ]; then
+  gum log --level error "node_modules missing" fix "mise run init"
+  exit 1
+fi
+
+gum log --level info "Dependencies OK"

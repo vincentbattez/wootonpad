@@ -1,0 +1,15 @@
+[settings]
+experimental = true   # required for [hooks]
+quiet = true          # let task scripts render directly (no [task-name] prefix in output)
+
+[tools]
+node = "24"
+
+# gum is used by the task scripts in mise-tasks/ for log/format/style output.
+"aqua:charmbracelet/gum" = "latest"
+
+# --- Aggregators ---
+
+[tasks.ci]
+description = "Full CI pipeline locally"
+depends = ["test", "build"]
