@@ -1231,6 +1231,7 @@ body { display: flex; flex-direction: column; }
   white-space: nowrap;
 }
 
+.project-ide-btn,
 .project-archive-btn,
 .project-new-btn {
   background: transparent;
@@ -1249,15 +1250,23 @@ body { display: flex; flex-direction: column; }
   opacity: 0;
 }
 
+.project-ide-btn svg,
 .project-archive-btn svg,
 .project-new-btn svg {
   display: block;
 }
 
+.project-header:hover .project-ide-btn,
 .project-header:hover .project-archive-btn,
 .project-header:hover .project-new-btn,
 .project-header:hover .project-settings-btn {
   opacity: 0.7;
+}
+
+.project-ide-btn:hover {
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  opacity: 1 !important;
 }
 
 .project-new-btn:hover {
@@ -1474,6 +1483,7 @@ body { display: flex; flex-direction: column; }
   white-space: nowrap;
 }
 
+.worktree-ide-btn,
 .worktree-new-btn,
 .worktree-hide-btn {
   width: 20px;
@@ -1491,9 +1501,16 @@ body { display: flex; flex-direction: column; }
   border-radius: var(--radius-xs);
 }
 
+.worktree-header:hover .worktree-ide-btn,
 .worktree-header:hover .worktree-new-btn,
 .worktree-header:hover .worktree-hide-btn {
   opacity: 0.7;
+}
+
+.worktree-ide-btn:hover {
+  opacity: 1 !important;
+  background: var(--surface-card);
+  color: var(--text-secondary);
 }
 
 .worktree-new-btn:hover {

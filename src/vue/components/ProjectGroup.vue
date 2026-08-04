@@ -5,6 +5,7 @@
     <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle">
       <span class="worktree-branch-icon" v-html="branchSvg" @click.stop="toggle"></span>
       <span class="worktree-name" @click.stop="toggle">{{ worktreeName }}</span>
+      <button class="worktree-ide-btn" data-tooltip="Open worktree in IDE" @click.stop="openInIde(project.projectPath)" v-html="ideSvg"></button>
       <button class="worktree-hide-btn" data-tooltip="Hide worktree" @click.stop="$emit('remove-project', project.projectPath)" v-html="closeSvg"></button>
       <button class="project-new-btn worktree-new-btn" data-tooltip="New session in worktree" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSmSvg"></button>
     </div>
@@ -26,6 +27,7 @@
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <ProjectAvatar class="project-header-avatar" :project-path="project.projectPath" @click.stop="toggle" />
       <span class="project-name" @click.stop="toggle">{{ shortName }}</span>
+      <button class="project-ide-btn" data-tooltip="Open in IDE" @click.stop="openInIde(project.projectPath)" v-html="ideSvg"></button>
       <button class="project-settings-btn" data-tooltip="Project settings" @click.stop="$emit('settings', project.projectPath)" v-html="gearSvg"></button>
       <button class="project-archive-btn" data-tooltip="Archive all sessions" @click.stop="archiveAll" v-html="archiveSvg"></button>
       <button class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
@@ -321,6 +323,25 @@ const olderItems = computed(() => {
   return allItems.value.filter(i => !visIds.has(i.type === 'slug' ? 'slug-' + i.slug : i.session.sessionId));
 });
 
+// Only the path travels to main; the command lives in the global settings.
+async function openInIde(dirPath) {
+  let result;
+  try {
+    result = await window.api.openInIde(dirPath);
+  } catch (err) {
+    alert(`Could not open the folder in your IDE: ${err.message}`);
+    return;
+  }
+  if (result?.ok) return;
+  if (result?.code === 'not-configured') {
+    if (confirm('No external IDE is configured.\n\nOpen the global settings to choose one?')) {
+      window.openSettingsViewer?.('global');
+    }
+    return;
+  }
+  alert(result?.message || 'Could not open the folder in your IDE.');
+}
+
 async function archiveAll() {
   emit('archive-sessions', props.project.sessions.filter(s => !s.archived));
 }
@@ -331,5 +352,6 @@ const archiveSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" 
 const plusSvg = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const plusSmSvg = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const closeSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
+const ideSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
 const branchSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8c0-2.76-2.46-5-5.5-5S2 5.24 2 8h2l1-1 1 1h4"/><path d="M13 7.14A5.82 5.82 0 0 1 16.5 6c3.04 0 5.5 2.24 5.5 5h-3l-1-1-1 1h-3"/><path d="M5.89 9.71c-2.15 2.15-2.3 5.47-.35 7.43l4.24-4.25.7-.7.71-.71 2.12-2.12c-1.95-1.96-5.27-1.8-7.42.35"/><path d="M11 15.5c.5 2.5-.17 4.5-1 6.5h4c2-5.5-.5-12-1-14"/></svg>';
 </script>

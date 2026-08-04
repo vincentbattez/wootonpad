@@ -217,6 +217,31 @@
 
             <div class="settings-field">
               <div class="settings-field-info">
+                <span class="settings-label">External IDE</span>
+                <div class="settings-description">Application opened by the IDE button in the sidebar. Applies to every project.</div>
+              </div>
+              <div class="settings-field-control">
+                <select class="settings-select" v-model="form.externalIde">
+                  <option value="">Not configured</option>
+                  <option v-for="ide in knownIdes" :key="ide.id" :value="ide.id">{{ ide.label }}</option>
+                  <option value="custom">Custom…</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="settings-field settings-field-secondary" v-if="form.externalIde === 'custom'">
+              <div class="settings-field-info">
+                <span class="settings-label">IDE Command</span>
+                <div class="settings-description">Run in your login shell, with the folder appended as the last argument.</div>
+              </div>
+              <div class="settings-field-control">
+                <input type="text" class="settings-input" v-model="form.externalIdeCommand"
+                  placeholder="e.g. code -n" autocomplete="off" />
+              </div>
+            </div>
+
+            <div class="settings-field">
+              <div class="settings-field-info">
                 <span class="settings-label">Max Visible Sessions</span>
                 <div class="settings-description">Show up to this many sessions before collapsing the rest behind "+N older"</div>
               </div>
@@ -362,6 +387,7 @@ const appVersion = ref('');
 const updateStatus = ref('');
 const newVersion = ref('');
 const shellProfiles = ref([]);
+const knownIdes = ref([]);
 const terminalThemes = computed(() => window.TERMINAL_THEMES || {});
 const terminalFonts = computed(() => window.TERMINAL_FONTS || {});
 
@@ -387,6 +413,8 @@ const form = reactive({
   uiFont: 'default',
   commitMessagePrompt: '',
   gitlabToken: '',
+  externalIde: '', // '' stands for the stored null — a null <option> value never matches
+  externalIdeCommand: '',
 });
 
 const useGlobal = reactive({
@@ -439,9 +467,12 @@ async function loadSettings() {
     form.uiFont = current.uiFont ?? 'default';
     form.commitMessagePrompt = current.commitMessagePrompt || COMMIT_MSG_PROMPT_DEFAULT;
     form.gitlabToken = current.gitlabToken || '';
+    form.externalIde = current.externalIde || '';
+    form.externalIdeCommand = current.externalIdeCommand || '';
     originalMcpEmulation = form.mcpEmulation;
 
     try { shellProfiles.value = await window.api.getShellProfiles(); } catch { shellProfiles.value = []; }
+    try { knownIdes.value = await window.api.getKnownIdes(); } catch { knownIdes.value = []; }
     window.api.getAppVersion().then(v => { appVersion.value = v; });
   }
 
@@ -491,6 +522,8 @@ async function save() {
       uiFont: form.uiFont || 'default',
       commitMessagePrompt: form.commitMessagePrompt === COMMIT_MSG_PROMPT_DEFAULT ? '' : (form.commitMessagePrompt || ''),
       gitlabToken: form.gitlabToken || '',
+      externalIde: form.externalIde || null,
+      externalIdeCommand: form.externalIdeCommand || '',
     };
   }
 

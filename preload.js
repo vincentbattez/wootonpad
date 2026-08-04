@@ -34,6 +34,8 @@ contextBridge.exposeInMainWorld('api', {
   renameSession: (id, name) => ipcRenderer.invoke('rename-session', id, name),
   archiveSession: (id, archived) => ipcRenderer.invoke('archive-session', id, archived),
   openTerminal: (id, projectPath, isNew, sessionOptions) => ipcRenderer.invoke('open-terminal', id, projectPath, isNew, sessionOptions),
+  openInIde: (dirPath) => ipcRenderer.invoke('open-in-ide', dirPath),
+  getKnownIdes: () => ipcRenderer.invoke('get-known-ides'),
   search: (type, query, titleOnly) => ipcRenderer.invoke('search', type, query, titleOnly),
   readSessionJsonl: (sessionId) => ipcRenderer.invoke('read-session-jsonl', sessionId),
 

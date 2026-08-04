@@ -16,7 +16,7 @@ try { require('electron-reloader')(module, { watchRenderer: false }); } catch {}
 try {
   const chokidar = require('chokidar');
   let _reloadTimer;
-  chokidar.watch(['public/vue-bundle.js', 'public/style.css'], { ignoreInitial: true })
+  chokidar.watch(['public/**/*.js', 'public/**/*.css', 'public/index.html'], { ignoreInitial: true })
     .on('change', () => {
       clearTimeout(_reloadTimer);
       _reloadTimer = setTimeout(() => {
@@ -43,6 +43,7 @@ const cleanPtyEnv = Object.fromEntries(
 const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs } = require('./shell-profiles');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
+const { launchIde, KNOWN_IDES } = require('./ide-launch');
 
 
 
@@ -710,6 +711,33 @@ ipcMain.handle('get-project-git-cache', (_event, projectPath) => {
 ipcMain.handle('open-external', (_event, url) => {
   log.info('[open-external IPC]', url);
   if (/^https?:\/\//i.test(url)) return shell.openExternal(url);
+});
+
+// Labels only — the settings form populates its select from this, so the id list
+// never diverges from the one the launcher resolves against.
+ipcMain.handle('get-known-ides', () => KNOWN_IDES.map(({ id, label }) => ({ id, label })));
+
+// The renderer sends a path and nothing else; the command is resolved here from
+// the global settings, keeping this channel out of arbitrary-execution territory.
+ipcMain.handle('open-in-ide', async (_event, dirPath) => {
+  if (typeof dirPath !== 'string' || !dirPath) {
+    return { ok: false, code: 'bad-path', message: 'No folder was given.' };
+  }
+  try {
+    if (!fs.statSync(dirPath).isDirectory()) throw new Error('not a directory');
+  } catch {
+    return { ok: false, code: 'bad-path', message: `This folder no longer exists: ${dirPath}` };
+  }
+
+  const global = getSetting('global') || {};
+  try {
+    const result = await launchIde(global, dirPath, { shellProfileId: global.shellProfile || SETTING_DEFAULTS.shellProfile });
+    if (!result.ok) log.info('[open-in-ide IPC] failed', result.code, result.message);
+    return result;
+  } catch (err) {
+    log.error('[open-in-ide IPC]', err);
+    return { ok: false, code: 'launch-failed', message: `Could not open the IDE: ${err.message}` };
+  }
 });
 
 // --- IPC: MCP bridge ---
@@ -1610,11 +1638,13 @@ const SETTING_DEFAULTS = {
   commitMessagePrompt: '',
   theme: APPEARANCE_DEFAULTS.theme,
   neutralTone: APPEARANCE_DEFAULTS.neutralTone,
+  externalIde: null,
+  externalIdeCommand: '',
 };
 
-// Appearance is a preference of the person, not a property of a Project:
-// these keys never take a per-project override.
-const GLOBAL_ONLY_SETTINGS = new Set(['theme', 'neutralTone']);
+// Appearance and tooling are preferences of the person, not properties of a
+// Project: these keys never take a per-project override.
+const GLOBAL_ONLY_SETTINGS = new Set(['theme', 'neutralTone', 'externalIde', 'externalIdeCommand']);
 
 ipcMain.handle('get-shell-profiles', () => {
   _shellProfiles = null; // refresh on each request
