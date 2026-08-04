@@ -2,7 +2,7 @@
   <div :class="isWorktree ? 'worktree-group' : 'project-group'" :id="folderId">
 
     <!-- Worktree header -->
-    <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle">
+    <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle" @mouseenter="refreshIdeCommand">
       <span class="worktree-branch-icon" v-html="branchSvg" @click.stop="toggle"></span>
       <span class="worktree-name" @click.stop="toggle">{{ worktreeName }}</span>
       <button class="worktree-hide-btn" data-tooltip="Hide worktree" @click.stop="$emit('remove-project', project.projectPath)" v-html="closeSvg"></button>
@@ -18,6 +18,7 @@
       :id="'ph-' + folderId"
       draggable="true"
       @click.self="toggle"
+      @mouseenter="refreshIdeCommand"
       @dragstart.stop="onDragStart"
       @dragend="onDragEnd"
       @dragover.prevent.stop="onDragOver"
@@ -162,7 +163,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
+import { computed, ref } from 'vue';
 import SessionItem from './SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
@@ -326,17 +327,19 @@ const olderItems = computed(() => {
 
 // Cosmetic only: the tooltip word. The click always goes to the main process,
 // which re-reads the setting and answers 'not-configured' if there is none.
+// Read on hover, not on mount: the tooltip is only ever seen after a hover, and
+// re-reading there keeps it honest right after the command is configured.
 const ideCommand = ref('');
 const ideTooltip = computed(() =>
   ideCommand.value ? 'Open in External IDE' : 'Configure an External IDE'
 );
 
-onMounted(async () => {
+async function refreshIdeCommand() {
   try {
     const effective = await window.api.getEffectiveSettings(props.project.projectPath);
     ideCommand.value = effective?.externalIdeCommand || '';
   } catch {}
-});
+}
 
 function openInExternalIde() {
   emit('open-external-ide', props.project.projectPath);

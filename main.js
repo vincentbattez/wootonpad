@@ -1643,7 +1643,7 @@ ipcMain.handle('get-effective-settings', (_event, projectPath) => effectiveSetti
 // --- IPC: open a Project in the user's External IDE ---
 // The renderer only ever sends a projectPath; the command comes from settings,
 // read here. See docs/adr/0003-external-ide-shell-command.md.
-const IDE_LAUNCH_WATCH_MS = 3000;
+const EXTERNAL_IDE_LAUNCH_WATCH_MS = 3000;
 
 ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
   const settings = effectiveSettings(projectPath);
@@ -1659,27 +1659,40 @@ ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
   if (!launch.ok) return launch;
 
   return new Promise((resolve) => {
-    let settled = false;
-    const done = (result) => { if (!settled) { settled = true; resolve(result); } };
-
     const { spawn } = require('child_process');
     let child;
     try {
       child = spawn(launch.shell, launch.args, { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
     } catch (err) {
-      return done({ ok: false, reason: 'launch-failed', message: String(err?.message || err) });
+      return resolve({ ok: false, reason: 'launch-failed', message: String(err?.message || err) });
     }
+    child.unref();
 
     let stderr = '';
-    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+    let timer;
+    const onStderr = (chunk) => { stderr += chunk.toString(); };
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      // A foreground editor (`code --wait`, `nvim`) outlives this promise: stop
+      // listening rather than buffer its output for nobody.
+      clearTimeout(timer);
+      child.stderr?.off('data', onStderr);
+      child.removeAllListeners('exit');
+      child.removeAllListeners('error');
+      resolve(result);
+    };
+
+    child.stderr?.on('data', onStderr);
     child.on('error', (err) => done({ ok: false, reason: 'launch-failed', message: String(err?.message || err) }));
     child.on('exit', (code) => {
       if (code) done({ ok: false, reason: 'launch-failed', message: stderr.trim().slice(0, 300) || `exited with code ${code}` });
       else done({ ok: true });
     });
 
-    // Past this window the IDE is considered up — never wait on a `code --wait`.
-    setTimeout(() => { child.unref(); done({ ok: true }); }, IDE_LAUNCH_WATCH_MS);
+    // Past this window the External IDE is considered up.
+    timer = setTimeout(() => done({ ok: true }), EXTERNAL_IDE_LAUNCH_WATCH_MS);
   });
 });
 

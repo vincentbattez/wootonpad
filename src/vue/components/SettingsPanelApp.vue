@@ -408,7 +408,6 @@ const externalIdePresets = [
   { name: 'PyCharm', command: 'pycharm {path}' },
   { name: 'Xcode', command: 'xed {path}' },
   { name: 'Sublime Text', command: 'subl {path}' },
-  { name: 'Neovim (in Terminal)', command: 'open -a Terminal {path}' },
 ];
 
 const form = reactive({
