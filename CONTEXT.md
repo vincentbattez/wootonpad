@@ -32,3 +32,9 @@ _Avoid_: Thread, topic
 **Session**:
 One Claude Code conversation.
 _Avoid_: Conversation, chat
+
+### Editors
+
+**External IDE**:
+A code editor installed on the machine, outside WootonPad, that a Project can be handed off to. Always qualified as _external_ — unqualified "IDE" refers to WootonPad acting as an IDE for the Claude CLI.
+_Avoid_: IDE (unqualified), editor

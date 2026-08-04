@@ -6,6 +6,7 @@
       <span class="worktree-branch-icon" v-html="branchSvg" @click.stop="toggle"></span>
       <span class="worktree-name" @click.stop="toggle">{{ worktreeName }}</span>
       <button class="worktree-hide-btn" data-tooltip="Hide worktree" @click.stop="$emit('remove-project', project.projectPath)" v-html="closeSvg"></button>
+      <button class="project-ide-btn worktree-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
       <button class="project-new-btn worktree-new-btn" data-tooltip="New session in worktree" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSmSvg"></button>
     </div>
 
@@ -26,6 +27,7 @@
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <ProjectAvatar class="project-header-avatar" :project-path="project.projectPath" @click.stop="toggle" />
       <span class="project-name" @click.stop="toggle">{{ shortName }}</span>
+      <button class="project-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
       <button class="project-settings-btn" data-tooltip="Project settings" @click.stop="$emit('settings', project.projectPath)" v-html="gearSvg"></button>
       <button class="project-archive-btn" data-tooltip="Archive all sessions" @click.stop="archiveAll" v-html="archiveSvg"></button>
       <button class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
@@ -151,6 +153,7 @@
         @rename="(id, name) => $emit('rename', id, name)"
         @new-session="(p, btn) => $emit('new-session', p, btn)"
         @settings="(path) => $emit('settings', path)"
+        @open-external-ide="(path) => $emit('open-external-ide', path)"
         @archive-sessions="(sessions) => $emit('archive-sessions', sessions)"
         @remove-project="(path) => $emit('remove-project', path)"
       />
@@ -159,7 +162,7 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import SessionItem from './SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
@@ -187,7 +190,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename',
-  'new-session', 'settings', 'archive-sessions', 'remove-project',
+  'new-session', 'settings', 'open-external-ide', 'archive-sessions', 'remove-project',
 ]);
 
 const folderId = computed(() => 'project-' + props.project.projectPath.replace(/[^a-zA-Z0-9_-]/g, '_'));
@@ -321,6 +324,24 @@ const olderItems = computed(() => {
   return allItems.value.filter(i => !visIds.has(i.type === 'slug' ? 'slug-' + i.slug : i.session.sessionId));
 });
 
+// Cosmetic only: the tooltip word. The click always goes to the main process,
+// which re-reads the setting and answers 'not-configured' if there is none.
+const ideCommand = ref('');
+const ideTooltip = computed(() =>
+  ideCommand.value ? 'Open in External IDE' : 'Configure an External IDE'
+);
+
+onMounted(async () => {
+  try {
+    const effective = await window.api.getEffectiveSettings(props.project.projectPath);
+    ideCommand.value = effective?.externalIdeCommand || '';
+  } catch {}
+});
+
+function openInExternalIde() {
+  emit('open-external-ide', props.project.projectPath);
+}
+
 async function archiveAll() {
   emit('archive-sessions', props.project.sessions.filter(s => !s.archived));
 }
@@ -328,6 +349,8 @@ async function archiveAll() {
 // SVG icons
 const gearSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>';
 const archiveSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
+// Code chevrons — neutral towards whichever External IDE the user picked.
+const codeSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
 const plusSvg = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const plusSmSvg = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const closeSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';

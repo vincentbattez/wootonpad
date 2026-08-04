@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('api', {
   getFileTree: (projectPath) => ipcRenderer.invoke('get-file-tree', projectPath),
   getProjectSessions: (projectPath) => ipcRenderer.invoke('get-project-sessions', projectPath),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  openInExternalIde: (projectPath) => ipcRenderer.invoke('open-in-external-ide', projectPath),
 
   // Send (fire-and-forget)
   sendInput: (id, data) => ipcRenderer.send('terminal-input', id, data),

@@ -41,6 +41,7 @@ const cleanPtyEnv = Object.fromEntries(
 
 // Shell profiles → shell-profiles.js
 const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs } = require('./shell-profiles');
+const { resolveIdeLaunch } = require('./external-ide');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 
@@ -1600,6 +1601,7 @@ const SETTING_DEFAULTS = {
   worktreeName: '',
   chrome: false,
   preLaunchCmd: '',
+  externalIdeCommand: '',
   addDirs: '',
   visibleSessionCount: 5,
   sidebarWidth: 340,
@@ -1621,7 +1623,7 @@ ipcMain.handle('get-shell-profiles', () => {
   return getShellProfiles();
 });
 
-ipcMain.handle('get-effective-settings', (_event, projectPath) => {
+function effectiveSettings(projectPath) {
   const global = getSetting('global') || {};
   const project = projectPath ? (getSetting('project:' + projectPath) || {}) : {};
   const effective = { ...SETTING_DEFAULTS };
@@ -1634,6 +1636,51 @@ ipcMain.handle('get-effective-settings', (_event, projectPath) => {
     }
   }
   return effective;
+}
+
+ipcMain.handle('get-effective-settings', (_event, projectPath) => effectiveSettings(projectPath));
+
+// --- IPC: open a Project in the user's External IDE ---
+// The renderer only ever sends a projectPath; the command comes from settings,
+// read here. See docs/adr/0003-external-ide-shell-command.md.
+const IDE_LAUNCH_WATCH_MS = 3000;
+
+ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
+  const settings = effectiveSettings(projectPath);
+  const profile = resolveShell(settings.shellProfile);
+  const launch = resolveIdeLaunch(
+    { externalIdeCommand: settings.externalIdeCommand, projectPath },
+    {
+      shellPath: profile.path,
+      shellExtraArgs: profile.args,
+      folderExists: !!projectPath && fs.existsSync(projectPath),
+    }
+  );
+  if (!launch.ok) return launch;
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (result) => { if (!settled) { settled = true; resolve(result); } };
+
+    const { spawn } = require('child_process');
+    let child;
+    try {
+      child = spawn(launch.shell, launch.args, { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (err) {
+      return done({ ok: false, reason: 'launch-failed', message: String(err?.message || err) });
+    }
+
+    let stderr = '';
+    child.stderr?.on('data', (chunk) => { stderr += chunk.toString(); });
+    child.on('error', (err) => done({ ok: false, reason: 'launch-failed', message: String(err?.message || err) }));
+    child.on('exit', (code) => {
+      if (code) done({ ok: false, reason: 'launch-failed', message: stderr.trim().slice(0, 300) || `exited with code ${code}` });
+      else done({ ok: true });
+    });
+
+    // Past this window the IDE is considered up — never wait on a `code --wait`.
+    setTimeout(() => { child.unref(); done({ ok: true }); }, IDE_LAUNCH_WATCH_MS);
+  });
 });
 
 // --- IPC: get-active-sessions ---
