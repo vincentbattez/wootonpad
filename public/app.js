@@ -885,6 +885,15 @@ window.api.onLaunchProjectSession((projectPath, continueSession) => {
   launchNewSession({ projectPath });
 });
 
+// wootonpad://focus/{token} — a notification click asking for a running session
+window.api.onFocusSession?.((sessionId) => {
+  const session = sessionMap.get(sessionId);
+  if (!session) return;
+  if (window.vueStore?.activeTab !== 'sessions') window.vueApp?.setTab('sessions');
+  setActiveSession(sessionId);
+  openSession(session);
+});
+
 // Live-reload sidebar when filesystem changes are detected
 let projectsChangedTimer = null;
 let projectsChangedWhileAway = false;

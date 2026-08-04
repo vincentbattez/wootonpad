@@ -171,4 +171,7 @@ contextBridge.exposeInMainWorld('api', {
   onLaunchProjectSession: (callback) => {
     ipcRenderer.on('launch-project-session', (_event, projectPath, continueSession) => callback(projectPath, continueSession));
   },
+  onFocusSession: (callback) => {
+    ipcRenderer.on('focus-session', (_event, sessionId) => callback(sessionId));
+  },
 });
