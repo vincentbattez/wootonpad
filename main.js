@@ -1645,6 +1645,13 @@ ipcMain.handle('get-effective-settings', (_event, projectPath) => effectiveSetti
 // read here. See docs/adr/0003-external-ide-shell-command.md.
 const EXTERNAL_IDE_LAUNCH_WATCH_MS = 3000;
 
+// The tail, not the head: a login shell prints its rc chatter first, so the
+// command's own error is what lands last.
+function lastStderr(stderr, max = 300) {
+  const trimmed = stderr.trim();
+  return trimmed.length > max ? '…' + trimmed.slice(-max) : trimmed;
+}
+
 ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
   const settings = effectiveSettings(projectPath);
   const profile = resolveShell(settings.shellProfile);
@@ -1687,7 +1694,7 @@ ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
     child.stderr?.on('data', onStderr);
     child.on('error', (err) => done({ ok: false, reason: 'launch-failed', message: String(err?.message || err) }));
     child.on('exit', (code) => {
-      if (code) done({ ok: false, reason: 'launch-failed', message: stderr.trim().slice(0, 300) || `exited with code ${code}` });
+      if (code) done({ ok: false, reason: 'launch-failed', message: lastStderr(stderr) || `exited with code ${code}` });
       else done({ ok: true });
     });
 
