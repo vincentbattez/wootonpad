@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 
-const { resolveIdeLaunch } = require('../external-ide');
+const { resolveIdeLaunch, launchErrorMessage } = require('../external-ide');
 
 // The command line the shell is asked to run is always the last argument.
 function commandLine(result) {
@@ -100,4 +100,33 @@ test('cmd.exe quotes with double quotes', () => {
   );
   assert.equal(commandLine(out), 'code "C:\\my projects\\app"');
   assert.deepEqual(out.args.slice(0, 1), ['/C']);
+});
+
+// A real failure captured from the app: the login shell sources mise, which
+// printed a multi-line template error before the command's own failure.
+const MISE_NOISE = `Identity added: /Users/x/.ssh/id_github (x@example.com)
+warning: unused env vars: __MISE_ZSH_CHPWD_RAN, __MISE_ZSH_PRECMD_RUN
+ --> __tera_one_off:1:7
+  |
+1 | {{env.LAB_FOLDER}}/norauto/wsc/front
+  |       ^^^^^^^^^^
+mise ERROR Version: 2026.7.18 macos-arm64 (2026-07-30)
+mise ERROR Run with --verbose or MISE_VERBOSE=1 for more information
+zsh: command not found: webstorm
+`;
+
+test('the error shown is the command failure, not the login shell chatter', () => {
+  assert.equal(launchErrorMessage(MISE_NOISE, 127), 'zsh: command not found: webstorm');
+});
+
+test('a silent failure falls back to the exit code', () => {
+  assert.equal(launchErrorMessage('', 127), 'exited with code 127');
+  assert.equal(launchErrorMessage('   \n\n  ', 127), 'exited with code 127');
+});
+
+test('an overlong single line is truncated from the front, keeping the end', () => {
+  const out = launchErrorMessage('x'.repeat(400) + 'command not found: foo', 127);
+  assert.equal(out.startsWith('…'), true);
+  assert.equal(out.endsWith('command not found: foo'), true);
+  assert.equal(out.length, 301);
 });

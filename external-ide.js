@@ -47,4 +47,17 @@ function resolveIdeLaunch(settings = {}, env = {}) {
   return { ok: true, shell: shellPath, args: shellArgs(shellPath, commandLine, env.shellExtraArgs) };
 }
 
-module.exports = { resolveIdeLaunch };
+// What to show the user out of a failed launch. Running through a login shell
+// means stderr opens with whatever the rc files print — mise, nvm, ssh-agent —
+// so the command's own error is the last line, not the first.
+function launchErrorMessage(stderr, exitCode) {
+  const lastLine = String(stderr || '')
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .pop();
+  if (!lastLine) return exitCode ? `exited with code ${exitCode}` : 'launch failed';
+  return lastLine.length > 300 ? '…' + lastLine.slice(-300) : lastLine;
+}
+
+module.exports = { resolveIdeLaunch, launchErrorMessage };

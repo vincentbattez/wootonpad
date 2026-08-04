@@ -41,7 +41,7 @@ const cleanPtyEnv = Object.fromEntries(
 
 // Shell profiles → shell-profiles.js
 const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs } = require('./shell-profiles');
-const { resolveIdeLaunch } = require('./external-ide');
+const { resolveIdeLaunch, launchErrorMessage } = require('./external-ide');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 
@@ -204,8 +204,37 @@ function dispatchProjectOpen(filePath, continueSession) {
   }
 }
 
+// Raise the window and select the session carrying this focus token.
+// Returns false when the token is unknown (session closed since spawn).
+function dispatchSessionFocus(token) {
+  if (!token) return false;
+  for (const [sessionId, session] of activeSessions) {
+    if (session.focusToken !== token) continue;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('focus-session', session.realSessionId || sessionId);
+    }
+    return true;
+  }
+  return false;
+}
+
 app.on('open-url', (event, url) => {
   event.preventDefault();
+  // wootonpad://focus/{token}      →  raise an already-running session
+  if (url.startsWith('wootonpad://focus/')) {
+    const token = decodeURIComponent(url.slice('wootonpad://focus/'.length));
+    if (dispatchSessionFocus(token)) return;
+    // Session gone: still bring the app forward rather than doing nothing.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    return;
+  }
   // wootonpad://+/path/to/project  →  continue last session
   // wootonpad:///path/to/project   →  new session
   const continueSession = url.startsWith('wootonpad://+');
@@ -1645,13 +1674,6 @@ ipcMain.handle('get-effective-settings', (_event, projectPath) => effectiveSetti
 // read here. See docs/adr/0003-external-ide-shell-command.md.
 const EXTERNAL_IDE_LAUNCH_WATCH_MS = 3000;
 
-// The tail, not the head: a login shell prints its rc chatter first, so the
-// command's own error is what lands last.
-function lastStderr(stderr, max = 300) {
-  const trimmed = stderr.trim();
-  return trimmed.length > max ? '…' + trimmed.slice(-max) : trimmed;
-}
-
 ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
   const settings = effectiveSettings(projectPath);
   const profile = resolveShell(settings.shellProfile);
@@ -1694,7 +1716,7 @@ ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
     child.stderr?.on('data', onStderr);
     child.on('error', (err) => done({ ok: false, reason: 'launch-failed', message: String(err?.message || err) }));
     child.on('exit', (code) => {
-      if (code) done({ ok: false, reason: 'launch-failed', message: lastStderr(stderr) || `exited with code ${code}` });
+      if (code) done({ ok: false, reason: 'launch-failed', message: launchErrorMessage(stderr, code) });
       else done({ ok: true });
     });
 
@@ -1867,6 +1889,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
   let ptyProcess;
   let mcpServer = null;
+  let focusToken = null;
   try {
     if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
@@ -1963,10 +1986,19 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         }
       }
 
+      // Opaque, spawn-time handle for click-to-focus. Not the session id: that key
+      // is reassigned once Claude's real jsonl id is discovered (session-transitions),
+      // while this token rides along on the session object and stays valid.
+      focusToken = require('crypto').randomUUID();
+
       const ptyEnv = {
         ...cleanPtyEnv,
         TERM: 'xterm-256color', COLORTERM: 'truecolor',
         TERM_PROGRAM: 'WarpTerminal', TERM_PROGRAM_VERSION: 'v0.2026.07.30.08.12.stable_01', FORCE_COLOR: '3',
+        // peon-ping click-to-focus: TERM_PROGRAM is spoofed to Warp, so peon resolves
+        // the wrong bundle id. This env var is read by its notify.sh and never
+        // overwritten, so it wins and routes the click back to this exact session.
+        PEON_CLICK_COMMAND: `open 'wootonpad://focus/${focusToken}'`,
       };
       if (activeAccount.id !== 'default') {
         ptyEnv.CLAUDE_CONFIG_DIR = activeAccount.configDir;
@@ -1997,7 +2029,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     projectPath, firstResize: true,
     projectFolder, knownJsonlFiles, sessionSlug,
     isPlainTerminal, forkFrom: sessionOptions?.forkFrom || null,
-    mcpServer, _openedAt: Date.now(),
+    mcpServer, focusToken, _openedAt: Date.now(),
   };
   activeSessions.set(sessionId, session);
 
