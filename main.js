@@ -1191,11 +1191,9 @@ ipcMain.handle('refresh-stats', async () => {
     ...cleanPtyEnv,
     TERM: 'xterm-256color',
     COLORTERM: 'truecolor',
-    TERM_PROGRAM: 'iTerm.app',
-    TERM_PROGRAM_VERSION: '3.6.6',
+    TERM_PROGRAM: 'WarpTerminal',
+    TERM_PROGRAM_VERSION: 'v0.2026.07.30.08.12.stable_01',
     FORCE_COLOR: '3',
-    // No ITERM_SESSION_ID: without it Claude CLI won't try to reach iTerm2 via AppleScript,
-    // which avoids the macOS "would like to access data from other apps" permission prompt.
     ...(configDir !== DEFAULT_CLAUDE_DIR ? { CLAUDE_CONFIG_DIR: configDir } : {}),
   };
 
@@ -1814,7 +1812,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         cwd: isWsl ? os.homedir() : projectPath,
         env: {
           ...cleanPtyEnv,
-          TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'iTerm.app', TERM_PROGRAM_VERSION: '3.6.6', FORCE_COLOR: '3', ITERM_SESSION_ID: '1',
+          TERM: 'xterm-256color', COLORTERM: 'truecolor', TERM_PROGRAM: 'WarpTerminal', TERM_PROGRAM_VERSION: 'v0.2026.07.30.08.12.stable_01', FORCE_COLOR: '3',
           CLAUDECODE: '1',
           // ZDOTDIR trick won't work reliably; instead inject via ENV (sh/bash) or precmd
           ENV: claudeShim,
@@ -1901,7 +1899,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       const ptyEnv = {
         ...cleanPtyEnv,
         TERM: 'xterm-256color', COLORTERM: 'truecolor',
-        TERM_PROGRAM: 'iTerm.app', TERM_PROGRAM_VERSION: '3.6.6', FORCE_COLOR: '3', ITERM_SESSION_ID: '1',
+        TERM_PROGRAM: 'WarpTerminal', TERM_PROGRAM_VERSION: 'v0.2026.07.30.08.12.stable_01', FORCE_COLOR: '3',
       };
       if (activeAccount.id !== 'default') {
         ptyEnv.CLAUDE_CONFIG_DIR = activeAccount.configDir;
@@ -1915,7 +1913,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         cols: 120,
         rows: 30,
         cwd: isWsl ? os.homedir() : projectPath,
-        // TERM_PROGRAM=iTerm.app: Claude Code checks this to decide whether to emit
+        // TERM_PROGRAM=WarpTerminal: Claude Code checks this to decide whether to emit
         // OSC 9 notifications (e.g. "needs your attention"). Without it, the packaged
         // app's minimal Electron environment won't trigger those sequences.
         env: ptyEnv,
