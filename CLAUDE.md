@@ -44,13 +44,18 @@ npm test
 # Run a single test file
 node --test test/folder-index-state.test.js
 
+# Renderer tests (Playwright launching the real Electron app, isolated HOME)
+npm run test:e2e
+
 # Build for distribution
 npm run build:mac     # DMG + zip (arm64 + x64)
 npm run build:win     # NSIS installer
 npm run build:linux   # AppImage + deb
 ```
 
-Tests use Node's built-in `node:test` runner — no Jest or Mocha.
+Main-process tests use Node's built-in `node:test` runner — no Jest or Mocha. Renderer
+behaviour is tested with Playwright (`e2e/`), which needs a real layout engine; it runs
+separately from `npm test` to keep the daily loop fast.
 
 ## Architecture
 

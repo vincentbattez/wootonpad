@@ -11,6 +11,8 @@ public/vue-bundle.js
 *.pem
 .env
 .cache/
+test-results/
+playwright-report/
 dev-app-update.yml
 docs/landing.js
 docs/landing.js.map

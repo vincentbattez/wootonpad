@@ -8,6 +8,7 @@
   "scripts": {
     "start": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron .",
     "test": "node --test",
+    "test:e2e": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && playwright test",
     "sandcastle": "tsx .sandcastle/main.mts",
     "sandcastle:build-image": "sandcastle docker build-image",
     "electron": "npm run bundle:radix && npm run bundle:vue && electron .",
@@ -58,6 +59,7 @@
     "@codemirror/view": "^6.39.16",
     "@ddietr/codemirror-themes": "^1.5.2",
     "@napi-rs/canvas": "^0.1.62",
+    "@playwright/test": "^1.62.1",
     "@vitejs/plugin-vue": "^6.0.8",
     "codemirror": "^6.0.2",
     "electron": "^43.1.1",

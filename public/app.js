@@ -670,19 +670,36 @@ async function openSession(session, customOptions) {
   pollActiveSessions();
 }
 
-// Handle window resize
-window.addEventListener('resize', () => {
+// --- Terminal refit ---
+// Single refit policy, driven by the real cause: the terminals container resized.
+function refitTerminals() {
+  // A hidden container measures zero — fitting on it would push bogus dimensions
+  // to the backing process. Sessions are refit when they become visible again.
+  if (!terminalsEl.clientWidth || !terminalsEl.clientHeight) return;
+
   if (gridViewActive) {
     for (const entry of openSessions.values()) {
-      fitAndScroll(entry);
+      if (!entry.closed) fitAndScroll(entry);
     }
     return;
   }
+  // Outside grid view the non-active sessions are display:none.
   if (activeSessionId && openSessions.has(activeSessionId)) {
-    const entry = openSessions.get(activeSessionId);
-    safeFit(entry);
+    fitAndScroll(openSessions.get(activeSessionId));
   }
-});
+}
+
+function initRefitObserver() {
+  // Trailing-edge coalescing: each notification rearms the timer, so dragging the
+  // sidebar handle produces one refit at rest instead of a burst of PTY resizes.
+  const REFIT_DEBOUNCE_MS = 80;
+  let refitTimer = null;
+  new ResizeObserver(() => {
+    clearTimeout(refitTimer);
+    refitTimer = setTimeout(refitTerminals, REFIT_DEBOUNCE_MS);
+  }).observe(terminalsEl);
+}
+initRefitObserver();
 
 // Tab switching is handled by App.vue (store.activeTab).
 // App.vue calls window.__sb.onTabChange(tabName) — defined near bottom of this file.
@@ -726,11 +743,7 @@ initGridObservers();
     handle.classList.remove('dragging');
     document.body.style.cursor = '';
     document.body.style.userSelect = '';
-    // Refit active terminal
-    if (!gridViewActive && activeSessionId && openSessions.has(activeSessionId)) {
-      const entry = openSessions.get(activeSessionId);
-      safeFit(entry);
-    }
+    // Refit is handled by the terminals-container resize observer.
     // Save sidebar width to settings
     const width = parseInt(sidebar.style.width);
     if (width) {
