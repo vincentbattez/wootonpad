@@ -90,6 +90,7 @@ contextBridge.exposeInMainWorld('api', {
   getFileTree: (projectPath) => ipcRenderer.invoke('get-file-tree', projectPath),
   getProjectSessions: (projectPath) => ipcRenderer.invoke('get-project-sessions', projectPath),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  openInExternalIde: (projectPath) => ipcRenderer.invoke('open-in-external-ide', projectPath),
 
   // Send (fire-and-forget)
   sendInput: (id, data) => ipcRenderer.send('terminal-input', id, data),
@@ -169,5 +170,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   onLaunchProjectSession: (callback) => {
     ipcRenderer.on('launch-project-session', (_event, projectPath, continueSession) => callback(projectPath, continueSession));
+  },
+  onFocusSession: (callback) => {
+    ipcRenderer.on('focus-session', (_event, sessionId) => callback(sessionId));
   },
 });

@@ -49,12 +49,28 @@ Fields:
 - **Title**: the feature in French, short and direct (~35 characters) with the ticket ID. The Things title column is narrow
 - **Notes**: `VIN-XX — <one-line French summary>` on the first line, the Linear spec URL on the second.
 - **Tags**: none by default — the user applies effort/priority tags themselves.
+- **Checklist**: the manual acceptance checks the user will run themselves once the issue is
+  done. One `--checklist-item` per check, in French, 3–6 items. See below.
 
 ```bash
 things add "[VIN-60] Thème clair / sombre" --list "👨‍💻 Wooton" \
   --notes "VIN-60 — Thème clair/sombre/système normalisé sur Radix Colors
-https://linear.app/vincentbattez/issue/VIN-60/theme-clair-sombre-systeme-normalise-sur-radix-colors"
+https://linear.app/vincentbattez/issue/VIN-60/theme-clair-sombre-systeme-normalise-sur-radix-colors" \
+  --checklist-item "Basculer clair → sombre : aucun flash blanc" \
+  --checklist-item "Suivre le thème système au changement macOS" \
+  --checklist-item "Contraste lisible sur la sidebar et le terminal"
 ```
+
+### Checklist: what the user verifies by hand
+
+The task carries a short list of things **the user** checks personally once the issue is
+closed — the app-level verification an agent can't do (visual, feel, real data, real macOS).
+
+- Derive it from the issue's acceptance criteria, one item per observable behaviour.
+- Phrase each item as an action with its expected result: "Ouvrir X → Y s'affiche".
+- Skip anything already covered by an automated test — the point is what only
+  a human eye catches.
+- Same rule as the task itself: only the root work item gets a checklist, never the children.
 
 Check for an existing task first to avoid duplicates. `--project` requires a `--query`; `title:/./` is the catch-all:
 

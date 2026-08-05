@@ -41,6 +41,7 @@ const cleanPtyEnv = Object.fromEntries(
 
 // Shell profiles → shell-profiles.js
 const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs } = require('./shell-profiles');
+const { resolveIdeLaunch, launchErrorMessage } = require('./external-ide');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 
@@ -203,8 +204,37 @@ function dispatchProjectOpen(filePath, continueSession) {
   }
 }
 
+// Raise the window and select the session carrying this focus token.
+// Returns false when the token is unknown (session closed since spawn).
+function dispatchSessionFocus(token) {
+  if (!token) return false;
+  for (const [sessionId, session] of activeSessions) {
+    if (session.focusToken !== token) continue;
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+      mainWindow.webContents.send('focus-session', session.realSessionId || sessionId);
+    }
+    return true;
+  }
+  return false;
+}
+
 app.on('open-url', (event, url) => {
   event.preventDefault();
+  // wootonpad://focus/{token}      →  raise an already-running session
+  if (url.startsWith('wootonpad://focus/')) {
+    const token = decodeURIComponent(url.slice('wootonpad://focus/'.length));
+    if (dispatchSessionFocus(token)) return;
+    // Session gone: still bring the app forward rather than doing nothing.
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.show();
+      mainWindow.focus();
+    }
+    return;
+  }
   // wootonpad://+/path/to/project  →  continue last session
   // wootonpad:///path/to/project   →  new session
   const continueSession = url.startsWith('wootonpad://+');
@@ -1600,6 +1630,7 @@ const SETTING_DEFAULTS = {
   worktreeName: '',
   chrome: false,
   preLaunchCmd: '',
+  externalIdeCommand: '',
   addDirs: '',
   visibleSessionCount: 5,
   sidebarWidth: 340,
@@ -1621,7 +1652,7 @@ ipcMain.handle('get-shell-profiles', () => {
   return getShellProfiles();
 });
 
-ipcMain.handle('get-effective-settings', (_event, projectPath) => {
+function effectiveSettings(projectPath) {
   const global = getSetting('global') || {};
   const project = projectPath ? (getSetting('project:' + projectPath) || {}) : {};
   const effective = { ...SETTING_DEFAULTS };
@@ -1634,6 +1665,64 @@ ipcMain.handle('get-effective-settings', (_event, projectPath) => {
     }
   }
   return effective;
+}
+
+ipcMain.handle('get-effective-settings', (_event, projectPath) => effectiveSettings(projectPath));
+
+// --- IPC: open a Project in the user's External IDE ---
+// The renderer only ever sends a projectPath; the command comes from settings,
+// read here. See docs/adr/0003-external-ide-shell-command.md.
+const EXTERNAL_IDE_LAUNCH_WATCH_MS = 3000;
+
+ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
+  const settings = effectiveSettings(projectPath);
+  const profile = resolveShell(settings.shellProfile);
+  const launch = resolveIdeLaunch(
+    { externalIdeCommand: settings.externalIdeCommand, projectPath },
+    {
+      shellPath: profile.path,
+      shellExtraArgs: profile.args,
+      folderExists: !!projectPath && fs.existsSync(projectPath),
+    }
+  );
+  if (!launch.ok) return launch;
+
+  return new Promise((resolve) => {
+    const { spawn } = require('child_process');
+    let child;
+    try {
+      child = spawn(launch.shell, launch.args, { detached: true, stdio: ['ignore', 'ignore', 'pipe'] });
+    } catch (err) {
+      return resolve({ ok: false, reason: 'launch-failed', message: String(err?.message || err) });
+    }
+    child.unref();
+
+    let stderr = '';
+    let timer;
+    const onStderr = (chunk) => { stderr += chunk.toString(); };
+    let settled = false;
+    const done = (result) => {
+      if (settled) return;
+      settled = true;
+      // A foreground editor (`code --wait`, `nvim`) outlives this promise: stop
+      // listening rather than buffer its output for nobody.
+      clearTimeout(timer);
+      child.stderr?.off('data', onStderr);
+      child.removeAllListeners('exit');
+      child.removeAllListeners('error');
+      resolve(result);
+    };
+
+    child.stderr?.on('data', onStderr);
+    child.on('error', (err) => done({ ok: false, reason: 'launch-failed', message: String(err?.message || err) }));
+    child.on('exit', (code) => {
+      if (code) done({ ok: false, reason: 'launch-failed', message: launchErrorMessage(stderr, code) });
+      else done({ ok: true });
+    });
+
+    // Past this window the External IDE is considered up.
+    timer = setTimeout(() => done({ ok: true }), EXTERNAL_IDE_LAUNCH_WATCH_MS);
+  });
 });
 
 // --- IPC: get-active-sessions ---
@@ -1800,6 +1889,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
   let ptyProcess;
   let mcpServer = null;
+  let focusToken = null;
   try {
     if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
@@ -1896,10 +1986,19 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         }
       }
 
+      // Opaque, spawn-time handle for click-to-focus. Not the session id: that key
+      // is reassigned once Claude's real jsonl id is discovered (session-transitions),
+      // while this token rides along on the session object and stays valid.
+      focusToken = require('crypto').randomUUID();
+
       const ptyEnv = {
         ...cleanPtyEnv,
         TERM: 'xterm-256color', COLORTERM: 'truecolor',
         TERM_PROGRAM: 'WarpTerminal', TERM_PROGRAM_VERSION: 'v0.2026.07.30.08.12.stable_01', FORCE_COLOR: '3',
+        // peon-ping click-to-focus: TERM_PROGRAM is spoofed to Warp, so peon resolves
+        // the wrong bundle id. This env var is read by its notify.sh and never
+        // overwritten, so it wins and routes the click back to this exact session.
+        PEON_CLICK_COMMAND: `open 'wootonpad://focus/${focusToken}'`,
       };
       if (activeAccount.id !== 'default') {
         ptyEnv.CLAUDE_CONFIG_DIR = activeAccount.configDir;
@@ -1930,7 +2029,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     projectPath, firstResize: true,
     projectFolder, knownJsonlFiles, sessionSlug,
     isPlainTerminal, forkFrom: sessionOptions?.forkFrom || null,
-    mcpServer, _openedAt: Date.now(),
+    mcpServer, focusToken, _openedAt: Date.now(),
   };
   activeSessions.set(sessionId, session);
 

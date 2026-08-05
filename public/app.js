@@ -885,6 +885,15 @@ window.api.onLaunchProjectSession((projectPath, continueSession) => {
   launchNewSession({ projectPath });
 });
 
+// wootonpad://focus/{token} — a notification click asking for a running session
+window.api.onFocusSession?.((sessionId) => {
+  const session = sessionMap.get(sessionId);
+  if (!session) return;
+  if (window.vueStore?.activeTab !== 'sessions') window.vueApp?.setTab('sessions');
+  setActiveSession(sessionId);
+  openSession(session);
+});
+
 // Live-reload sidebar when filesystem changes are detected
 let projectsChangedTimer = null;
 let projectsChangedWhileAway = false;
@@ -1740,6 +1749,18 @@ window.__sb = {
   },
 
   openSettings: (path) => openSettingsViewer('project', path),
+
+  openExternalIde: async (path) => {
+    const result = await window.api.openInExternalIde(path);
+    if (result?.ok) return;
+    // Nothing configured yet: the first click leads to the setting instead of an error.
+    if (result?.reason === 'not-configured') { openSettingsViewer('project', path); return; }
+    if (result?.reason === 'missing-folder') {
+      setUpdaterStatus(`External IDE: folder no longer exists — ${path}`, 6000);
+      return;
+    }
+    setUpdaterStatus(`External IDE failed: ${result?.message || 'unknown error'}`, 8000);
+  },
 
   archiveSessions: async (sessions) => {
     const active = sessions.filter(s => !s.archived);

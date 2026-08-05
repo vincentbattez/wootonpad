@@ -123,6 +123,34 @@
           </div>
         </div>
 
+        <!-- ── External IDE ────────────────────────────────────── -->
+        <div class="settings-section">
+          <div class="settings-section-title">External IDE</div>
+
+          <div class="settings-field settings-field-wide">
+            <div class="settings-field-info">
+              <div class="settings-field-header">
+                <span class="settings-label">Launch Command</span>
+                <label v-if="isProject" class="settings-use-global">
+                  <input type="checkbox" :checked="useGlobal.externalIdeCommand" @change="toggleGlobal('externalIdeCommand', $event.target.checked)" />
+                  Use global default
+                </label>
+              </div>
+              <div class="settings-description">
+                Run to open a Project folder. Use {path} to place the folder, or omit it and it is appended.
+                Do not quote {path} yourself.
+              </div>
+            </div>
+            <div class="settings-field-control">
+              <input type="text" class="settings-input" v-model="form.externalIdeCommand" list="external-ide-presets"
+                placeholder="e.g. code {path}" :disabled="isProject && useGlobal.externalIdeCommand" />
+              <datalist id="external-ide-presets">
+                <option v-for="preset in externalIdePresets" :key="preset.command" :value="preset.command">{{ preset.name }}</option>
+              </datalist>
+            </div>
+          </div>
+        </div>
+
         <!-- ── Application (global only) ──────────────────────── -->
         <template v-if="!isProject">
           <div class="settings-section">
@@ -368,12 +396,27 @@ const terminalFonts = computed(() => window.TERMINAL_FONTS || {});
 const COMMIT_MSG_PROMPT_DEFAULT = `Write a concise git commit message (max 72 chars for first line) for these changes. Use conventional commit format (feat/fix/refactor/docs/chore). Output ONLY the commit message, no explanation:`;
 const commitMsgPromptDefault = COMMIT_MSG_PROMPT_DEFAULT;
 
+// Prefill only — an External IDE is identified by its command, never by an id.
+const externalIdePresets = [
+  { name: 'VS Code', command: 'code {path}' },
+  { name: 'VS Code (new window)', command: 'code -n {path}' },
+  { name: 'Cursor', command: 'cursor {path}' },
+  { name: 'Windsurf', command: 'windsurf {path}' },
+  { name: 'Zed', command: 'zed {path}' },
+  { name: 'WebStorm', command: 'webstorm {path}' },
+  { name: 'IntelliJ IDEA', command: 'idea {path}' },
+  { name: 'PyCharm', command: 'pycharm {path}' },
+  { name: 'Xcode', command: 'xed {path}' },
+  { name: 'Sublime Text', command: 'subl {path}' },
+];
+
 const form = reactive({
   permissionMode: '',
   worktree: false,
   worktreeName: '',
   chrome: false,
   preLaunchCmd: '',
+  externalIdeCommand: '',
   addDirs: '',
   visibleSessionCount: 10,
   sessionMaxAgeDays: 3,
@@ -395,6 +438,7 @@ const useGlobal = reactive({
   worktreeName: true,
   chrome: true,
   preLaunchCmd: true,
+  externalIdeCommand: true,
   addDirs: true,
 });
 
@@ -418,7 +462,7 @@ async function loadSettings() {
   const current = (await window.api.getSetting(settingsKey.value)) || {};
   const global = isProject.value ? ((await window.api.getSetting('global')) || {}) : {};
 
-  const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'addDirs'];
+  const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'addDirs'];
   for (const field of overrideFields) {
     if (isProject.value) {
       useGlobal[field] = isUsingGlobal(current, field);
@@ -449,7 +493,7 @@ async function loadSettings() {
 }
 
 function getDefault(field) {
-  const defaults = { permissionMode: '', worktree: false, worktreeName: '', chrome: false, preLaunchCmd: '', addDirs: '' };
+  const defaults = { permissionMode: '', worktree: false, worktreeName: '', chrome: false, preLaunchCmd: '', externalIdeCommand: '', addDirs: '' };
   return defaults[field];
 }
 
@@ -463,7 +507,7 @@ async function save() {
   let settings = {};
 
   if (isProject.value) {
-    const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'addDirs'];
+    const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'addDirs'];
     for (const field of overrideFields) {
       if (!useGlobal[field]) {
         settings[field] = form[field];
@@ -478,6 +522,7 @@ async function save() {
       worktreeName: form.worktreeName,
       chrome: form.chrome,
       preLaunchCmd: form.preLaunchCmd,
+      externalIdeCommand: form.externalIdeCommand,
       addDirs: form.addDirs,
       visibleSessionCount: form.visibleSessionCount || 10,
       sessionMaxAgeDays: form.sessionMaxAgeDays || 3,
