@@ -48,12 +48,15 @@ Fields:
 - **Project**: `👨‍💻 Wooton` (area `Dev`) — pass the emoji, it is part of the title.
 - **Title**: the feature in French, short and direct (~35 characters) with the ticket ID. The Things title column is narrow
 - **Notes**: `VIN-XX — <one-line French summary>` on the first line, the Linear spec URL on the second.
-- **Tags**: none by default — the user applies effort/priority tags themselves.
+- **Tags**: `--tags="🤖 IA: Ready to auto-implement"` — toujours, sur chaque tâche créée.
+  Aucun autre tag : le user applique lui-même ceux d'effort/priorité. Le tag doit exister
+  dans Things, sinon il est ignoré silencieusement.
 - **Checklist**: the manual acceptance checks the user will run themselves once the issue is
   done. One `--checklist-item` per check, in French, 3–6 items. See below.
 
 ```bash
 things add "[VIN-60] Thème clair / sombre" --list "👨‍💻 Wooton" \
+  --tags="🤖 IA: Ready to auto-implement" \
   --notes "VIN-60 — Thème clair/sombre/système normalisé sur Radix Colors
 https://linear.app/vincentbattez/issue/VIN-60/theme-clair-sombre-systeme-normalise-sur-radix-colors" \
   --checklist-item "Basculer clair → sombre : aucun flash blanc" \
