@@ -166,6 +166,7 @@ const listeners = {
   onNewSession: (project, btn) => props.callbacks.newSession?.(project, btn),
   onSettings: (path) => props.callbacks.openSettings?.(path),
   onOpenExternalIde: (path) => props.callbacks.openExternalIde?.(path),
+  onOpenProjectFolder: (path) => props.callbacks.openProjectFolder?.(path),
   onArchiveSessions: (sessions) => props.callbacks.archiveSessions?.(sessions),
   onRemoveProject: (path) => props.callbacks.removeProject?.(path),
 };

@@ -1775,6 +1775,20 @@ window.__sb = {
     setUpdaterStatus(`External IDE failed: ${result?.message || 'unknown error'}`, 8000);
   },
 
+  openProjectFolder: async (path) => {
+    const result = await window.api.openProjectFolder(path);
+    if (result?.ok) return;
+    if (result?.reason === 'missing-folder') {
+      setUpdaterStatus(`Project Folder: folder no longer exists — ${path}`, 6000);
+      return;
+    }
+    if (result?.reason === 'not-a-directory') {
+      setUpdaterStatus(`Project Folder: not a directory — ${path}`, 6000);
+      return;
+    }
+    setUpdaterStatus(`Project Folder failed: ${result?.message || 'unknown error'}`, 8000);
+  },
+
   archiveSessions: async (sessions) => {
     const active = sessions.filter(s => !s.archived);
     if (!active.length) return;

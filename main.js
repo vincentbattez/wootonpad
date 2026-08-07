@@ -1725,6 +1725,23 @@ ipcMain.handle('open-in-external-ide', (_event, projectPath) => {
   });
 });
 
+// --- IPC: open a Project Folder in the system file manager ---
+// Electron's native API, not the External IDE's shell template: a file manager is a
+// predictable target the OS already picks. See docs/adr/0004-native-open-for-predictable-targets.md.
+ipcMain.handle('open-project-folder', async (_event, projectPath) => {
+  let stat;
+  try {
+    stat = fs.statSync(projectPath);
+  } catch {
+    return { ok: false, reason: 'missing-folder' };
+  }
+  // openPath on a file would launch its default app — an "open the folder" must stay one.
+  if (!stat.isDirectory()) return { ok: false, reason: 'not-a-directory' };
+
+  const message = await shell.openPath(projectPath);
+  return message ? { ok: false, reason: 'open-failed', message } : { ok: true };
+});
+
 // --- IPC: get-active-sessions ---
 ipcMain.handle('get-active-sessions', () => {
   const active = [];

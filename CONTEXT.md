@@ -25,6 +25,10 @@ _Avoid_: Orphan, loose project
 A Project that is a git worktree of another Project, shown nested inside it.
 _Avoid_: Branch, sub-project
 
+**Project Folder**:
+The working directory of a Project on disk — what the sidebar's folder button hands to the system file manager. Distinct from the Sessions folder, where Claude Code stores that Project's `.jsonl` files.
+_Avoid_: Folder (unqualified), Reveal in Finder
+
 **Slug**:
 A named lineage of Sessions within one Project.
 _Avoid_: Thread, topic

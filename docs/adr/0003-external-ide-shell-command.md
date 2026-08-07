@@ -15,3 +15,5 @@ Because the template is assembled into a shell command line, quoting is the buil
 The button hands over a Project folder only, never a single file — even though the MCP bridge already receives file-open calls and could supply one.
 
 The template is user data. Moving later to a fixed list of known IDEs, or to URL schemes, would mean migrating everyone's stored command.
+
+This applies only to *unpredictable* external targets. [ADR 0004](0004-native-open-for-predictable-targets.md) draws the line and takes the native API where the target is predictable.

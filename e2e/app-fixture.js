@@ -6,9 +6,11 @@ const { encodeProjectPath } = require('../encode-project-path');
 
 const repoRoot = path.join(__dirname, '..');
 const FIXTURE_SESSION_ID = '00000000-0000-4000-8000-000000000001';
+const WORKTREE_SESSION_ID = '00000000-0000-4000-8000-000000000002';
+const GHOST_SESSION_ID = '00000000-0000-4000-8000-000000000003';
 
-function fixtureSessionJsonl(cwd) {
-  const base = { sessionId: FIXTURE_SESSION_ID, cwd, version: '2.1.126', timestamp: '2026-01-01T00:00:00.000Z' };
+function fixtureSessionJsonl(cwd, sessionId = FIXTURE_SESSION_ID) {
+  const base = { sessionId, cwd, version: '2.1.126', timestamp: '2026-01-01T00:00:00.000Z' };
   return [
     { ...base, type: 'user', message: { role: 'user', content: 'hello from the fixture' } },
     { ...base, type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] } },
@@ -19,19 +21,30 @@ function fixtureSessionJsonl(cwd) {
 // ~/.wootonpad/switchboard.db, and tests must never touch the developer's real ones.
 function makeSandboxHome() {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'wootonpad-e2e-'));
+  const projectsRoot = path.join(home, '.claude', 'projects');
+
+  const seedSession = (cwd, sessionId) => {
+    const folder = path.join(projectsRoot, encodeProjectPath(cwd));
+    fs.mkdirSync(folder, { recursive: true });
+    fs.writeFileSync(path.join(folder, `${sessionId}.jsonl`), fixtureSessionJsonl(cwd, sessionId));
+  };
+
   const projectPath = path.join(home, 'sample-project');
-  fs.mkdirSync(projectPath, { recursive: true });
+  const worktreePath = path.join(projectPath, '.claude', 'worktrees', 'feature-x');
+  // Never created on disk: a Project still listed in the sidebar whose folder is gone.
+  const ghostPath = path.join(home, 'ghost-project');
 
-  const folder = path.join(home, '.claude', 'projects', encodeProjectPath(projectPath));
-  fs.mkdirSync(folder, { recursive: true });
-  fs.writeFileSync(path.join(folder, `${FIXTURE_SESSION_ID}.jsonl`), fixtureSessionJsonl(projectPath));
+  fs.mkdirSync(worktreePath, { recursive: true });
+  seedSession(projectPath, FIXTURE_SESSION_ID);
+  seedSession(worktreePath, WORKTREE_SESSION_ID);
+  seedSession(ghostPath, GHOST_SESSION_ID);
 
-  return { home, projectPath };
+  return { home, projectPath, worktreePath, ghostPath };
 }
 
 const test = base.extend({
   sandbox: async ({}, use) => {
-    const { home, projectPath } = makeSandboxHome();
+    const { home, projectPath, worktreePath, ghostPath } = makeSandboxHome();
     const app = await electron.launch({
       // --user-data-dir is required on top of HOME: on macOS Electron resolves its own
       // paths from the OS home, not from $HOME, so without it the test instance loses
@@ -42,7 +55,7 @@ const test = base.extend({
     });
     const page = await app.firstWindow();
     await page.waitForSelector('#terminals');
-    await use({ app, page, home, projectPath });
+    await use({ app, page, home, projectPath, worktreePath, ghostPath });
     await app.close();
     fs.rmSync(home, { recursive: true, force: true });
   },

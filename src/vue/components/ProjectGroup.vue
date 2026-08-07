@@ -7,6 +7,7 @@
       <span class="worktree-name" @click.stop="toggle">{{ worktreeName }}</span>
       <button class="worktree-hide-btn" data-tooltip="Hide worktree" @click.stop="$emit('remove-project', project.projectPath)" v-html="closeSvg"></button>
       <button class="project-ide-btn worktree-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
+      <button class="project-folder-btn worktree-folder-btn" data-tooltip="Open Project Folder" @click.stop="openProjectFolder" v-html="folderSvg"></button>
       <button class="project-new-btn worktree-new-btn" data-tooltip="New session in worktree" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSmSvg"></button>
     </div>
 
@@ -29,6 +30,7 @@
       <ProjectAvatar class="project-header-avatar" :project-path="project.projectPath" @click.stop="toggle" />
       <span class="project-name" @click.stop="toggle">{{ shortName }}</span>
       <button class="project-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
+      <button class="project-folder-btn" data-tooltip="Open Project Folder" @click.stop="openProjectFolder" v-html="folderSvg"></button>
       <button class="project-settings-btn" data-tooltip="Project settings" @click.stop="$emit('settings', project.projectPath)" v-html="gearSvg"></button>
       <button class="project-archive-btn" data-tooltip="Archive all sessions" @click.stop="archiveAll" v-html="archiveSvg"></button>
       <button class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
@@ -155,6 +157,7 @@
         @new-session="(p, btn) => $emit('new-session', p, btn)"
         @settings="(path) => $emit('settings', path)"
         @open-external-ide="(path) => $emit('open-external-ide', path)"
+        @open-project-folder="(path) => $emit('open-project-folder', path)"
         @archive-sessions="(sessions) => $emit('archive-sessions', sessions)"
         @remove-project="(path) => $emit('remove-project', path)"
       />
@@ -191,7 +194,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename',
-  'new-session', 'settings', 'open-external-ide', 'archive-sessions', 'remove-project',
+  'new-session', 'settings', 'open-external-ide', 'open-project-folder', 'archive-sessions', 'remove-project',
 ]);
 
 const folderId = computed(() => 'project-' + props.project.projectPath.replace(/[^a-zA-Z0-9_-]/g, '_'));
@@ -345,6 +348,10 @@ function openInExternalIde() {
   emit('open-external-ide', props.project.projectPath);
 }
 
+function openProjectFolder() {
+  emit('open-project-folder', props.project.projectPath);
+}
+
 async function archiveAll() {
   emit('archive-sessions', props.project.sessions.filter(s => !s.archived));
 }
@@ -354,6 +361,7 @@ const gearSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" str
 const archiveSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
 // Code chevrons — neutral towards whichever External IDE the user picked.
 const codeSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
+const folderSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 const plusSvg = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const plusSmSvg = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const closeSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';

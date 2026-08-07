@@ -322,6 +322,7 @@ const sidebarCallbacks = {
   newSession: (project, btn) => window.__sb?.newSession?.(project, btn),
   openSettings: (path) => window.__sb?.openSettings?.(path),
   openExternalIde: (path) => window.__sb?.openExternalIde?.(path),
+  openProjectFolder: (path) => window.__sb?.openProjectFolder?.(path),
   archiveSessions: (sessions) => window.__sb?.archiveSessions?.(sessions),
   removeProject: (path) => window.__sb?.removeProject?.(path),
 };
