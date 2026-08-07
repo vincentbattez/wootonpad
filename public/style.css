@@ -1056,7 +1056,7 @@ body { display: flex; flex-direction: column; }
   animation: loading-pulse 1.2s ease-in-out infinite;
 }
 
-#star-toggle, #archive-toggle, #running-toggle, #today-toggle {
+#star-toggle, #running-toggle, #today-toggle {
   background: transparent;
   border: none;
   color: var(--text-tertiary);
@@ -1071,7 +1071,7 @@ body { display: flex; flex-direction: column; }
   justify-content: center;
 }
 
-#star-toggle:hover, #archive-toggle:hover, #running-toggle:hover, #today-toggle:hover {
+#star-toggle:hover, #running-toggle:hover, #today-toggle:hover {
   background: var(--surface-card);
   color: var(--text-secondary);
 }
@@ -1079,11 +1079,6 @@ body { display: flex; flex-direction: column; }
 #star-toggle.active {
   background: color-mix(in srgb, var(--amber-500) 12%, transparent);
   color: var(--amber-500);
-}
-
-#archive-toggle.active {
-  background: var(--surface-selected-accent);
-  color: var(--indigo-400);
 }
 
 #running-toggle.active {
@@ -1925,6 +1920,51 @@ body { display: flex; flex-direction: column; }
 
 .session-item.archived-item {
   opacity: 0.55;
+}
+
+/* ---- Compact session row: one line, ~24px against the full row's ~62px ---- */
+.session-item.compact .session-row {
+  gap: 8px;
+  padding: 2px 12px;
+  flex-wrap: nowrap;
+  align-items: center;
+}
+
+.session-item.compact .session-status-dot,
+.session-item.compact .session-subtitle {
+  display: none;
+}
+
+.session-item.compact .session-info {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.session-item.compact .session-summary {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-normal);
+  line-height: var(--leading-tight);
+}
+
+.session-item.compact .session-meta {
+  margin-top: 0;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.session-item.compact .session-actions {
+  top: 0;
+  bottom: 0;
+  align-items: center;
+}
+
+.session-item.compact.is-pinned {
+  border-left-width: 2px;
+}
+
+.sessions-archive-older-toggle {
+  margin-left: 48px;
 }
 
 /* ---- Response ready indicator (Claude finished, unread output) ---- */

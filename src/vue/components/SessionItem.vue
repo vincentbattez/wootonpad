@@ -30,7 +30,12 @@
         <div class="session-meta">{{ timeStr }}{{ msgSuffix }}</div>
       </div>
 
-      <div class="session-actions">
+      <!-- A compact row is an archive entry: unarchive is its only sensible action. -->
+      <div v-if="compact" class="session-actions">
+        <button class="session-archive-btn" data-tooltip="Unarchive" @click.stop="$emit('archive', session.sessionId)" v-html="archiveSvg"></button>
+      </div>
+
+      <div v-else class="session-actions">
         <button class="session-stop-btn" data-tooltip="Stop session" @click.stop="$emit('stop', session.sessionId)" v-html="stopSvg"></button>
         <template v-if="session.type !== 'terminal'">
           <button class="session-fork-btn" data-tooltip="Fork session" @click.stop="$emit('fork', session.sessionId)" v-html="forkSvg"></button>
@@ -54,6 +59,8 @@ const props = defineProps({
   isBusy: Boolean,
   isAttention: Boolean,
   isResponseReady: Boolean,
+  // Density only, deliberately untied from `archived` (ADR 0005).
+  compact: Boolean,
 });
 
 const emit = defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename']);
@@ -87,6 +94,7 @@ const itemClasses = computed(() => ({
   'is-pinned': !!props.session.starred,
   'archived-item': !!props.session.archived,
   'is-terminal': props.session.type === 'terminal',
+  compact: props.compact,
 }));
 
 function startRename() {

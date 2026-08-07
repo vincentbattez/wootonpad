@@ -128,6 +128,42 @@
         </template>
       </template>
 
+      <!-- This Project's archive: revealed here and nowhere else -->
+      <div
+        v-if="archivedCount > 0"
+        class="sessions-more-toggle sessions-archive-toggle"
+        :class="{ expanded: archiveExpanded }"
+        @click="archiveExpanded = !archiveExpanded"
+      >
+        {{ archiveExpanded ? '- hide archived' : `+ ${archivedCount} archived` }}
+      </div>
+
+      <template v-if="archiveExpanded">
+        <SessionItem
+          v-for="item in shownArchived"
+          :key="item.session.sessionId"
+          :session="item.session"
+          compact
+          :is-active="activeSessionId === item.session.sessionId"
+          :is-running="activePtyIds.has(item.session.sessionId)"
+          :is-busy="sessionBusyState.get(item.session.sessionId) || false"
+          :is-attention="attentionSessions.has(item.session.sessionId)"
+          :is-response-ready="responseReadySessions.has(item.session.sessionId)"
+          @open="$emit('open', item.session)"
+          @archive="$emit('archive', item.session.sessionId)"
+          @rename="(id, name) => $emit('rename', id, name)"
+        />
+
+        <div
+          v-if="archivedOlder.length > 0"
+          class="sessions-more-toggle sessions-archive-older-toggle"
+          :class="{ expanded: showArchivedOlder }"
+          @click="showArchivedOlder = !showArchivedOlder"
+        >
+          {{ showArchivedOlder ? '- hide older archived' : `+ ${archivedOlder.length} older archived` }}
+        </div>
+      </template>
+
       <!-- Nested worktree sub-groups -->
       <ProjectGroup
         v-for="wt in worktrees"
@@ -140,7 +176,6 @@
         :attention-sessions="attentionSessions"
         :response-ready-sessions="responseReadySessions"
         :search-match-ids="searchMatchIds"
-        :show-archived="showArchived"
         :show-starred-only="showStarredOnly"
         :show-running-only="showRunningOnly"
         :show-today-only="showTodayOnly"
@@ -166,11 +201,12 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue';
+import { computed, ref, watchEffect } from 'vue';
 import SessionItem from './SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
 import { isStaleProject } from '../project-collapse.mjs';
+import { partitionSessionList } from '../session-list.mjs';
 import { store } from '../store.js';
 import { startDrag, endDrag, dropOnTarget, isDragging } from '../area-drag.js';
 
@@ -183,7 +219,6 @@ const props = defineProps({
   attentionSessions: { type: Set, required: true },
   responseReadySessions: { type: Set, required: true },
   searchMatchIds: { type: Set, default: null },
-  showArchived: Boolean,
   showStarredOnly: Boolean,
   showRunningOnly: Boolean,
   showTodayOnly: Boolean,
@@ -244,88 +279,41 @@ function toggle() {
 }
 
 const showOlder = ref(false);
+const showArchivedOlder = ref(false);
 
-// Build mixed items list: individual sessions + slug groups
-const allItems = computed(() => {
-  let sessions = props.project.sessions || [];
+// Ordering and visibility live in the pure module (ADR 0005).
+const partition = computed(() => partitionSessionList({
+  sessions: props.project.sessions || [],
+  activePtyIds: props.activePtyIds,
+  searchMatchIds: props.searchMatchIds,
+  showStarredOnly: props.showStarredOnly,
+  showRunningOnly: props.showRunningOnly,
+  showTodayOnly: props.showTodayOnly,
+  visibleSessionCount: props.visibleSessionCount,
+  sessionMaxAgeDays: props.sessionMaxAgeDays,
+  now: Date.now(),
+}));
 
-  if (!props.showArchived && !props.searchMatchIds) {
-    sessions = sessions.filter(s => !s.archived);
-  }
-  if (props.showStarredOnly) sessions = sessions.filter(s => s.starred);
-  if (props.showRunningOnly) sessions = sessions.filter(s => props.activePtyIds.has(s.sessionId));
-  if (props.showTodayOnly) {
-    const now = new Date();
-    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    sessions = sessions.filter(s => {
-      if (!s.modified) return false;
-      const d = new Date(s.modified);
-      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === todayStr;
-    });
-  }
-  if (props.searchMatchIds) {
-    sessions = sessions.filter(s => props.searchMatchIds.has(s.sessionId));
-  }
+const visibleItems = computed(() => partition.value.visible);
+const olderItems = computed(() => partition.value.older);
+const archivedVisible = computed(() => partition.value.archivedVisible);
+const archivedOlder = computed(() => partition.value.archivedOlder);
+const archivedCount = computed(() => archivedVisible.value.length + archivedOlder.value.length);
 
-  // Group by slug
-  const slugMap = new Map();
-  const ungrouped = [];
-  for (const s of sessions) {
-    if (s.slug) {
-      if (!slugMap.has(s.slug)) slugMap.set(s.slug, []);
-      slugMap.get(s.slug).push(s);
-    } else {
-      ungrouped.push(s);
-    }
-  }
+const shownArchived = computed(() =>
+  showArchivedOlder.value ? [...archivedVisible.value, ...archivedOlder.value] : archivedVisible.value
+);
 
-  const items = [];
-
-  for (const s of ungrouped) {
-    const running = props.activePtyIds.has(s.sessionId);
-    items.push({ type: 'session', session: s, sortTime: new Date(s.modified).getTime(), pinned: !!s.starred, running });
-  }
-
-  for (const [slug, slugSessions] of slugMap) {
-    if (slugSessions.length === 1) {
-      const s = slugSessions[0];
-      items.push({ type: 'session', session: s, sortTime: new Date(s.modified).getTime(), pinned: !!s.starred, running: props.activePtyIds.has(s.sessionId) });
-    } else {
-      const mostRecentTime = Math.max(...slugSessions.map(s => new Date(s.modified).getTime()));
-      const hasRunning = slugSessions.some(s => props.activePtyIds.has(s.sessionId));
-      const hasPinned = slugSessions.some(s => s.starred);
-      items.push({ type: 'slug', slug, sessions: slugSessions, sortTime: mostRecentTime, pinned: hasPinned, running: hasRunning });
-    }
-  }
-
-  // Sort: running+pinned > running > pinned > recency
-  items.sort((a, b) => {
-    const aPri = (a.pinned && a.running ? 3 : a.running ? 2 : a.pinned ? 1 : 0);
-    const bPri = (b.pinned && b.running ? 3 : b.running ? 2 : b.pinned ? 1 : 0);
-    if (aPri !== bPri) return bPri - aPri;
-    return b.sortTime - a.sortTime;
-  });
-
-  return items;
-});
-
-const visibleItems = computed(() => {
-  const anyFilter = props.showStarredOnly || props.showRunningOnly || props.showTodayOnly || props.searchMatchIds;
-  if (anyFilter) return allItems.value;
-  const ageCutoff = Date.now() - props.sessionMaxAgeDays * 86400000;
-  let count = 0;
-  return allItems.value.filter(item => {
-    if (item.running || item.pinned || (count < props.visibleSessionCount && item.sortTime >= ageCutoff)) {
-      count++;
-      return true;
-    }
-    return false;
-  });
-});
-
-const olderItems = computed(() => {
-  const visIds = new Set(visibleItems.value.map(i => i.type === 'slug' ? 'slug-' + i.slug : i.session.sessionId));
-  return allItems.value.filter(i => !visIds.has(i.type === 'slug' ? 'slug-' + i.slug : i.session.sessionId));
+// Local and unpersisted, so every archive is collapsed on app start. Opened on its own only
+// when a Session that lives in it is the one on screen — a search hit, or the Session in the
+// pane — which would otherwise be invisible. Still closable: this sets the ref, not a lock.
+const archiveExpanded = ref(false);
+watchEffect(() => {
+  const holdsSelection = archivedCount.value > 0 && (
+    !!props.searchMatchIds ||
+    [...archivedVisible.value, ...archivedOlder.value].some(i => i.session.sessionId === props.activeSessionId)
+  );
+  if (holdsSelection) archiveExpanded.value = true;
 });
 
 // Cosmetic only: the tooltip word. The click always goes to the main process,

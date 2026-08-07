@@ -30,6 +30,7 @@
 import { computed, onMounted, ref } from 'vue';
 import { store } from '../store.js';
 import { buildSidebarTree, subtreeAreaIds } from '../area-tree.mjs';
+import { filterSessions } from '../session-list.mjs';
 import { dropOnTarget, isDragging } from '../area-drag.js';
 import ProjectGroup from './ProjectGroup.vue';
 import AreaGroup from './AreaGroup.vue';
@@ -99,22 +100,16 @@ const visibleProjects = computed(() => {
       })
       .filter(Boolean);
   } else {
-    // Hide projects with no sessions surviving the active filters
-    projects = projects.filter(p => {
-      let sessions = store.showArchived ? p.sessions : p.sessions.filter(s => !s.archived);
-      if (store.showStarredOnly) sessions = sessions.filter(s => s.starred);
-      if (store.showRunningOnly) sessions = sessions.filter(s => store.activePtyIds.has(s.sessionId));
-      if (store.showTodayOnly) {
-        const now = new Date();
-        const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-        sessions = sessions.filter(s => {
-          if (!s.modified) return false;
-          const d = new Date(s.modified);
-          return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` === todayStr;
-        });
-      }
-      return sessions.length > 0;
-    });
+    // Hide projects with no sessions surviving the active filters. Archived Sessions count:
+    // a fully-archived Project stays browsable, an empty directory stays hidden (ADR 0005).
+    const now = Date.now();
+    projects = projects.filter(p => filterSessions(p.sessions, {
+      activePtyIds: store.activePtyIds,
+      showStarredOnly: store.showStarredOnly,
+      showRunningOnly: store.showRunningOnly,
+      showTodayOnly: store.showTodayOnly,
+      now,
+    }).length > 0);
   }
 
   return projects.filter(p => !worktreeSet.value.has(p.projectPath));
@@ -146,7 +141,6 @@ const shared = computed(() => ({
   attentionSessions: store.attentionSessions,
   responseReadySessions: store.responseReadySessions,
   searchMatchIds: store.searchMatchIds,
-  showArchived: store.showArchived,
   showStarredOnly: store.showStarredOnly,
   showRunningOnly: store.showRunningOnly,
   showTodayOnly: store.showTodayOnly,

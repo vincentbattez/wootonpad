@@ -27,7 +27,6 @@
         <button id="running-toggle" :class="{ active: store.showRunningOnly }" data-tooltip="Show running only" @click="toggleFilter('showRunningOnly')" v-html="RUNNING_SVG"></button>
         <button id="star-toggle" :class="{ active: store.showStarredOnly }" data-tooltip="Show pinned only" @click="toggleFilter('showStarredOnly')" v-html="STAR_SVG"></button>
         <button id="today-toggle" :class="{ active: store.showTodayOnly }" data-tooltip="Show today's sessions only" @click="toggleFilter('showTodayOnly')" v-html="TODAY_SVG"></button>
-        <button id="archive-toggle" :class="{ active: store.showArchived }" data-tooltip="Show archived sessions" @click="toggleFilter('showArchived')" v-html="ARCHIVE_SVG"></button>
         <span id="loading-status" v-show="store.loadingStatus">{{ store.loadingStatus }}</span>
         <button id="grid-toggle-btn" :class="{ active: store.gridViewActive }" data-tooltip="Session overview" @click="onToggleGrid" v-html="GRID_SVG"></button>
         <button id="resort-btn" data-tooltip="Re-sort sessions" @click="onResort" v-html="RESORT_SVG"></button>
@@ -225,7 +224,6 @@ const STATS_REFRESH_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill=
 const RUNNING_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="4"/></svg>';
 const STAR_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1-.707.707c-.28-.28-.576-.49-.888-.656L10.073 9.333l-.07 3.181a.5.5 0 0 1-.853.354l-3.535-3.536-4.243 4.243a.5.5 0 1 1-.707-.707l4.243-4.243L1.372 5.11a.5.5 0 0 1 .354-.854l3.18-.07L8.37.722A3.37 3.37 0 0 1 9.12.074a.5.5 0 0 1 .708.002l-.707.707z"/></svg>';
 const TODAY_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-12a2 2 0 0 1-2-2v-12z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M11 15h1"/><path d="M12 15v3"/></svg>';
-const ARCHIVE_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="m21.706 5.292-2.999-2.999A.996.996 0 0 0 18 2H6a.996.996 0 0 0-.707.293L2.294 5.292A.994.994 0 0 0 2 6v13c0 1.103.897 2 2 2h16c1.103 0 2-.897 2-2V6a.994.994 0 0 0-.294-.708zM6.414 4h11.172l1 1H5.414l1-1zM4 19V7h16l.002 12H4z"/><path d="M14 9h-4v3H7l5 5 5-5h-3z"/></svg>';
 const GRID_SVG = '<svg width="14" height="14" stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>';
 const RESORT_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
 const ADD_AREA_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>';
@@ -290,7 +288,6 @@ function toggleFilter(filterName) {
     showStarredOnly: store.showStarredOnly,
     showRunningOnly: store.showRunningOnly,
     showTodayOnly: store.showTodayOnly,
-    showArchived: store.showArchived,
   });
 }
 
@@ -469,7 +466,6 @@ onMounted(async () => {
   store.showRunningOnly = localStorage.getItem('showRunningOnly') === '1';
   store.showStarredOnly = localStorage.getItem('showStarredOnly') === '1';
   store.showTodayOnly = localStorage.getItem('showTodayOnly') === '1';
-  store.showArchived = localStorage.getItem('showArchived') === '1';
 
   // Plans & memory viewer globals (migrated from plans-memory-view.js)
   let cachedMemoryData = { global: { files: [] }, projects: [] };

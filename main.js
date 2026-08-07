@@ -1024,9 +1024,9 @@ ipcMain.handle('get-file-tree', (_event, projectPath) => {
 ipcMain.handle('get-project-sessions', (_event, projectPath) => {
   try {
     const { buildProjectsFromCache } = require('./session-cache');
-    const projects = buildProjectsFromCache(false);
+    const projects = buildProjectsFromCache();
     const proj = projects.find(p => p.projectPath === projectPath);
-    const sessions = (proj?.sessions || []).slice(0, 10).map(s => ({
+    const sessions = (proj?.sessions || []).filter(s => !s.archived).slice(0, 10).map(s => ({
       id: s.sessionId, name: s.name || s.aiTitle || s.summary?.slice(0, 40) || s.sessionId?.slice(0, 8), updatedAt: s.modified, running: false,
     }));
     return { ok: true, sessions };
@@ -1105,7 +1105,7 @@ ipcMain.handle('unwatch-file', (_event, filePath) => {
   return { ok: true };
 });
 
-ipcMain.handle('get-projects', (_event, showArchived) => {
+ipcMain.handle('get-projects', () => {
   try {
     const needsPopulate = !isCachePopulated(getActiveAccount().id) || !isSearchIndexPopulated();
 
@@ -1114,7 +1114,7 @@ ipcMain.handle('get-projects', (_event, showArchived) => {
       return [];
     }
 
-    return buildProjectsFromCache(showArchived);
+    return buildProjectsFromCache();
   } catch (err) {
     console.error('Error listing projects:', err);
     return [];

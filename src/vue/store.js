@@ -17,7 +17,6 @@ export const store = reactive({
   showStarredOnly: false,
   showRunningOnly: false,
   showTodayOnly: false,
-  showArchived: false,
   searchMatchIds: null,
   searchMatchProjectPaths: null,
 

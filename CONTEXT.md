@@ -37,6 +37,10 @@ _Avoid_: Thread, topic
 One Claude Code conversation.
 _Avoid_: Conversation, chat
 
+**Archived Session**:
+A Session the user has set aside. It stays attached to its Project, never appears in that Project's main list, and is reachable only inside the Project's own archive — collapsed by default, compact when open. Reversible, and hidden from nothing: search still reaches it.
+_Avoid_: Deleted, hidden, closed
+
 ### Editors
 
 **External IDE**:

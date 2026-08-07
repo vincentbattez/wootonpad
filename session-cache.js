@@ -172,7 +172,7 @@ function populateCacheFromFilesystem() {
 }
 
 /** Build projects response from cached data */
-function buildProjectsFromCache(showArchived) {
+function buildProjectsFromCache() {
   const metaMap = getAllMeta();
   const cachedRows = getAllCached(accountId);
   const global = getSetting('global') || {};
@@ -183,9 +183,8 @@ function buildProjectsFromCache(showArchived) {
   // directories can resolve to the same projectPath (Claude Code's folder-name encoding
   // scheme has changed over time, leaving legacy stragglers around), so we merge them into
   // a single sidebar group to avoid duplicate-id collisions in the morphdom render.
-  // Only insert a project entry once we have a session that survives the archive filter —
-  // otherwise folders whose sessions are all archived would appear in the sidebar as
-  // undismissable phantom entries.
+  // Archived Sessions ship in the payload: each Project group reveals its own archive
+  // (ADR 0005), so a fully-archived Project stays browsable in the sidebar.
   const projectMap = new Map();
   for (const row of cachedRows) {
     if (!row.projectPath) continue;
@@ -206,7 +205,6 @@ function buildProjectsFromCache(showArchived) {
       archived: meta?.archived || 0,
       accountId: row.accountId || 'default',
     };
-    if (!showArchived && s.archived) continue;
     if (!projectMap.has(row.projectPath)) {
       projectMap.set(row.projectPath, {
         folder: encodeProjectPath(row.projectPath),

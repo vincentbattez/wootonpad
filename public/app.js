@@ -24,12 +24,10 @@ function setActiveSession(id) {
   if (typeof switchPanel === 'function') switchPanel(id);
   window.vueSidebar?.setActiveSession(id);
 }
-let showArchived = false;
 let showStarredOnly = false;
 let showRunningOnly = false;
 let showTodayOnly = false;
 let cachedProjects = [];
-let cachedAllProjects = [];
 let activePtyIds = new Set();
 let sortedOrder = []; // kept for grid-view.js project-heading ordering; no longer updated by sidebar
 let activeTab = 'sessions';
@@ -241,10 +239,8 @@ window.api.onProcessExited((sessionId, exitCode) => {
   // Plain terminal sessions: remove from sidebar entirely (ephemeral)
   if (session?.type === 'terminal') {
     pendingSessions.delete(sessionId);
-    for (const projList of [cachedProjects, cachedAllProjects]) {
-      for (const proj of projList) {
-        proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
-      }
+    for (const proj of cachedProjects) {
+      proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
     }
     sessionMap.delete(sessionId);
     refreshSidebar();
@@ -256,10 +252,8 @@ window.api.onProcessExited((sessionId, exitCode) => {
   if (pendingSessions.has(sessionId)) {
     pendingSessions.delete(sessionId);
     // Remove from cached project data
-    for (const projList of [cachedProjects, cachedAllProjects]) {
-      for (const proj of projList) {
-        proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
-      }
+    for (const proj of cachedProjects) {
+      proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
     }
     sessionMap.delete(sessionId);
     refreshSidebar();
@@ -300,15 +294,10 @@ window.api.onCliBusyState((sessionId, busy) => {
 // resort=true: re-sort items by priority+time (use for user-initiated actions)
 // resort=false (default): preserve existing DOM order, new items go to top
 function refreshSidebar({ resort = false } = {}) {
-  // When searching, always use all projects (search ignores archive filter)
-  const projects = (searchMatchIds !== null)
-    ? cachedAllProjects
-    : (showArchived ? cachedAllProjects : cachedProjects);
-
-  // Vue sidebar handles its own filtering; just pass the full project list
-  window.vueSidebar?.setProjects(projects);
+  // Archived Sessions ship in the payload too; each Project group reveals its own.
+  window.vueSidebar?.setProjects(cachedProjects);
   window.vueSidebar?.setSearch(searchMatchIds, searchMatchProjectPaths);
-  window.vueSidebar?.setFilters({ showStarredOnly, showRunningOnly, showTodayOnly, showArchived });
+  window.vueSidebar?.setFilters({ showStarredOnly, showRunningOnly, showTodayOnly });
 }
 
 // --- Search & filter handlers moved to App.vue ---
@@ -347,10 +336,8 @@ async function confirmAndStopSession(sessionId) {
       // Plain terminals are ephemeral — clean up immediately without waiting for process-exited
       destroySession(sessionId);
       pendingSessions.delete(sessionId);
-      for (const projList of [cachedProjects, cachedAllProjects]) {
-        for (const proj of projList) {
-          proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
-        }
+      for (const proj of cachedProjects) {
+        proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
       }
       sessionMap.delete(sessionId);
       if (activeSessionId === sessionId) {
@@ -479,35 +466,27 @@ function dedup(projects) {
 async function loadProjects({ resort = false } = {}) {
   const wasEmpty = cachedProjects.length === 0;
   if (wasEmpty && window.vueStore) window.vueStore.loadingStatus = 'Loading\u2026';
-  const [defaultProjects, allProjects] = await Promise.all([
-    window.api.getProjects(false),
-    window.api.getProjects(true),
-  ]);
-  cachedProjects = defaultProjects;
-  cachedAllProjects = allProjects;
+  cachedProjects = await window.api.getProjects();
   if (window.vueStore) window.vueStore.loadingStatus = '';
   dedup(cachedProjects);
-  dedup(cachedAllProjects);
 
   // Reconcile pending sessions: remove ones that now have real data
   let hasReinjected = false;
   for (const [sid, pending] of [...pendingSessions]) {
-    const realExists = allProjects.some(p => p.sessions.some(s => s.sessionId === sid));
+    const realExists = cachedProjects.some(p => p.sessions.some(s => s.sessionId === sid));
     if (realExists) {
       pendingSessions.delete(sid);
     } else {
       hasReinjected = true;
       // Still pending — re-inject into cached data
-      for (const projList of [cachedProjects, cachedAllProjects]) {
-        let proj = projList.find(p => p.projectPath === pending.projectPath);
-        if (!proj) {
-          // Project not in list (no other sessions) — create a synthetic entry
-          proj = { folder: pending.folder, projectPath: pending.projectPath, sessions: [] };
-          projList.unshift(proj);
-        }
-        if (!proj.sessions.some(s => s.sessionId === sid)) {
-          proj.sessions.unshift(pending.session);
-        }
+      let proj = cachedProjects.find(p => p.projectPath === pending.projectPath);
+      if (!proj) {
+        // Project not in list (no other sessions) — create a synthetic entry
+        proj = { folder: pending.folder, projectPath: pending.projectPath, sessions: [] };
+        cachedProjects.unshift(proj);
+      }
+      if (!proj.sessions.some(s => s.sessionId === sid)) {
+        proj.sessions.unshift(pending.session);
       }
     }
   }
@@ -520,7 +499,7 @@ async function loadProjects({ resort = false } = {}) {
       const folder = encodeProjectPath(projectPath);
       // Find the session object already injected by the backend
       let session;
-      for (const proj of cachedAllProjects) {
+      for (const proj of cachedProjects) {
         session = proj.sessions.find(s => s.sessionId === sessionId);
         if (session) break;
       }
@@ -561,14 +540,12 @@ async function launchNewSession(project, sessionOptions) {
 
   // Inject into cached project data so it appears in sidebar immediately
   sessionMap.set(sessionId, session);
-  for (const projList of [cachedProjects, cachedAllProjects]) {
-    let proj = projList.find(p => p.projectPath === projectPath);
-    if (!proj) {
-      proj = { folder, projectPath, sessions: [] };
-      projList.unshift(proj);
-    }
-    proj.sessions.unshift(session);
+  let proj = cachedProjects.find(p => p.projectPath === projectPath);
+  if (!proj) {
+    proj = { folder, projectPath, sessions: [] };
+    cachedProjects.unshift(proj);
   }
+  proj.sessions.unshift(session);
   refreshSidebar();
 
   // Switch to sessions tab and highlight the new session
@@ -870,7 +847,7 @@ loadProjects().then(async () => {
     }
     // Restore main panel
     if (_uiState.panel === 'project' && _uiState.projectPath) {
-      const proj = cachedAllProjects.find(p => p.projectPath === _uiState.projectPath);
+      const proj = cachedProjects.find(p => p.projectPath === _uiState.projectPath);
       if (proj) {
         openProjectViewer(proj);
         if (_uiState.pvTab) setTimeout(() => window.vueProjectViewer?.setTab(_uiState.pvTab), 50);
@@ -938,8 +915,8 @@ window.api.onProjectsChanged(() => {
 
 // Status bar
 function renderDefaultStatus() {
-  const totalSessions = cachedAllProjects.reduce((n, p) => n + p.sessions.length, 0);
-  const totalProjects = cachedAllProjects.length;
+  const totalSessions = cachedProjects.reduce((n, p) => n + p.sessions.length, 0);
+  const totalProjects = cachedProjects.length;
   const running = activePtyIds.size;
   const parts = [];
   if (running > 0) parts.push(`${running} running`);
@@ -1270,14 +1247,14 @@ function openProjectViewer(project) {
 }
 
 function renderProjectsPanel() {
-  window.vueProjects?.setProjects(cachedAllProjects);
+  window.vueProjects?.setProjects(cachedProjects);
 }
 
 function _renderProjectsPanelOld() {
   if (!projectsContent) return;
   projectsContent.innerHTML = '';
 
-  const allProjects = cachedAllProjects;
+  const allProjects = cachedProjects;
 
   const { group: projectsGroup, list: projectsList } = makeGroup(
     `Projects (${allProjects.length})`, 'Add', () => showAddProjectDialog()
@@ -1634,11 +1611,10 @@ window.__sb = {
     }
   },
 
-  onFilterChange({ showStarredOnly: s, showRunningOnly: r, showTodayOnly: t, showArchived: a }) {
+  onFilterChange({ showStarredOnly: s, showRunningOnly: r, showTodayOnly: t }) {
     showStarredOnly = s;
     showRunningOnly = r;
     showTodayOnly = t;
-    showArchived = a;
     refreshSidebar({ resort: true });
   },
 
@@ -1716,7 +1692,7 @@ window.__sb = {
 
   forkSession: (id) => {
     const session = sessionMap.get(id);
-    const project = [...cachedAllProjects, ...cachedProjects].find(p =>
+    const project = cachedProjects.find(p =>
       p.sessions.some(s => s.sessionId === id)
     );
     if (session && project && typeof forkSession === 'function') forkSession(session, project);

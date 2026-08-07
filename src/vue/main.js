@@ -26,11 +26,10 @@ window.vueSidebar = {
     store.attentionSessions.delete(sessionId);
     store.responseReadySessions.delete(sessionId);
   },
-  setFilters({ showStarredOnly, showRunningOnly, showTodayOnly, showArchived }) {
+  setFilters({ showStarredOnly, showRunningOnly, showTodayOnly }) {
     if (showStarredOnly !== undefined) store.showStarredOnly = showStarredOnly;
     if (showRunningOnly !== undefined) store.showRunningOnly = showRunningOnly;
     if (showTodayOnly !== undefined) store.showTodayOnly = showTodayOnly;
-    if (showArchived !== undefined) store.showArchived = showArchived;
   },
   setSearch(matchIds, matchProjectPaths) {
     store.searchMatchIds = matchIds;

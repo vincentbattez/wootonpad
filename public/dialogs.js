@@ -1,5 +1,5 @@
 // --- Dialogs & session launch helpers ---
-// Depends on globals: launchNewSession, cachedProjects, cachedAllProjects, sessionMap,
+// Depends on globals: launchNewSession, cachedProjects, sessionMap,
 // pendingSessions, openSessions, activePtyIds, refreshSidebar, pollActiveSessions (app.js)
 // Depends on: ICONS (icons.js)
 
@@ -52,14 +52,12 @@ async function launchScheduleCreator(project) {
   const folder = encodeProjectPath(project.projectPath);
   pendingSessions.set(result.sessionId, { session, projectPath: project.projectPath, folder });
   sessionMap.set(result.sessionId, session);
-  for (const projList of [cachedProjects, cachedAllProjects]) {
-    let proj = projList.find(p => p.projectPath === project.projectPath);
-    if (!proj) {
-      proj = { folder, projectPath: project.projectPath, sessions: [] };
-      projList.unshift(proj);
-    }
-    proj.sessions.unshift(session);
+  let proj = cachedProjects.find(p => p.projectPath === project.projectPath);
+  if (!proj) {
+    proj = { folder, projectPath: project.projectPath, sessions: [] };
+    cachedProjects.unshift(proj);
   }
+  proj.sessions.unshift(session);
   refreshSidebar();
 
   const entry = createTerminalEntry(session);
@@ -108,14 +106,12 @@ async function launchTerminalSession(project) {
 
   // Inject into cached project data
   sessionMap.set(sessionId, session);
-  for (const projList of [cachedProjects, cachedAllProjects]) {
-    let proj = projList.find(p => p.projectPath === projectPath);
-    if (!proj) {
-      proj = { folder, projectPath, sessions: [] };
-      projList.unshift(proj);
-    }
-    proj.sessions.unshift(session);
+  let proj = cachedProjects.find(p => p.projectPath === projectPath);
+  if (!proj) {
+    proj = { folder, projectPath, sessions: [] };
+    cachedProjects.unshift(proj);
   }
+  proj.sessions.unshift(session);
   refreshSidebar();
 
   const entry = createTerminalEntry(session);
