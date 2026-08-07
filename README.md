@@ -4,6 +4,18 @@
 
 ---
 
+## What this fork adds
+
+This repo forks [fortael/wootonpad](https://github.com/fortael/wootonpad). On top of it:
+
+- **Areas** — Group projects into nestable containers in the sidebar. File them by drag and drop, rename, delete, give one a custom image. Collapse state survives restarts and search reaches inside.
+- **Light mode** — A real light / dark / system theme across the whole app, terminal and editor included, plus a neutral-tone selector.
+- **Open in External IDE** — One click from the sidebar opens a project in your own editor, via a command you configure.
+- **Open Project Folder** — One click opens a project — or a worktree — in Finder, Explorer, or your Linux file manager. Nothing to configure.
+- **Agent tooling** — Linear as the issue tracker, a mise task runner, ADRs and a project glossary.
+
+---
+
 <div align="center">
 
 [![Download](https://img.shields.io/github/v/release/fortael/wootonpad?label=Download&style=for-the-badge&logo=github)](https://github.com/fortael/wootonpad/releases/latest)
