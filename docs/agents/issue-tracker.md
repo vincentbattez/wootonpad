@@ -83,6 +83,21 @@ things search --query=title:/./ --project="👨‍💻 Wooton" --select="uuid,ti
 
 The first result is the project row itself (title `👨‍💻 Wooton`, empty notes), not a duplicate.
 
+## Update the README when a feature ships
+
+Every user-facing feature developed for this repo is reflected in `README.md`, in the same run
+as the implementation — not later.
+
+**Only the `## What this fork adds` section at the top is touched. Never any other part of the
+README.**
+
+- **New feature** → add a bullet: bold feature name, then one or two sentences on what the
+  user can now do. Match the tone of the existing bullets — concrete, no ticket ID, no
+  implementation detail.
+- **Changed feature** → edit the existing bullet in place, don't add a second one.
+- **Removed feature** → delete its bullet.
+- Bug fixes, refactors, and internal chores → no README change.
+
 ## Pull requests as a triage surface
 
 **PRs as a request surface: no.** _(Set to `yes` if this repo treats external PRs as feature
