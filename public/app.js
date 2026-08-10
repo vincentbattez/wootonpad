@@ -236,6 +236,14 @@ window.api.onProcessExited((sessionId, exitCode) => {
     placeholder.style.display = '';
   }
 
+  // A Run Terminal outlives its shell: the tab stays in the sidebar, ready to be
+  // revealed and respawned by the next click on Run (ADR 0006).
+  if (session?.type === 'run-terminal') {
+    refreshSidebar();
+    pollActiveSessions();
+    return;
+  }
+
   // Plain terminal sessions: remove from sidebar entirely (ephemeral)
   if (session?.type === 'terminal') {
     pendingSessions.delete(sessionId);
@@ -332,7 +340,10 @@ async function confirmAndStopSession(sessionId) {
     activePtyIds.delete(sessionId);
 
     const session = sessionMap.get(sessionId);
-    if (session?.type === 'terminal') {
+    if (session?.type === 'terminal' || session?.type === 'run-terminal') {
+      // Stopping by hand is deliberate: unlike a shell that exited on its own, the
+      // tab goes, and the backend forgets this Project's Run Terminal binding.
+      if (session.type === 'run-terminal') await window.api.forgetRunTerminal?.(sessionId);
       // Plain terminals are ephemeral — clean up immediately without waiting for process-exited
       destroySession(sessionId);
       pendingSessions.delete(sessionId);
@@ -494,7 +505,7 @@ async function loadProjects({ resort = false } = {}) {
   // Track active plain terminals in pendingSessions/sessionMap (data now comes from backend)
   try {
     const activeTerminals = await window.api.getActiveTerminals();
-    for (const { sessionId, projectPath } of activeTerminals) {
+    for (const { sessionId, projectPath, type } of activeTerminals) {
       if (pendingSessions.has(sessionId)) continue; // already tracked
       const folder = encodeProjectPath(projectPath);
       // Find the session object already injected by the backend
@@ -503,7 +514,30 @@ async function loadProjects({ resort = false } = {}) {
         session = proj.sessions.find(s => s.sessionId === sessionId);
         if (session) break;
       }
-      if (!session) continue;
+      // A renderer reload lost the row but not the PTY: rebuild it from what the
+      // backend still knows, so a running server survives a UI refresh.
+      if (!session) {
+        if (type !== 'run-terminal') continue;
+        session = {
+          sessionId,
+          summary: 'Run',
+          firstPrompt: '',
+          projectPath,
+          name: null,
+          starred: 0,
+          archived: 0,
+          messageCount: 0,
+          modified: new Date().toISOString(),
+          created: new Date().toISOString(),
+          type,
+        };
+        let proj = cachedProjects.find(p => p.projectPath === projectPath);
+        if (!proj) {
+          proj = { folder, projectPath, sessions: [] };
+          cachedProjects.unshift(proj);
+        }
+        proj.sessions.unshift(session);
+      }
       pendingSessions.set(sessionId, { session, projectPath, folder });
       sessionMap.set(sessionId, session);
     }
@@ -622,6 +656,11 @@ async function openSession(session, customOptions) {
       destroySession(sessionId);
       if (session.type === 'terminal') {
         launchTerminalSession({ projectPath: session.projectPath });
+        return;
+      }
+      // Back through the backend, which re-reads the Run Command rather than trusting a stale one.
+      if (session.type === 'run-terminal') {
+        window.__sb.runProject(session.projectPath);
         return;
       }
     } else {
@@ -1561,6 +1600,21 @@ initAccounts();
 // App.vue calls these when the user interacts with the sidebar shell
 // (tabs, filters, search). Each callback syncs local app.js state and
 // triggers whatever data loading or rendering is needed.
+// One error language for the three Project hand-off buttons (ADR 0004).
+function reportHandoffFailure(label, path, result) {
+  // Nothing configured yet: the first click leads to the setting instead of an error.
+  if (result?.reason === 'not-configured') { openSettingsViewer('project', path); return; }
+  if (result?.reason === 'missing-folder') {
+    setUpdaterStatus(`${label}: folder no longer exists — ${path}`, 6000);
+    return;
+  }
+  if (result?.reason === 'not-a-directory') {
+    setUpdaterStatus(`${label}: not a directory — ${path}`, 6000);
+    return;
+  }
+  setUpdaterStatus(`${label} failed: ${result?.message || 'unknown error'}`, 8000);
+}
+
 window.__sb = {
   onTabChange(tabName) {
     activeTab = tabName;
@@ -1742,27 +1796,29 @@ window.__sb = {
   openExternalIde: async (path) => {
     const result = await window.api.openInExternalIde(path);
     if (result?.ok) return;
-    // Nothing configured yet: the first click leads to the setting instead of an error.
-    if (result?.reason === 'not-configured') { openSettingsViewer('project', path); return; }
-    if (result?.reason === 'missing-folder') {
-      setUpdaterStatus(`External IDE: folder no longer exists — ${path}`, 6000);
+    reportHandoffFailure('External IDE', path, result);
+  },
+
+  // The main process decides; the renderer only carries the verdict out (ADR 0006).
+  runProject: async (path) => {
+    const result = await window.api.runProject(path);
+    if (!result?.ok) { reportHandoffFailure('Run Project', path, result); return; }
+    if (result.action === 'focus') {
+      const session = sessionMap.get(result.sessionId);
+      // Never respawn on a focus verdict: the shell is alive, and a second start
+      // would take the running server's port.
+      if (session) openSession(session);
+      else setUpdaterStatus('Run Project: the Run Terminal is already running', 6000);
       return;
     }
-    setUpdaterStatus(`External IDE failed: ${result?.message || 'unknown error'}`, 8000);
+    const reuseId = result.action === 'reuse' && sessionMap.has(result.sessionId) ? result.sessionId : undefined;
+    launchRunTerminal(path, result.command, reuseId);
   },
 
   openProjectFolder: async (path) => {
     const result = await window.api.openProjectFolder(path);
     if (result?.ok) return;
-    if (result?.reason === 'missing-folder') {
-      setUpdaterStatus(`Project Folder: folder no longer exists — ${path}`, 6000);
-      return;
-    }
-    if (result?.reason === 'not-a-directory') {
-      setUpdaterStatus(`Project Folder: not a directory — ${path}`, 6000);
-      return;
-    }
-    setUpdaterStatus(`Project Folder failed: ${result?.message || 'unknown error'}`, 8000);
+    reportHandoffFailure('Project Folder', path, result);
   },
 
   archiveSessions: async (sessions) => {

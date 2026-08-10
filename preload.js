@@ -92,6 +92,8 @@ contextBridge.exposeInMainWorld('api', {
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   openInExternalIde: (projectPath) => ipcRenderer.invoke('open-in-external-ide', projectPath),
   openProjectFolder: (projectPath) => ipcRenderer.invoke('open-project-folder', projectPath),
+  runProject: (projectPath) => ipcRenderer.invoke('run-project', projectPath),
+  forgetRunTerminal: (sessionId) => ipcRenderer.invoke('forget-run-terminal', sessionId),
 
   // Send (fire-and-forget)
   sendInput: (id, data) => ipcRenderer.send('terminal-input', id, data),

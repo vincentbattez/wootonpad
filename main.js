@@ -42,6 +42,7 @@ const cleanPtyEnv = Object.fromEntries(
 // Shell profiles → shell-profiles.js
 const { discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell, windowsToWslPath, shellArgs } = require('./shell-profiles');
 const { resolveIdeLaunch, launchErrorMessage } = require('./external-ide');
+const { resolveRunTerminal, RUN_TERMINAL_TYPE } = require('./run-command');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 
@@ -1631,6 +1632,7 @@ const SETTING_DEFAULTS = {
   chrome: false,
   preLaunchCmd: '',
   externalIdeCommand: '',
+  runCommand: '',
   addDirs: '',
   visibleSessionCount: 5,
   sidebarWidth: 340,
@@ -1742,6 +1744,49 @@ ipcMain.handle('open-project-folder', async (_event, projectPath) => {
   return message ? { ok: false, reason: 'open-failed', message } : { ok: true };
 });
 
+// --- IPC: run a Project's Run Command in a Run Terminal ---
+// The renderer only ever sends a projectPath; the command comes from settings,
+// read here. See docs/adr/0006-run-command-in-a-run-terminal.md.
+//
+// activeSessions drops an exited session; this binding outlives it, so reuse-on-exit works.
+const runTerminals = new Map(); // projectPath -> sessionId
+
+function sessionsForRunLookup() {
+  const sessions = [];
+  for (const [sessionId, session] of activeSessions) {
+    sessions.push({
+      sessionId,
+      projectPath: session.projectPath,
+      type: session.sessionType || (session.isPlainTerminal ? 'terminal' : 'session'),
+      exited: !!session.exited,
+    });
+  }
+  for (const [projectPath, sessionId] of runTerminals) {
+    if (activeSessions.has(sessionId)) continue;
+    sessions.push({ sessionId, projectPath, type: RUN_TERMINAL_TYPE, exited: true });
+  }
+  return sessions;
+}
+
+ipcMain.handle('run-project', (_event, projectPath) => {
+  const settings = effectiveSettings(projectPath);
+  return resolveRunTerminal(
+    { runCommand: settings.runCommand, projectPath },
+    {
+      folderExists: !!projectPath && fs.existsSync(projectPath),
+      sessions: sessionsForRunLookup(),
+    }
+  );
+});
+
+// A Run Terminal the user closed by hand is gone for good: the next click starts a new one.
+ipcMain.handle('forget-run-terminal', (_event, sessionId) => {
+  for (const [projectPath, id] of runTerminals) {
+    if (id === sessionId) runTerminals.delete(projectPath);
+  }
+  return { ok: true };
+});
+
 // --- IPC: get-active-sessions ---
 ipcMain.handle('get-active-sessions', () => {
   const active = [];
@@ -1756,7 +1801,12 @@ ipcMain.handle('get-active-terminals', () => {
   const terminals = [];
   for (const [sessionId, session] of activeSessions) {
     if (!session.exited && session.isPlainTerminal) {
-      terminals.push({ sessionId, projectPath: session.projectPath });
+      // The type travels: a reload must rebuild a Run Terminal as one, not as a plain Terminal.
+      terminals.push({
+        sessionId,
+        projectPath: session.projectPath,
+        type: session.sessionType || 'terminal',
+      });
     }
   }
   return terminals;
@@ -1844,7 +1894,12 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     return { ok: false, error: `project directory no longer exists: ${projectPath}` };
   }
 
-  const isPlainTerminal = sessionOptions?.type === 'terminal';
+  // A Run Terminal is a Plain Terminal that starts on the Project's Run Command:
+  // same PTY path, same shell, distinct only in identity and in what is written to it.
+  const sessionType = sessionOptions?.type === RUN_TERMINAL_TYPE ? RUN_TERMINAL_TYPE
+    : sessionOptions?.type === 'terminal' ? 'terminal'
+    : 'session';
+  const isPlainTerminal = sessionType !== 'session';
 
   // Resolve shell profile from effective settings
   const effectiveProfileId = (() => {
@@ -1926,11 +1981,15 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
           BASH_ENV: claudeShim,
         },
       });
-      // For zsh, ENV/BASH_ENV don't apply — write the function after shell starts
+      // For zsh, ENV/BASH_ENV don't apply — write the function after shell starts.
+      // The Run Command rides along in this write: ordered by construction, first line after clear (ADR 0006).
+      const runCommand = sessionType === RUN_TERMINAL_TYPE
+        ? String(sessionOptions?.runCommand || '').trim()
+        : '';
       setTimeout(() => {
         if (!ptyProcess._isDisposed) {
           try {
-            ptyProcess.write(claudeShim + ' clear\n');
+            ptyProcess.write(claudeShim + ' clear\n' + (runCommand ? runCommand + '\n' : ''));
           } catch {}
         }
       }, 300);
@@ -2045,10 +2104,12 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     outputBuffer: [], outputBufferSize: 0, altScreen: false,
     projectPath, firstResize: true,
     projectFolder, knownJsonlFiles, sessionSlug,
-    isPlainTerminal, forkFrom: sessionOptions?.forkFrom || null,
+    isPlainTerminal, sessionType, forkFrom: sessionOptions?.forkFrom || null,
     mcpServer, focusToken, _openedAt: Date.now(),
   };
   activeSessions.set(sessionId, session);
+  // Binds this Project to its one Run Terminal, and survives the PTY's exit.
+  if (sessionType === RUN_TERMINAL_TYPE) runTerminals.set(projectPath, sessionId);
 
   ptyProcess.onData(data => {
     const currentId = session.realSessionId || sessionId;

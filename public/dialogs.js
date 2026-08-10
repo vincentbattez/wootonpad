@@ -83,12 +83,12 @@ async function showNewSessionPopover(project, anchorEl) {
   window.vueDialogs?.openPopover(project, anchorEl, callbacks);
 }
 
-async function launchTerminalSession(project) {
-  const sessionId = crypto.randomUUID();
-  const projectPath = project.projectPath;
+// Both kinds of internal terminal take this path: a Run Terminal differs only by
+// its type, its label, and the Run Command written into it (ADR 0006).
+async function spawnInternalTerminal(projectPath, { sessionId = crypto.randomUUID(), type = 'terminal', summary = 'Terminal', runCommand } = {}) {
   const session = {
     sessionId,
-    summary: 'Terminal',
+    summary,
     firstPrompt: '',
     projectPath,
     name: null,
@@ -97,7 +97,7 @@ async function launchTerminalSession(project) {
     messageCount: 0,
     modified: new Date().toISOString(),
     created: new Date().toISOString(),
-    type: 'terminal',
+    type,
   };
 
   // Track as pending
@@ -111,12 +111,13 @@ async function launchTerminalSession(project) {
     proj = { folder, projectPath, sessions: [] };
     cachedProjects.unshift(proj);
   }
+  proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
   proj.sessions.unshift(session);
   refreshSidebar();
 
   const entry = createTerminalEntry(session);
 
-  const result = await window.api.openTerminal(sessionId, projectPath, true, { type: 'terminal' });
+  const result = await window.api.openTerminal(sessionId, projectPath, true, { type, runCommand });
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
     entry.closed = true;
@@ -125,6 +126,22 @@ async function launchTerminalSession(project) {
 
   showSession(sessionId);
   pollActiveSessions();
+}
+
+async function launchTerminalSession(project) {
+  await spawnInternalTerminal(project.projectPath);
+}
+
+// Reuse revives the tab in place: the same sessionId keeps this Project's single
+// Run Terminal single, alive or being relaunched.
+async function launchRunTerminal(projectPath, command, sessionId) {
+  if (sessionId) destroySession(sessionId);
+  await spawnInternalTerminal(projectPath, {
+    sessionId,
+    type: 'run-terminal',
+    summary: 'Run',
+    runCommand: command,
+  });
 }
 
 async function showNewSessionDialog(project) {

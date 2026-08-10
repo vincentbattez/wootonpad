@@ -12,7 +12,8 @@
       <div class="session-info">
         <div class="session-summary" @dblclick.stop="startRename">
           <!-- eslint-disable-next-line vue/no-v-html -->
-          <span v-if="session.type === 'terminal'" class="terminal-badge" v-html="terminalBadgeSvg"></span>
+          <span v-if="session.type === 'run-terminal'" class="terminal-badge run-terminal-badge" v-html="runBadgeSvg"></span>
+          <span v-else-if="session.type === 'terminal'" class="terminal-badge" v-html="terminalBadgeSvg"></span>
           <template v-if="renaming">
             <input
               ref="renameInput"
@@ -37,7 +38,7 @@
 
       <div v-else class="session-actions">
         <button class="session-stop-btn" data-tooltip="Stop session" @click.stop="$emit('stop', session.sessionId)" v-html="stopSvg"></button>
-        <template v-if="session.type !== 'terminal'">
+        <template v-if="!isTerminalLike">
           <button class="session-fork-btn" data-tooltip="Fork session" @click.stop="$emit('fork', session.sessionId)" v-html="forkSvg"></button>
           <button class="session-jsonl-btn" data-tooltip="View messages" @click.stop="$emit('jsonl', session.sessionId)" v-html="jsonlSvg"></button>
           <button class="session-archive-btn" :data-tooltip="session.archived ? 'Unarchive' : 'Archive'" @click.stop="$emit('archive', session.sessionId)" v-html="archiveSvg"></button>
@@ -85,6 +86,11 @@ const msgSuffix = computed(() =>
   props.session.messageCount ? ` · ${props.session.messageCount} msgs` : ''
 );
 
+// Neither kind of internal terminal has a .jsonl behind it.
+const isTerminalLike = computed(() =>
+  props.session.type === 'terminal' || props.session.type === 'run-terminal'
+);
+
 const itemClasses = computed(() => ({
   active: props.isActive,
   'has-running-pty': props.isRunning,
@@ -93,7 +99,7 @@ const itemClasses = computed(() => ({
   'response-ready': props.isResponseReady,
   'is-pinned': !!props.session.starred,
   'archived-item': !!props.session.archived,
-  'is-terminal': props.session.type === 'terminal',
+  'is-terminal': isTerminalLike.value,
   compact: props.compact,
 }));
 
@@ -121,6 +127,8 @@ const jsonlSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" st
 const archiveSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
 const launchConfigSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M1 12h4M19 12h4M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/></svg>';
 const terminalBadgeSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 9l3 3-3 3m5 0h3M5 20h14a2 2 0 002-2V6a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/></svg>';
+// A play triangle in a terminal frame: a server started here, not a shell opened by hand.
+const runBadgeSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><polygon points="10 9 15 12 10 15 10 9" fill="currentColor"/></svg>';
 const pinSvg = computed(() => props.session.starred
   ? '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor"><path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1-.707.707c-.28-.28-.576-.49-.888-.656L10.073 9.333l-.07 3.181a.5.5 0 0 1-.853.354l-3.535-3.536-4.243 4.243a.5.5 0 1 1-.707-.707l4.243-4.243L1.372 5.11a.5.5 0 0 1 .354-.854l3.18-.07L8.37.722A3.37 3.37 0 0 1 9.12.074a.5.5 0 0 1 .708.002z"/></svg>'
   : '<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.2"><path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1-.707.707c-.28-.28-.576-.49-.888-.656L10.073 9.333l-.07 3.181a.5.5 0 0 1-.853.354l-3.535-3.536-4.243 4.243a.5.5 0 1 1-.707-.707l4.243-4.243L1.372 5.11a.5.5 0 0 1 .354-.854l3.18-.07L8.37.722A3.37 3.37 0 0 1 9.12.074a.5.5 0 0 1 .708.002z"/></svg>'

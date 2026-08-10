@@ -320,6 +320,7 @@ const sidebarCallbacks = {
   openSettings: (path) => window.__sb?.openSettings?.(path),
   openExternalIde: (path) => window.__sb?.openExternalIde?.(path),
   openProjectFolder: (path) => window.__sb?.openProjectFolder?.(path),
+  runProject: (path) => window.__sb?.runProject?.(path),
   archiveSessions: (sessions) => window.__sb?.archiveSessions?.(sessions),
   removeProject: (path) => window.__sb?.removeProject?.(path),
 };

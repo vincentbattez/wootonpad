@@ -2,10 +2,11 @@
   <div :class="isWorktree ? 'worktree-group' : 'project-group'" :id="folderId">
 
     <!-- Worktree header -->
-    <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle" @mouseenter="refreshIdeCommand">
+    <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle" @mouseenter="refreshCommands">
       <span class="worktree-branch-icon" v-html="branchSvg" @click.stop="toggle"></span>
       <span class="worktree-name" @click.stop="toggle">{{ worktreeName }}</span>
       <button class="worktree-hide-btn" data-tooltip="Hide worktree" @click.stop="$emit('remove-project', project.projectPath)" v-html="closeSvg"></button>
+      <button class="project-run-btn worktree-run-btn" :data-tooltip="runTooltip" @click.stop="runProject" v-html="playSvg"></button>
       <button class="project-ide-btn worktree-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
       <button class="project-folder-btn worktree-folder-btn" data-tooltip="Open Project Folder" @click.stop="openProjectFolder" v-html="folderSvg"></button>
       <button class="project-new-btn worktree-new-btn" data-tooltip="New session in worktree" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSmSvg"></button>
@@ -19,7 +20,7 @@
       :id="'ph-' + folderId"
       draggable="true"
       @click.self="toggle"
-      @mouseenter="refreshIdeCommand"
+      @mouseenter="refreshCommands"
       @dragstart.stop="onDragStart"
       @dragend="onDragEnd"
       @dragover.prevent.stop="onDragOver"
@@ -29,6 +30,7 @@
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <ProjectAvatar class="project-header-avatar" :project-path="project.projectPath" @click.stop="toggle" />
       <span class="project-name" @click.stop="toggle">{{ shortName }}</span>
+      <button class="project-run-btn" :data-tooltip="runTooltip" @click.stop="runProject" v-html="playSvg"></button>
       <button class="project-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
       <button class="project-folder-btn" data-tooltip="Open Project Folder" @click.stop="openProjectFolder" v-html="folderSvg"></button>
       <button class="project-settings-btn" data-tooltip="Project settings" @click.stop="$emit('settings', project.projectPath)" v-html="gearSvg"></button>
@@ -193,6 +195,7 @@
         @settings="(path) => $emit('settings', path)"
         @open-external-ide="(path) => $emit('open-external-ide', path)"
         @open-project-folder="(path) => $emit('open-project-folder', path)"
+        @run-project="(path) => $emit('run-project', path)"
         @archive-sessions="(sessions) => $emit('archive-sessions', sessions)"
         @remove-project="(path) => $emit('remove-project', path)"
       />
@@ -229,7 +232,7 @@ const props = defineProps({
 
 const emit = defineEmits([
   'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename',
-  'new-session', 'settings', 'open-external-ide', 'open-project-folder', 'archive-sessions', 'remove-project',
+  'new-session', 'settings', 'open-external-ide', 'open-project-folder', 'run-project', 'archive-sessions', 'remove-project',
 ]);
 
 const folderId = computed(() => 'project-' + props.project.projectPath.replace(/[^a-zA-Z0-9_-]/g, '_'));
@@ -325,15 +328,27 @@ const ideTooltip = computed(() =>
   ideCommand.value ? 'Open in External IDE' : 'Configure an External IDE'
 );
 
-async function refreshIdeCommand() {
+// The Run Command itself is the tooltip: what is about to start is worth reading
+// before the click. A Worktree resolves its own, never its parent's (ADR 0006).
+const runCommand = ref('');
+const runTooltip = computed(() =>
+  runCommand.value ? 'Run Project: ' + runCommand.value : 'Configure a Run Command'
+);
+
+async function refreshCommands() {
   try {
     const effective = await window.api.getEffectiveSettings(props.project.projectPath);
     ideCommand.value = effective?.externalIdeCommand || '';
+    runCommand.value = effective?.runCommand || '';
   } catch {}
 }
 
 function openInExternalIde() {
   emit('open-external-ide', props.project.projectPath);
+}
+
+function runProject() {
+  emit('run-project', props.project.projectPath);
 }
 
 function openProjectFolder() {
@@ -349,6 +364,8 @@ const gearSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" str
 const archiveSvg = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
 // Code chevrons — neutral towards whichever External IDE the user picked.
 const codeSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>';
+// A play triangle: the one gesture that starts something rather than handing it elsewhere.
+const playSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"/></svg>';
 const folderSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 const plusSvg = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const plusSmSvg = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';

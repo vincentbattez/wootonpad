@@ -12,6 +12,7 @@ This repo forks [fortael/wootonpad](https://github.com/fortael/wootonpad). On to
 - **Light mode** — A real light / dark / system theme across the whole app, terminal and editor included, plus a neutral-tone selector.
 - **Open in External IDE** — One click from the sidebar opens a project in your own editor, via a command you configure.
 - **Open Project Folder** — One click opens a project — or a worktree — in Finder, Explorer, or your Linux file manager. Nothing to configure.
+- **Run Project** — One click starts your dev server in a Run Terminal beside your Claude sessions, on a command you configure per project. Clicking again reveals it rather than restarting it; Ctrl+C then the up arrow is the restart.
 - **Agent tooling** — Linear as the issue tracker, a mise task runner, ADRs and a project glossary.
 
 ---

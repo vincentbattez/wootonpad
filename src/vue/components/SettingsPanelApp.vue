@@ -151,6 +151,30 @@
           </div>
         </div>
 
+        <!-- ── Run Project ─────────────────────────────────────── -->
+        <div class="settings-section">
+          <div class="settings-section-title">Run Project</div>
+
+          <div class="settings-field settings-field-wide">
+            <div class="settings-field-info">
+              <div class="settings-field-header">
+                <span class="settings-label">Run Command</span>
+                <label v-if="isProject" class="settings-use-global">
+                  <input type="checkbox" :checked="useGlobal.runCommand" @change="toggleGlobal('runCommand', $event.target.checked)" />
+                  Use global default
+                </label>
+              </div>
+              <div class="settings-description">
+                Typed into a Run Terminal opened in the Project Folder. Sent verbatim — write it as you would type it.
+              </div>
+            </div>
+            <div class="settings-field-control">
+              <input type="text" class="settings-input" v-model="form.runCommand"
+                placeholder="e.g. npm run dev" :disabled="isProject && useGlobal.runCommand" />
+            </div>
+          </div>
+        </div>
+
         <!-- ── Application (global only) ──────────────────────── -->
         <template v-if="!isProject">
           <div class="settings-section">
@@ -417,6 +441,7 @@ const form = reactive({
   chrome: false,
   preLaunchCmd: '',
   externalIdeCommand: '',
+  runCommand: '',
   addDirs: '',
   visibleSessionCount: 10,
   sessionMaxAgeDays: 3,
@@ -439,6 +464,7 @@ const useGlobal = reactive({
   chrome: true,
   preLaunchCmd: true,
   externalIdeCommand: true,
+  runCommand: true,
   addDirs: true,
 });
 
@@ -462,7 +488,7 @@ async function loadSettings() {
   const current = (await window.api.getSetting(settingsKey.value)) || {};
   const global = isProject.value ? ((await window.api.getSetting('global')) || {}) : {};
 
-  const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'addDirs'];
+  const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'runCommand', 'addDirs'];
   for (const field of overrideFields) {
     if (isProject.value) {
       useGlobal[field] = isUsingGlobal(current, field);
@@ -493,7 +519,7 @@ async function loadSettings() {
 }
 
 function getDefault(field) {
-  const defaults = { permissionMode: '', worktree: false, worktreeName: '', chrome: false, preLaunchCmd: '', externalIdeCommand: '', addDirs: '' };
+  const defaults = { permissionMode: '', worktree: false, worktreeName: '', chrome: false, preLaunchCmd: '', externalIdeCommand: '', runCommand: '', addDirs: '' };
   return defaults[field];
 }
 
@@ -507,7 +533,7 @@ async function save() {
   let settings = {};
 
   if (isProject.value) {
-    const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'addDirs'];
+    const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'runCommand', 'addDirs'];
     for (const field of overrideFields) {
       if (!useGlobal[field]) {
         settings[field] = form[field];
@@ -523,6 +549,7 @@ async function save() {
       chrome: form.chrome,
       preLaunchCmd: form.preLaunchCmd,
       externalIdeCommand: form.externalIdeCommand,
+      runCommand: form.runCommand,
       addDirs: form.addDirs,
       visibleSessionCount: form.visibleSessionCount || 10,
       sessionMaxAgeDays: form.sessionMaxAgeDays || 3,

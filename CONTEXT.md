@@ -41,6 +41,18 @@ _Avoid_: Conversation, chat
 A Session the user has set aside. It stays attached to its Project, never appears in that Project's main list, and is reachable only inside the Project's own archive — collapsed by default, compact when open. Reversible, and hidden from nothing: search still reaches it.
 _Avoid_: Deleted, hidden, closed
 
+**Plain Terminal**:
+An interactive shell opened by hand inside WootonPad, attached to a Project. It is ephemeral — never archived, renamed or searched, since there is no `.jsonl` behind it — and dies with the app.
+_Avoid_: Shell, console, tab
+
+**Run Terminal**:
+The one internal terminal a Project runs its Run Command in, opened by the sidebar's Run button. It is a Plain Terminal in every other respect — a real interactive shell, ephemeral, never archived or searched — and a Project has at most one, alive or waiting to be relaunched. Clicking Run again reveals it; it is never restarted by a click.
+_Avoid_: Dev server, run tab, console
+
+**Run Command**:
+The command a Run Terminal starts on. User-authored, global with a per-Project override, empty by default — WootonPad never guesses it from a manifest. Sent to the shell verbatim, exactly as the user would type it.
+_Avoid_: Dev command, start script
+
 ### Editors
 
 **External IDE**:

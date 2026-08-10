@@ -1252,6 +1252,7 @@ body { display: flex; flex-direction: column; }
 .project-header:hover .project-archive-btn,
 .project-header:hover .project-new-btn,
 .project-header:hover .project-ide-btn,
+.project-header:hover .project-run-btn,
 .project-header:hover .project-folder-btn,
 .project-header:hover .project-settings-btn {
   opacity: 0.7;
@@ -1489,6 +1490,7 @@ body { display: flex; flex-direction: column; }
 }
 
 .worktree-header:hover .worktree-new-btn,
+.worktree-header:hover .worktree-run-btn,
 .worktree-header:hover .worktree-ide-btn,
 .worktree-header:hover .worktree-folder-btn,
 .worktree-header:hover .worktree-hide-btn {
@@ -4047,6 +4049,7 @@ body { display: flex; flex-direction: column; }
 
 /* Project header gear, External IDE and Project Folder buttons */
 .project-ide-btn,
+.project-run-btn,
 .project-folder-btn,
 .project-settings-btn {
   background: transparent;
@@ -4066,6 +4069,7 @@ body { display: flex; flex-direction: column; }
 }
 
 .project-ide-btn svg,
+.project-run-btn svg,
 .project-folder-btn svg,
 .project-settings-btn svg {
   display: block;
@@ -4073,7 +4077,8 @@ body { display: flex; flex-direction: column; }
 
 .project-header:hover .project-settings-btn,
 .project-header:hover .project-folder-btn,
-.project-header:hover .project-ide-btn {
+.project-header:hover .project-ide-btn,
+.project-header:hover .project-run-btn {
   opacity: 1;
 }
 
@@ -4082,6 +4087,13 @@ body { display: flex; flex-direction: column; }
 .project-settings-btn:hover {
   background: var(--surface-card);
   color: var(--text-secondary);
+  opacity: 1 !important;
+}
+
+/* Run starts something rather than handing it elsewhere: it hovers green, like New session. */
+.project-run-btn:hover {
+  background: color-mix(in srgb, var(--green-500) 12%, transparent);
+  color: var(--green-500);
   opacity: 1 !important;
 }
 
@@ -4748,6 +4760,11 @@ body { display: flex; flex-direction: column; }
   vertical-align: middle;
   position: relative;
   top: -1px;
+}
+
+/* A Run Terminal is not a Terminal opened by hand: it says so in its own colour. */
+.run-terminal-badge {
+  color: var(--green-500);
 }
 
 /* Terminal sessions: green status dot */
@@ -6774,6 +6791,7 @@ body.hide-avatars .grid-card-avatar {
   text-align: center;
 }
 
+.worktree-run-btn,
 .worktree-ide-btn,
 .worktree-folder-btn {
   width: 20px;
