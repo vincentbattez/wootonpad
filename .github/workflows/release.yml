@@ -1,4 +1,4 @@
-name: Release (Mac)
+name: Release (Mac + Windows)
 
 on:
   push:
@@ -49,5 +49,41 @@ jobs:
 
       - name: Upload artifacts to GitHub Release
         run: gh release upload "${{ github.ref_name }}" dist/WootonPad-*-arm64.dmg dist/latest-mac.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-windows:
+    needs: test
+    runs-on: windows-latest
+    # Packaging plus upload runs well under the cap; this is the backstop for a
+    # step that never returns.
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Bundle assets
+        run: npm run bundle:codemirror && npm run bundle:vue
+
+      # One NSIS installer covering both x64 and arm64 — the arch list comes from
+      # build.win.target[].arch in package.json. Both archs of better-sqlite3 and
+      # node-pty resolve from prebuilds, so no ARM64 MSVC toolset is involved.
+      - name: Build Windows app
+        run: npx electron-builder --win --publish never
+
+      # The default NSIS artifact name contains a space ("WootonPad Setup
+      # <version>.exe"), so a glob is safer than naming the file. latest.yml is
+      # the auto-update metadata electron-builder emits alongside it.
+      - name: Upload artifacts to GitHub Release
+        shell: pwsh
+        run: gh release upload "${{ github.ref_name }}" (Get-ChildItem dist/*.exe, dist/latest.yml | ForEach-Object FullName)
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
