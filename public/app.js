@@ -216,11 +216,26 @@ window.api.onSessionForked((oldId, newId) => {
   pollActiveSessions();
 });
 
-window.api.onProcessExited((sessionId, exitCode) => {
+window.api.onProcessExited((sessionId, exitCode, exitInfo) => {
   const entry = openSessions.get(sessionId);
   const session = sessionMap.get(sessionId);
   if (entry) {
     entry.closed = true;
+  }
+
+  // A Claude session that died on its own printed its own error message, and the
+  // terminal buffer is the only place it exists. Destroying the tab here would
+  // close the window on the one thing that explains the failure — so keep it and
+  // let the user read it. Clicking the session again respawns it (openSession).
+  const isTerminalTab = session?.type === 'terminal' || session?.type === 'run-terminal';
+  if (entry && exitCode !== 0 && !exitInfo?.stoppedByUser && !isTerminalTab) {
+    entry.terminal.write(
+      `\r\n\x1b[1;31m── Session ended unexpectedly (exit code ${exitCode}) ──\x1b[0m\r\n` +
+      `\x1b[2mThe error above is the CLI's own. Click this session in the sidebar to start it again.\x1b[0m\r\n`
+    );
+    refreshSidebar();
+    pollActiveSessions();
+    return;
   }
 
   // Clean up terminal UI on exit (uses destroySession to handle grid cards too)
@@ -672,9 +687,11 @@ async function openSession(session, customOptions) {
   // Create new terminal entry (hidden until showSession)
   const entry = createTerminalEntry(session);
 
-  // Open terminal in main process
+  // Open terminal in main process. A session still pending never wrote a .jsonl —
+  // it died before Claude got that far — so there is nothing to `--resume`: it has
+  // to be spawned as new again, under the same id.
   const resumeOptions = customOptions || await resolveDefaultSessionOptions({ projectPath });
-  const result = await window.api.openTerminal(sessionId, projectPath, false, resumeOptions);
+  const result = await window.api.openTerminal(sessionId, projectPath, pendingSessions.has(sessionId), resumeOptions);
   if (!result.ok) {
     entry.terminal.write(`\r\nError: ${result.error}\r\n`);
     entry.closed = true;

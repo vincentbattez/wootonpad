@@ -2000,6 +2000,8 @@ ipcMain.handle('get-active-terminals', () => {
 ipcMain.handle('stop-session', (_event, sessionId) => {
   const session = activeSessions.get(sessionId);
   if (!session || session.exited) return { ok: false, error: 'not running' };
+  // Marks the exit as deliberate so the renderer doesn't report it as a crash.
+  session._stoppedByUser = true;
   session.pty.kill();
   return { ok: true };
 });
@@ -2430,13 +2432,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     session.mcpServer = null;
 
     const realId = session.realSessionId || sessionId;
+    const exitInfo = { stoppedByUser: !!session._stoppedByUser };
     if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('process-exited', realId, exitCode);
+      mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
       // If a fork/plan-accept transition re-keyed this session under realId
       // but the PTY exited before transition detection ran, also notify the
       // renderer for the original sessionId so it doesn't stay stuck as "Running".
       if (realId !== sessionId && activeSessions.has(sessionId)) {
-        mainWindow.webContents.send('process-exited', sessionId, exitCode);
+        mainWindow.webContents.send('process-exited', sessionId, exitCode, exitInfo);
       }
     }
     activeSessions.delete(realId);
