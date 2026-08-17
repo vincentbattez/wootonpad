@@ -115,6 +115,14 @@ const CLAUDE_DIR = DEFAULT_CLAUDE_DIR;
 const STATS_CACHE_PATH = path.join(CLAUDE_DIR, 'stats-cache.json');
 const MAX_BUFFER_SIZE = 256 * 1024;
 
+// Terminal output is mostly redraw escapes; only the stripped text carries a message.
+function stripAnsi(s) {
+  return s
+    .replace(/\x1b\[[^@-~]*[@-~]/g, '')
+    .replace(/\x1b\][^\x07]*\x07/g, '')
+    .replace(/\x1b[^[\]].?/g, '');
+}
+
 // --- Multi-account helpers ---
 
 const DEFAULT_ACCOUNT = { id: 'default', name: 'Default', configDir: DEFAULT_CLAUDE_DIR };
@@ -1388,6 +1396,7 @@ ipcMain.handle('refresh-stats', async () => {
       };
 
       const claudeCmd = `claude ${args}`;
+      log.info(`[claude-cmd] session=stats cmd=${JSON.stringify(claudeCmd)}`);
       const p = pty.spawn(statsShell, shellArgs(statsShell, claudeCmd, statsShellExtraArgs), {
         name: 'xterm-256color',
         cols: 120,
@@ -1396,17 +1405,20 @@ ipcMain.handle('refresh-stats', async () => {
         env: ptyEnv,
       });
 
-      const strip = (s) => s
-        .replace(/\x1b\[[^@-~]*[@-~]/g, '')
-        .replace(/\x1b\][^\x07]*\x07/g, '')
-        .replace(/\x1b[^[\]].?/g, '');
+      p.onExit(({ exitCode, signal }) => {
+        log.info(
+          `[pty-exit] session=stats code=${exitCode} signal=${signal ?? 'none'} ` +
+          `settled=${settled} tail=${JSON.stringify(stripAnsi(output).slice(-600))}`
+        );
+        finish();
+      });
 
       p.onData((data) => {
         output += data;
 
         // Auto-accept trust directory prompt (Enter selects "1. Yes")
         if (!trustAccepted) {
-          if (/trust\s*this\s*folder/i.test(strip(output))) {
+          if (/trust\s*this\s*folder/i.test(stripAnsi(output))) {
             trustAccepted = true;
             try { p.write('\r'); } catch {}
             return;
@@ -1415,7 +1427,7 @@ ipcMain.handle('refresh-stats', async () => {
 
         // If waitFor is set, finish when that pattern appears in stripped output
         if (waitFor) {
-          if (waitFor.test(strip(output))) {
+          if (waitFor.test(stripAnsi(output))) {
             finish();
           }
           return;
@@ -2306,8 +2318,8 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         ]));
       }
 
-      // The command is assembled from a dozen conditionals above; when a session
-      // dies at startup, the only way to tell which of them fired is to read it back.
+      // Assembled from a dozen conditionals above: reading it back is the only way
+      // to tell which of them fired when a session dies at startup.
       log.info(`[claude-cmd] session=${sessionId} cmd=${JSON.stringify(claudeCmd)}`);
 
       ptyProcess = pty.spawn(shell, shellArgs(shell, claudeCmd, shellExtraArgs), {
@@ -2430,10 +2442,8 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 
   ptyProcess.onExit(({ exitCode, signal }) => {
     session.exited = true;
-    // A session that dies on its own leaves no trace on this side. Log the code
-    // and the tail of what the shell last printed — that tail carries the error
-    // message of whatever actually failed, which may not be Claude itself.
-    const tail = (session.outputBuffer || []).join('').slice(-600);
+    // The tail carries the error of whatever actually failed, which may not be Claude.
+    const tail = stripAnsi((session.outputBuffer || []).join('')).slice(-600);
     log.info(
       `[pty-exit] session=${sessionId} code=${exitCode} signal=${signal ?? 'none'} ` +
       `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
@@ -2444,7 +2454,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     session.mcpServer = null;
 
     const realId = session.realSessionId || sessionId;
-    const exitInfo = { stoppedByUser: !!session._stoppedByUser };
+    const exitInfo = { stoppedByUser: !!session._stoppedByUser, signal: signal ?? null };
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
       // If a fork/plan-accept transition re-keyed this session under realId
