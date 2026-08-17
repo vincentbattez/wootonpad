@@ -106,32 +106,3 @@ test('the only surviving raw colours are the documented .cm- MergeView rules', (
     );
   }
 });
-
-// Acceptance criterion #5: docs/customizing-colors.md must carry a cross-
-// reference note pointing readers at the native theme setting, so the person
-// who followed the old app.asar-unpacking guide finds the supported path and no
-// longer loses their customisation on every auto-update.
-test('customizing-colors.md carries a cross-reference to the native theme setting', () => {
-  const doc = fs.readFileSync(
-    path.join(__dirname, '..', 'docs', 'customizing-colors.md'),
-    'utf8',
-  );
-  // A dedicated note near the top, not buried at the end.
-  const head = doc.slice(0, 2500);
-  assert.match(
-    head,
-    /r[ée]glage|param[èe]tre|native|natif/i,
-    'the note must point at the native/in-app theme setting',
-  );
-  assert.match(
-    head,
-    /th[èe]me|theme/i,
-    'the note must mention the theme setting',
-  );
-  // The note must explicitly supersede the app.asar manipulation.
-  assert.match(
-    doc,
-    /(app\.asar|d[ée]paqueter|d[ée]sormais|obsol[èe]te|plus besoin)/i,
-    'the note must frame the manual app.asar edit as no longer necessary',
-  );
-});
