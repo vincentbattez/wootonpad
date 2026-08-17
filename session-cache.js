@@ -281,8 +281,9 @@ function buildProjectsFromCache() {
     // Empty projects go to the bottom
     if (a.sessions.length === 0 && b.sessions.length > 0) return 1;
     if (b.sessions.length === 0 && a.sessions.length > 0) return -1;
-    const aName = a.projectPath.split('/').filter(Boolean).pop() || a.projectPath;
-    const bName = b.projectPath.split('/').filter(Boolean).pop() || b.projectPath;
+    // Split on both separators: a projectPath may be POSIX or Windows-shaped.
+    const aName = a.projectPath.split(/[\\/]/).filter(Boolean).pop() || a.projectPath;
+    const bName = b.projectPath.split(/[\\/]/).filter(Boolean).pop() || b.projectPath;
     return aName.localeCompare(bName);
   });
 
