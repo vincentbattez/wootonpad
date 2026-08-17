@@ -16,7 +16,7 @@
     <div
       v-else
       class="project-header"
-      :class="{ collapsed, 'drop-target': dropHover }"
+      :class="{ collapsed, 'drop-target': dropHover, 'has-active-session': hasActiveSession }"
       :id="'ph-' + folderId"
       draggable="true"
       @click.self="toggle"
@@ -254,6 +254,10 @@ const avatar = computed(() =>
 
 const shortName = computed(() =>
   props.project.projectPath.split('/').filter(Boolean).slice(-2).join('/')
+);
+
+const hasActiveSession = computed(() =>
+  !!props.activeSessionId && (props.project.sessions || []).some(s => s.sessionId === props.activeSessionId)
 );
 
 const worktreeName = computed(() => {

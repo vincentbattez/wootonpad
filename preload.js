@@ -46,6 +46,8 @@ contextBridge.exposeInMainWorld('api', {
   getAccounts: () => ipcRenderer.invoke('get-accounts'),
   saveAccounts: (accounts) => ipcRenderer.invoke('save-accounts', accounts),
   createAccount: (name) => ipcRenderer.invoke('create-account', name),
+  discoverWslClaudeHomes: () => ipcRenderer.invoke('discover-wsl-claude-homes'),
+  createWslAccount: (distro, name) => ipcRenderer.invoke('create-wsl-account', distro, name),
   renameAccount: (id, name) => ipcRenderer.invoke('rename-account', id, name),
   deleteAccount: (id) => ipcRenderer.invoke('delete-account', id),
   getActiveAccountId: () => ipcRenderer.invoke('get-active-account-id'),
@@ -108,7 +110,7 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.on('session-detected', (_event, tempId, realId) => callback(tempId, realId));
   },
   onProcessExited: (callback) => {
-    ipcRenderer.on('process-exited', (_event, sessionId, exitCode) => callback(sessionId, exitCode));
+    ipcRenderer.on('process-exited', (_event, sessionId, exitCode, info) => callback(sessionId, exitCode, info));
   },
   onTerminalNotification: (callback) => {
     ipcRenderer.on('terminal-notification', (_event, sessionId, message) => callback(sessionId, message));
@@ -124,6 +126,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   onProjectInfoUpdated: (callback) => {
     ipcRenderer.on('project-info-updated', (_event, path, data) => callback(path, data));
+  },
+  onProjectInfoLoading: (callback) => {
+    ipcRenderer.on('project-info-loading', (_event, path) => callback(path));
   },
   onStatusUpdate: (callback) => {
     ipcRenderer.on('status-update', (_event, text, type) => callback(text, type));

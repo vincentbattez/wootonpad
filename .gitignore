@@ -7,6 +7,9 @@ design/
 *.db-shm
 public/codemirror-bundle.js
 public/vue-bundle.js
+# Vite emits the scoped-style sheet next to vue-bundle.js, named after the lib.
+public/switchboard.css
+public/wootonpad.css
 .DS_Store
 *.pem
 .env

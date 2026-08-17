@@ -1,13 +1,13 @@
 {
-  "name": "switchboard",
-  "version": "0.3.0",
+  "name": "wootonpad",
+  "version": "0.5.0",
   "private": true,
   "description": "A desktop app for browsing, searching, and managing CLI coding sessions",
   "author": "Zakhar Morozov <fortael@yahoo.com",
   "main": "main.js",
   "scripts": {
     "start": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron .",
-    "test": "node --test",
+    "test": "node --test --test-timeout=60000",
     "test:e2e": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && playwright test",
     "sandcastle": "tsx .sandcastle/main.mts",
     "sandcastle:build-image": "sandcastle docker build-image",
