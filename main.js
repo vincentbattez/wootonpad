@@ -2306,6 +2306,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         ]));
       }
 
+      // The command is assembled from a dozen conditionals above; when a session
+      // dies at startup, the only way to tell which of them fired is to read it back.
+      log.info(`[claude-cmd] session=${sessionId} cmd=${JSON.stringify(claudeCmd)}`);
+
       ptyProcess = pty.spawn(shell, shellArgs(shell, claudeCmd, shellExtraArgs), {
         name: 'xterm-256color',
         cols: 120,
@@ -2424,8 +2428,16 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     }
   });
 
-  ptyProcess.onExit(({ exitCode }) => {
+  ptyProcess.onExit(({ exitCode, signal }) => {
     session.exited = true;
+    // A session that dies on its own leaves no trace on this side. Log the code
+    // and the tail of what the shell last printed — that tail carries the error
+    // message of whatever actually failed, which may not be Claude itself.
+    const tail = (session.outputBuffer || []).join('').slice(-600);
+    log.info(
+      `[pty-exit] session=${sessionId} code=${exitCode} signal=${signal ?? 'none'} ` +
+      `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
+    );
     // Clean up MCP server
     const mcpId = session.realSessionId || sessionId;
     shutdownMcpServer(mcpId);
