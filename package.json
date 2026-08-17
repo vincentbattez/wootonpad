@@ -21,7 +21,7 @@
     "generate-icons": "node scripts/generate-icons.js && node scripts/generate-dmg-background.js",
     "build": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron-builder",
     "build:mac": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron-builder --mac && node scripts/postinstall.js && codesign --sign - --force --deep dist/mac-arm64/WootonPad.app 2>/dev/null; true",
-    "build:mac:arm64": "npm run bundle:radix && npm run bundle:vue && electron-builder --mac --arm64 2>/dev/null; true",
+    "build:mac:arm64": "npm run bundle:radix && npm run bundle:vue && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac --arm64 -c.mac.notarize=false -c.mac.identity=null && node scripts/install-local-mac.js",
     "build:win": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron-builder --win",
     "build:linux": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron-builder --linux",
     "release": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron-builder --publish always",
