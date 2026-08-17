@@ -7,15 +7,28 @@ const crypto = require('crypto');
 const { encodeProjectPath } = require('./encode-project-path');
 
 const CLAUDE_DIR = path.join(os.homedir(), '.claude');
-const PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
-const SCHEDULE_COMMANDS_DIR = path.join(CLAUDE_DIR, 'commands');
+
+// The Claude home to write into follows the active account, so a WSL-backed one
+// gets its creator command inside the distribution rather than in the Windows
+// home. main.js injects the real resolvers; the defaults preserve the previous
+// single-home behaviour.
+let ctx = {
+  getProjectsDir: () => path.join(CLAUDE_DIR, 'projects'),
+  getCommandsDir: () => path.join(CLAUDE_DIR, 'commands'),
+  // A schedule file lives in the project, so its path carries the project's
+  // flavour and needs translating before a Windows read.
+  hostPath: (p) => p,
+};
+function configure(next) {
+  ctx = { ...ctx, ...next };
+}
 
 const SCHEDULE_CREATOR_TEMPLATE = `---
 name: create-switchboard-schedule
-description: Create a new Switchboard scheduled task for this project
+description: Create a new WootonPad scheduled task for this project
 ---
 
-You are helping the user create a scheduled task in Switchboard. This task will run automatically on a cron schedule using Claude Code CLI in headless mode (-p flag).
+You are helping the user create a scheduled task in WootonPad. This task will run automatically on a cron schedule using Claude Code CLI in headless mode (-p flag).
 
 ## Instructions for the user
 
@@ -82,11 +95,11 @@ Default permission-mode is \`acceptEdits\`. Always include at least \`Read\` and
 - The slug must be kebab-case, short, and descriptive
 - The prompt in the body must be fully self-contained — it runs without any conversation history
 - If the \`.claude/commands/\` directory doesn't exist, create it
-- After saving, tell the user: "Your scheduled task is saved! It will appear in Switchboard's brain tab with a schedule icon. You can enable/disable it or edit the schedule from there."
+- After saving, tell the user: "Your scheduled task is saved! It will appear in WootonPad's brain tab with a schedule icon. You can enable/disable it or edit the schedule from there."
 - If the user wants to see existing schedules, list any \`schedule-*.md\` files in \`.claude/commands/\`
 `;
 
-const SCHEDULE_WELCOME_MESSAGE = `## Switchboard Scheduled Task Creator
+const SCHEDULE_WELCOME_MESSAGE = `## WootonPad Scheduled Task Creator
 
 Welcome! This session will help you create a **scheduled task** that runs automatically on a cron schedule using Claude Code.
 
@@ -96,7 +109,7 @@ Welcome! This session will help you create a **scheduled task** that runs automa
 - The schedule file gets saved to this project's \`.claude/commands/\` directory as a command — so it can also be run manually from any Claude session using \`/schedule-<name>\`
 - Once saved, it appears in the **brain tab** with a clock icon where you can edit it directly
 - To edit, you can also ask use this schedule claude session to ask to edit existing commands.
-- Switchboard runs matching schedules automatically in the background — each run creates a session grouped under the task's slug
+- WootonPad runs matching schedules automatically in the background — each run creates a session grouped under the task's slug
 
 ### What you can configure
 - **The prompt** — what Claude should do each time the task runs
@@ -112,9 +125,10 @@ Just describe the task you have in mind, or try one of these:
 
 function ensureScheduleCreatorCommand() {
   try {
-    const commandPath = path.join(SCHEDULE_COMMANDS_DIR, 'create-switchboard-schedule.md');
+    const commandsDir = ctx.getCommandsDir();
+    const commandPath = path.join(commandsDir, 'create-switchboard-schedule.md');
     if (!fs.existsSync(commandPath)) {
-      fs.mkdirSync(SCHEDULE_COMMANDS_DIR, { recursive: true });
+      fs.mkdirSync(commandsDir, { recursive: true });
       fs.writeFileSync(commandPath, SCHEDULE_CREATOR_TEMPLATE);
     }
   } catch (err) {
@@ -127,7 +141,7 @@ function init(log, runCommand) {
 
   ipcMain.handle('get-schedule-creator-command', () => {
     try {
-      const commandPath = path.join(SCHEDULE_COMMANDS_DIR, 'create-switchboard-schedule.md');
+      const commandPath = path.join(ctx.getCommandsDir(), 'create-switchboard-schedule.md');
       ensureScheduleCreatorCommand();
       return fs.readFileSync(commandPath, 'utf8');
     } catch (err) {
@@ -139,14 +153,14 @@ function init(log, runCommand) {
   ipcMain.handle('create-schedule-session', (_event, projectPath) => {
     try {
       ensureScheduleCreatorCommand();
-      const commandPath = path.join(SCHEDULE_COMMANDS_DIR, 'create-switchboard-schedule.md');
+      const commandPath = path.join(ctx.getCommandsDir(), 'create-switchboard-schedule.md');
       const systemPrompt = fs.readFileSync(commandPath, 'utf8');
 
       const sessionId = crypto.randomUUID();
       const msgId = crypto.randomUUID();
       const timestamp = new Date().toISOString();
       const folder = encodeProjectPath(projectPath);
-      const claudeProjectDir = path.join(PROJECTS_DIR, folder);
+      const claudeProjectDir = path.join(ctx.getProjectsDir(), folder);
 
       fs.mkdirSync(claudeProjectDir, { recursive: true });
       const jsonlPath = path.join(claudeProjectDir, `${sessionId}.jsonl`);
@@ -184,7 +198,10 @@ function init(log, runCommand) {
   });
   ipcMain.handle('run-schedule-now', (_event, filePath) => {
     try {
-      const content = fs.readFileSync(filePath, 'utf8');
+      // filePath is canonical — for a WSL project it is the POSIX path
+      // scanSchedules reported. path.dirname below copes with either flavour,
+      // but the read does not.
+      const content = fs.readFileSync(ctx.hostPath(filePath), 'utf8');
       const { meta, body } = parseFrontmatter(content);
       if (!body) return { ok: false, error: 'No prompt in schedule file' };
 
@@ -217,4 +234,4 @@ function init(log, runCommand) {
   });
 }
 
-module.exports = { ensureScheduleCreatorCommand, init };
+module.exports = { ensureScheduleCreatorCommand, init, configure };

@@ -1727,7 +1727,16 @@ window.__sb = {
   toggleStar: async (id) => {
     const { starred } = await window.api.toggleStar(id);
     const s = sessionMap.get(id);
-    if (s) s.starred = starred;
+    if (s) {
+      const updated = { ...s, starred };
+      sessionMap.set(id, updated);
+      for (const list of [cachedProjects, cachedAllProjects]) {
+        for (const p of list) {
+          const idx = p.sessions.findIndex(x => x.sessionId === id);
+          if (idx !== -1) p.sessions[idx] = updated;
+        }
+      }
+    }
     refreshSidebar({ resort: true });
   },
 
@@ -1866,6 +1875,18 @@ window.__sb = {
   createAccount: async (name) => {
     const newAcc = await window.api.createAccount(name);
     if (!newAcc) return null;
+    accounts = [...accounts, newAcc];
+    await refreshAccountUsage();
+    updateAccountDropdown();
+    renderAccountsPanel();
+    return newAcc;
+  },
+
+  discoverWslClaudeHomes: () => window.api.discoverWslClaudeHomes(),
+
+  createWslAccount: async (distro, name) => {
+    const newAcc = await window.api.createWslAccount(distro, name);
+    if (!newAcc || newAcc.error) return newAcc;
     accounts = [...accounts, newAcc];
     await refreshAccountUsage();
     updateAccountDropdown();
