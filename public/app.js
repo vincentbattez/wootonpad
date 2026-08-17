@@ -216,6 +216,35 @@ window.api.onSessionForked((oldId, newId) => {
   pollActiveSessions();
 });
 
+// Drop every renderer-side trace of a session the sidebar should stop listing.
+function forgetSession(sessionId) {
+  pendingSessions.delete(sessionId);
+  for (const proj of cachedProjects) {
+    proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
+  }
+  sessionMap.delete(sessionId);
+}
+
+// What a session's tab does when its process exits, by session type.
+// keepTabOnCrash: the CLI's error message lives only in that terminal buffer, so
+//   destroying the tab would close the window on the one thing explaining the failure.
+//   Clicking the session again respawns it (openSession).
+// forgetOnExit: a Run Terminal outlives its shell — its tab stays in the sidebar,
+//   ready to be revealed and respawned by the next click on Run (ADR 0006).
+const EXIT_POLICIES = {
+  'terminal': { keepTabOnCrash: false, forgetOnExit: true },
+  'run-terminal': { keepTabOnCrash: false, forgetOnExit: false },
+  // Claude sessions: only a no-op pending one (never wrote a .jsonl) is forgotten.
+  default: { keepTabOnCrash: true, forgetOnExit: 'pendingOnly' },
+};
+
+// The shell reports an interrupt as 128+signal; that is deliberate, not a crash.
+const INTERRUPT_EXIT_CODES = new Set([130, 143]);
+function isCrashExit(exitCode, exitInfo) {
+  if (exitCode === 0 || exitInfo?.stoppedByUser) return false;
+  return !exitInfo?.signal && !INTERRUPT_EXIT_CODES.has(exitCode);
+}
+
 window.api.onProcessExited((sessionId, exitCode, exitInfo) => {
   const entry = openSessions.get(sessionId);
   const session = sessionMap.get(sessionId);
@@ -223,12 +252,9 @@ window.api.onProcessExited((sessionId, exitCode, exitInfo) => {
     entry.closed = true;
   }
 
-  // A Claude session that died on its own printed its own error message, and the
-  // terminal buffer is the only place it exists. Destroying the tab here would
-  // close the window on the one thing that explains the failure — so keep it and
-  // let the user read it. Clicking the session again respawns it (openSession).
-  const isTerminalTab = session?.type === 'terminal' || session?.type === 'run-terminal';
-  if (entry && exitCode !== 0 && !exitInfo?.stoppedByUser && !isTerminalTab) {
+  const policy = EXIT_POLICIES[session?.type] || EXIT_POLICIES.default;
+
+  if (entry && policy.keepTabOnCrash && isCrashExit(exitCode, exitInfo)) {
     entry.terminal.write(
       `\r\n\x1b[1;31m── Session ended unexpectedly (exit code ${exitCode}) ──\x1b[0m\r\n` +
       `\x1b[2mThe error above is the CLI's own. Click this session in the sidebar to start it again.\x1b[0m\r\n`
@@ -251,37 +277,12 @@ window.api.onProcessExited((sessionId, exitCode, exitInfo) => {
     placeholder.style.display = '';
   }
 
-  // A Run Terminal outlives its shell: the tab stays in the sidebar, ready to be
-  // revealed and respawned by the next click on Run (ADR 0006).
-  if (session?.type === 'run-terminal') {
-    refreshSidebar();
-    pollActiveSessions();
-    return;
+  if (policy.forgetOnExit === true ||
+      (policy.forgetOnExit === 'pendingOnly' && pendingSessions.has(sessionId))) {
+    forgetSession(sessionId);
   }
 
-  // Plain terminal sessions: remove from sidebar entirely (ephemeral)
-  if (session?.type === 'terminal') {
-    pendingSessions.delete(sessionId);
-    for (const proj of cachedProjects) {
-      proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
-    }
-    sessionMap.delete(sessionId);
-    refreshSidebar();
-    pollActiveSessions();
-    return;
-  }
-
-  // Clean up no-op pending sessions (never created a .jsonl)
-  if (pendingSessions.has(sessionId)) {
-    pendingSessions.delete(sessionId);
-    // Remove from cached project data
-    for (const proj of cachedProjects) {
-      proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
-    }
-    sessionMap.delete(sessionId);
-    refreshSidebar();
-  }
-
+  refreshSidebar();
   pollActiveSessions();
 });
 
@@ -351,21 +352,22 @@ async function confirmAndStopSession(sessionId) {
   _stoppingSession = true;
   try {
     if (!confirm('Stop this session?')) return;
-    await window.api.stopSession(sessionId);
+    const stopped = await window.api.stopSession(sessionId);
     activePtyIds.delete(sessionId);
 
     const session = sessionMap.get(sessionId);
-    if (session?.type === 'terminal' || session?.type === 'run-terminal') {
+    // A crashed tab kept open for its error message has no process left to stop;
+    // stopping it is the user asking to be rid of it, so the tab goes — and with it
+    // the sidebar row, if the session never wrote a .jsonl to be listed from.
+    const alreadyDead = !stopped?.ok;
+    if (session?.type === 'terminal' || session?.type === 'run-terminal' || alreadyDead) {
       // Stopping by hand is deliberate: unlike a shell that exited on its own, the
       // tab goes, and the backend forgets this Project's Run Terminal binding.
-      if (session.type === 'run-terminal') await window.api.forgetRunTerminal?.(sessionId);
+      if (session?.type === 'run-terminal') await window.api.forgetRunTerminal?.(sessionId);
       // Plain terminals are ephemeral — clean up immediately without waiting for process-exited
       destroySession(sessionId);
-      pendingSessions.delete(sessionId);
-      for (const proj of cachedProjects) {
-        proj.sessions = proj.sessions.filter(s => s.sessionId !== sessionId);
-      }
-      sessionMap.delete(sessionId);
+      const isEphemeral = session?.type === 'terminal' || session?.type === 'run-terminal';
+      if (isEphemeral || pendingSessions.has(sessionId)) forgetSession(sessionId);
       if (activeSessionId === sessionId) {
         setActiveSession(null);
         placeholder.style.display = '';
@@ -687,9 +689,8 @@ async function openSession(session, customOptions) {
   // Create new terminal entry (hidden until showSession)
   const entry = createTerminalEntry(session);
 
-  // Open terminal in main process. A session still pending never wrote a .jsonl —
-  // it died before Claude got that far — so there is nothing to `--resume`: it has
-  // to be spawned as new again, under the same id.
+  // A session still pending never wrote a .jsonl, so there is nothing to `--resume`:
+  // it is spawned as new again, under the same id.
   const resumeOptions = customOptions || await resolveDefaultSessionOptions({ projectPath });
   const result = await window.api.openTerminal(sessionId, projectPath, pendingSessions.has(sessionId), resumeOptions);
   if (!result.ok) {
