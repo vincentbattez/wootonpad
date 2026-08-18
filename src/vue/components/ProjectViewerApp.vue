@@ -693,7 +693,7 @@ async function switchBranch(branch) {
   const res = await window.api.gitCheckout(viewedPath.value, branch);
   gitBusy.value = false;
   if (res.ok) { showGitMsg(`Switched to ${branch}`); await reload(); }
-  else showGitMsg(res.error || 'Checkout failed', true);
+  else showGitMsg(res.stderr || 'Checkout failed', true);
 }
 
 async function doFetch() {
@@ -702,7 +702,7 @@ async function doFetch() {
   const res = await window.api.gitFetch(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Fetched'); const br = await window.api.gitBranches(viewedPath.value); if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; } }
-  else showGitMsg(res.error || 'Fetch failed', true);
+  else showGitMsg(res.stderr || 'Fetch failed', true);
 }
 
 async function doPull() {
@@ -711,7 +711,7 @@ async function doPull() {
   const res = await window.api.gitPull(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Pulled'); await reload(); }
-  else showGitMsg(res.error || 'Pull failed', true);
+  else showGitMsg(res.stderr || 'Pull failed', true);
 }
 
 async function generateCommitMsg(style = 'short') {
@@ -728,7 +728,7 @@ async function doCommit() {
   const res = await window.api.gitCommit(viewedPath.value, commitMessage.value.trim());
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Committed'); commitMessage.value = ''; await reload(); }
-  else showGitMsg(res.error || 'Commit failed', true);
+  else showGitMsg(res.stderr || 'Commit failed', true);
 }
 
 async function doPush() {
@@ -738,7 +738,7 @@ async function doPush() {
   const res = await window.api.gitPush(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Pushed successfully'); await reload(); }
-  else showGitMsg(res.error || 'Push failed', true);
+  else showGitMsg(res.stderr || 'Push failed', true);
 }
 
 async function doCreateBranch() {
@@ -756,7 +756,7 @@ async function doCreateBranch() {
     if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
     await reload();
   } else {
-    showGitMsg(res.error || 'Failed to create branch', true);
+    showGitMsg(res.stderr || 'Failed to create branch', true);
   }
 }
 
@@ -807,7 +807,7 @@ function setViewedPath(path) {
 async function deleteWorktree(wt) {
   if (!confirm(`Delete worktree "${wt.name}" and its branch?\n\nThis cannot be undone.`)) return;
   const res = await window.api.deleteWorktree(project.value.projectPath, wt.projectPath);
-  if (!res.ok) { showGitMsg(res.error || 'Failed to delete worktree', true); return; }
+  if (!res.ok) { showGitMsg(res.stderr || 'Failed to delete worktree', true); return; }
   if (viewedPath.value === wt.projectPath) setViewedPath(project.value.projectPath);
   worktrees.value = worktrees.value.filter(w => w.projectPath !== wt.projectPath);
   showGitMsg(`Deleted worktree "${wt.name}"${res.branch ? ` and branch "${res.branch}"` : ''}`);

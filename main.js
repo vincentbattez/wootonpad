@@ -24,6 +24,11 @@ const log = require('electron-log');
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
+const { createProjectGit } = require('./project-git');
+const { execFile } = require('child_process');
+
+// A working diff can be large; the 1 MB default would truncate it into a parse error.
+const GIT_MAX_BUFFER = 10 * 1024 * 1024;
 log.transports.file.level = app.isPackaged ? 'info' : 'debug';
 log.transports.console.level = app.isPackaged ? 'info' : 'debug';
 
@@ -213,6 +218,27 @@ function projectExecFile(argv, cwd, options = {}) {
   const { cwd: _cwd, env: _env, ...rest } = options;
   return ['wsl.exe', wslExecArgs(distro, cwd, argv), rest];
 }
+
+// The one place that binds project-git to this process. The module owns every
+// decision about git; projectExecFile owns where the command runs, which is what
+// keeps a WSL-backed project's git inside its distribution. See docs/adr/0007.
+const projectGit = createProjectGit({
+  run: (argv, cwd, { timeout } = {}) => new Promise(resolve => {
+    const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
+      encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
+    });
+    execFile(file, args, options, (err, stdout, stderr) => {
+      resolve({
+        // A timeout kills the child without an exit code; git's own codes are numbers.
+        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+        stdout,
+        // A spawn failure or a timeout produces no stderr at all, and the message is
+        // then the only description of what went wrong the user will ever get.
+        stderr: stderr || (err ? err.message : ''),
+      });
+    });
+  }),
+});
 
 // Build stats in the same format as stats-cache.json using Switchboard's own DB.
 // This ensures all accounts see charts even before running `claude /stats`.
@@ -674,9 +700,9 @@ function infoJitter() {
 }
 
 function fetchProjectInfo(projectPath) {
-  const { execFile } = require('child_process');
-  // argv form: for a WSL account these run inside the distribution, where the
-  // project's git and docker live, instead of over the 9p share.
+  // argv form: for a WSL account this runs inside the distribution, where the
+  // project's docker lives, instead of over the 9p share. Git took the same route
+  // and now goes through project-git; docker is not git, so it stays here.
   const run = (argv, opts = {}) => new Promise((resolve) => {
     const [file, args, options] = projectExecFile(argv, projectPath, { encoding: 'utf8', timeout: 10000, ...opts });
     execFile(file, args, options, (err, stdout) => {
@@ -685,20 +711,15 @@ function fetchProjectInfo(projectPath) {
   });
   const data = { branch: null, added: null, deleted: null, containers: null };
   return Promise.all([
-    run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }),
-    run(['git', 'diff', '--shortstat', 'HEAD'], { timeout: 5000 }),
+    projectGit.snapshot(projectPath, { depth: 'light' }),
     run(['docker', 'compose', 'ps', '--format', 'json'], {
       timeout: 8000,
       env: { ...process.env, PATH: DOCKER_PATH },
     }),
-  ]).then(([branch, stat, dockerOut]) => {
-    if (branch) data.branch = branch;
-    if (stat) {
-      const addM = stat.match(/(\d+) insertion/);
-      const delM = stat.match(/(\d+) deletion/);
-      if (addM) data.added = parseInt(addM[1]);
-      if (delM) data.deleted = parseInt(delM[1]);
-    }
+  ]).then(([snapshot, dockerOut]) => {
+    data.branch = snapshot.branch;
+    data.added = snapshot.added;
+    data.deleted = snapshot.deleted;
     if (dockerOut) {
       data.containers = dockerOut.split('\n').filter(Boolean).map(line => {
         try {
@@ -713,7 +734,6 @@ function fetchProjectInfo(projectPath) {
 
 // du -sk: only run on add-project and when the long-TTL size cache expires
 function fetchProjectSize(projectPath) {
-  const { execFile } = require('child_process');
   return new Promise((resolve) => {
     const [file, args, options] = projectExecFile(['du', '-sk', '.'], projectPath, { encoding: 'utf8', timeout: 15000 });
     execFile(file, args, options, (err, stdout) => {
@@ -766,92 +786,39 @@ ipcMain.handle('get-project-info', (_event, projectPath) => {
   return base && sizeMb !== null ? { ...base, sizeMb } : base;
 });
 
-// --- IPC: get-project-detail (full git log + docker details, no cache) ---
-ipcMain.handle('get-project-detail', (_event, projectPath) => {
+// --- IPC: get-project-detail (full Git Snapshot + docker details, no cache) ---
+// The Snapshot is assigned wholesale by the Project Viewer and re-read after every
+// mutation, which is why it stays one call rather than ten. Docker is not git and
+// stays here; it only becomes async so this handler stops blocking the process.
+ipcMain.handle('get-project-detail', async (_event, projectPath) => {
   if (!projectPath || !fs.existsSync(hostPath(projectPath))) return null;
-  const { execFileSync } = require('child_process');
-  // argv form so the project path never goes through shell quoting, and so a
-  // WSL account runs these where the repository actually lives.
-  const sh = (argv, opts = {}) => {
+  const docker = (argv, opts = {}) => new Promise(resolve => {
     const [file, args, options] = projectExecFile(argv, projectPath, {
-      encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], ...opts,
+      encoding: 'utf8', ...opts,
     });
-    return execFileSync(file, args, options).trim();
-  };
-  const detail = { branch: null, upstream: null, remoteUrl: null, tags: [], worktreePaths: [], commits: [], unpushedCommits: [], changedFiles: [], totalAdded: 0, totalDeleted: 0, containers: [], readmePath: null };
+    execFile(file, args, options, (err, stdout) => resolve(err ? '' : (stdout || '').trim()));
+  });
+
+  const { ok: _ok, ...snapshot } = await projectGit.snapshot(projectPath, { depth: 'full' });
+  const detail = { ...snapshot, containers: [], readmePath: null };
   for (const name of ['README.md', 'readme.md', 'Readme.md', 'README.rst', 'README']) {
     const fp = projectJoin(projectPath, name);
     if (fs.existsSync(hostPath(fp))) { detail.readmePath = fp; break; }
   }
-  try {
-    detail.branch = sh(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 });
-    const log = sh(['git', 'log', '--format=%h\x1f%s\x1f%an\x1f%ar', '-15'], { timeout: 5000 });
-    if (log) {
-      detail.commits = log.split('\n').filter(Boolean).map(line => {
-        const [hash, message, author, date] = line.split('\x1f');
-        return { hash, message, author, date };
-      });
-    }
-    try {
-      const unpushed = sh(['git', 'log', '--format=%h\x1f%s\x1f%an\x1f%ar', '@{u}..HEAD'], { timeout: 5000 });
-      if (unpushed) {
-        detail.unpushedCommits = unpushed.split('\n').filter(Boolean).map(line => {
-          const [hash, message, author, date] = line.split('\x1f');
-          return { hash, message, author, date };
-        });
-      }
-      const upstream = sh(['git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], { timeout: 3000 });
-      detail.upstream = upstream;
-      const remoteName = upstream.split('/')[0];
+
+  const raw = await docker(['docker', 'compose', 'ps', '--format', 'json'], {
+    timeout: 8000,
+    env: { ...process.env, PATH: DOCKER_PATH },
+  });
+  if (raw) {
+    detail.containers = raw.split('\n').filter(Boolean).map(line => {
       try {
-        detail.remoteUrl = sh(['git', 'remote', 'get-url', remoteName], { timeout: 3000 });
-      } catch {}
-    } catch {} // no upstream set — just leave empty
-    // Always try origin as fallback even without upstream
-    if (!detail.remoteUrl) {
-      try {
-        detail.remoteUrl = sh(['git', 'remote', 'get-url', 'origin'], { timeout: 3000 });
-      } catch {}
-    }
-    try {
-      const tagsRaw = sh(['git', 'tag', '--sort=-version:refname'], { timeout: 3000 });
-      detail.tags = tagsRaw ? tagsRaw.split('\n').filter(Boolean).slice(0, 20) : [];
-    } catch { detail.tags = []; }
-    try {
-      const wtRaw = sh(['git', 'worktree', 'list', '--porcelain'], { timeout: 3000 });
-      // Each worktree block is separated by blank line; first entry is the main worktree
-      detail.worktreePaths = wtRaw.split('\n\n').slice(1).map(block => {
-        const match = block.match(/^worktree (.+)/m);
-        return match ? match[1].trim() : null;
-      }).filter(Boolean);
-    } catch { detail.worktreePaths = []; }
-    const numstat = sh(['git', 'diff', '--numstat', 'HEAD'], { timeout: 5000 });
-    if (numstat) {
-      detail.changedFiles = numstat.split('\n').filter(Boolean).map(line => {
-        const [added, deleted, file] = line.split('\t');
-        const a = parseInt(added) || 0;
-        const d = parseInt(deleted) || 0;
-        detail.totalAdded += a;
-        detail.totalDeleted += d;
-        return { file, added: a, deleted: d };
-      }).sort((a, b) => (b.added + b.deleted) - (a.added + a.deleted));
-    }
-  } catch {}
-  try {
-    const raw = sh(['docker', 'compose', 'ps', '--format', 'json'], {
-      timeout: 8000,
-      env: { ...process.env, PATH: DOCKER_PATH },
-    });
-    if (raw) {
-      detail.containers = raw.split('\n').filter(Boolean).map(line => {
-        try {
-          const c = JSON.parse(line);
-          const ports = (c.Publishers || []).map(p => `${p.PublishedPort}→${p.TargetPort}/${p.Protocol}`).filter(p => !p.startsWith('0→')).join(', ');
-          return { name: c.Service || c.Name, state: (c.State || '').toLowerCase(), status: c.Status || '', ports };
-        } catch { return null; }
-      }).filter(Boolean);
-    }
-  } catch {}
+        const c = JSON.parse(line);
+        const ports = (c.Publishers || []).map(p => `${p.PublishedPort}→${p.TargetPort}/${p.Protocol}`).filter(p => !p.startsWith('0→')).join(', ');
+        return { name: c.Service || c.Name, state: (c.State || '').toLowerCase(), status: c.Status || '', ports };
+      } catch { return null; }
+    }).filter(Boolean);
+  }
   try {
     setProjectGitCache(projectPath, detail);
     notifyRendererProjectsChanged();
@@ -874,79 +841,22 @@ ipcMain.on('mcp-diff-response', (_event, sessionId, diffId, action, editedConten
 });
 
 // --- IPC: git operations ---
-// Every git call goes through projectGit so it runs where the repository is —
-// inside the distribution for a WSL-backed project, on Windows otherwise — and
-// so branch names and messages travel as argv rather than in a shell string.
-function projectGit(projectPath, argv, opts = {}) {
-  const { execFileSync } = require('child_process');
-  const [file, args, options] = projectExecFile(['git', ...argv], projectPath, {
-    encoding: 'utf8', timeout: 10000, stdio: ['ignore', 'pipe', 'pipe'], ...opts,
-  });
-  return execFileSync(file, args, options);
-}
+// The handlers below are a call and a return: everything git knows lives in
+// project-git.js (see docs/adr/0007).
+ipcMain.handle('git-branches', (_event, projectPath) => projectGit.branches(projectPath));
 
-ipcMain.handle('git-branches', (_event, projectPath) => {
-  try {
-    const current = projectGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 }).trim();
-    const all = projectGit(projectPath, ['branch'], { timeout: 5000 }).trim();
-    const branches = all.split('\n').map(b => b.replace(/^[*+]\s*/, '').trim()).filter(Boolean);
-    let remotes = [];
-    try {
-      const raw = projectGit(projectPath, ['branch', '-r'], { timeout: 5000 }).trim();
-      remotes = raw.split('\n').map(b => b.trim().replace(/^origin\//, '')).filter(b => b && b !== 'HEAD' && !b.includes('->') && !branches.includes(b));
-    } catch {}
-    return { ok: true, current, branches, remotes };
-  } catch (e) { return { ok: false, error: e.message }; }
-});
+ipcMain.handle('git-checkout', (_event, projectPath, branch) => projectGit.checkout(projectPath, branch));
 
-ipcMain.handle('git-checkout', (_event, projectPath, branch) => {
-  try {
-    projectGit(projectPath, ['checkout', branch]);
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.stderr || e.message }; }
-});
+ipcMain.handle('git-fetch', (_event, projectPath) => projectGit.fetch(projectPath));
 
-ipcMain.handle('git-fetch', (_event, projectPath) => {
-  try {
-    return { ok: true, output: projectGit(projectPath, ['fetch', '--prune'], { timeout: 30000 }) };
-  } catch (e) { return { ok: false, error: e.stderr || e.message }; }
-});
+ipcMain.handle('git-pull', (_event, projectPath) => projectGit.pull(projectPath));
 
-ipcMain.handle('git-pull', (_event, projectPath) => {
-  try {
-    return { ok: true, output: projectGit(projectPath, ['pull'], { timeout: 30000 }) };
-  } catch (e) { return { ok: false, error: e.stderr || e.message }; }
-});
+ipcMain.handle('git-commit', (_event, projectPath, message) => projectGit.commit(projectPath, message));
 
-ipcMain.handle('git-commit', (_event, projectPath, message) => {
-  try {
-    projectGit(projectPath, ['add', '-A']);
-    projectGit(projectPath, ['commit', '-m', message]);
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.stderr || e.message }; }
-});
+ipcMain.handle('git-push', (_event, projectPath) => projectGit.push(projectPath));
 
-ipcMain.handle('git-push', (_event, projectPath) => {
-  try {
-    return { ok: true, output: projectGit(projectPath, ['push'], { timeout: 30000 }) };
-  } catch (e) {
-    // try push with set-upstream
-    try {
-      const branch = projectGit(projectPath, ['rev-parse', '--abbrev-ref', 'HEAD'], {
-        timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
-      }).trim();
-      const out2 = projectGit(projectPath, ['push', '--set-upstream', 'origin', branch], { timeout: 30000 });
-      return { ok: true, output: out2 };
-    } catch (e2) { return { ok: false, error: e2.stderr || e2.message }; }
-  }
-});
-
-ipcMain.handle('git-create-branch', (_event, projectPath, branchName, checkout) => {
-  try {
-    projectGit(projectPath, checkout ? ['checkout', '-b', branchName] : ['branch', branchName]);
-    return { ok: true };
-  } catch (e) { return { ok: false, error: e.stderr || e.message }; }
-});
+ipcMain.handle('git-create-branch', (_event, projectPath, branchName, checkout) =>
+  projectGit.createBranch(projectPath, branchName, { checkout }));
 
 // --- IPC: areas ---
 // Thin CRUD. Ordering and visibility are decided in src/vue/area-tree.mjs, not here.
@@ -1056,10 +966,12 @@ ipcMain.handle('fetch-gitlab-avatar', async (_event, projectPath, remoteUrl) => 
   return `data:${contentType};base64,${buffer.toString('base64')}`;
 });
 
+// Only the diff is git. The claude spawn below is this file's own business.
 ipcMain.handle('git-generate-commit-msg', async (_event, projectPath, style = 'short') => {
   const { spawn } = require('child_process');
   try {
-    const diff = projectGit(projectPath, ['diff', 'HEAD'], { stdio: ['ignore', 'pipe', 'ignore'] });
+    const res = await projectGit.diff(projectPath);
+    const diff = res.ok ? res.diff : '';
     if (!diff.trim()) return { ok: false, error: 'No changes to describe' };
     const globalSettings = getSetting('global') || {};
     const baseInstruction = globalSettings.commitMessagePrompt || COMMIT_MSG_PROMPT_DEFAULT;
@@ -1091,42 +1003,16 @@ ipcMain.handle('git-generate-commit-msg', async (_event, projectPath, style = 's
   } catch (e) { return { ok: false, error: e.message }; }
 });
 
-ipcMain.handle('delete-worktree', (_event, projectPath, worktreePath) => {
+ipcMain.handle('delete-worktree', async (_event, projectPath, worktreePath) => {
   const { setProjectGitCache } = require('./db');
-  let branch = null;
-  // `-C <worktree>` is kept, but the whole call is routed through the project so
-  // a WSL-backed worktree path stays POSIX and is resolved by the distribution.
-  try {
-    branch = projectGit(projectPath, ['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'], {
-      timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim();
-  } catch {}
-  // Remove the worktree — idempotent: ignore "not a working tree" error
-  try {
-    projectGit(projectPath, ['worktree', 'remove', worktreePath, '--force']);
-  } catch (e) {
-    if (!e.message.includes('is not a working tree') && !e.message.includes('not a git')) {
-      return { ok: false, error: e.message };
-    }
-  }
-  // Prune stale worktree refs
-  try { projectGit(projectPath, ['worktree', 'prune'], { timeout: 5000 }); } catch {}
-  // Delete the branch
-  if (branch && branch !== 'HEAD' && branch !== 'main' && branch !== 'master') {
-    try { projectGit(projectPath, ['branch', '-D', branch], { timeout: 5000 }); } catch {}
-  }
-  // Clear project git cache for the worktree path so stale data doesn't show
+  const res = await projectGit.removeWorktree(projectPath, worktreePath);
+  if (!res.ok) return res;
+  // Clear the git cache for the worktree path so stale data doesn't show
   try { setProjectGitCache(worktreePath, { branch: null, upstream: null, remoteUrl: null, tags: [], commits: [], unpushedCommits: [], changedFiles: [], totalAdded: 0, totalDeleted: 0, containers: [] }); } catch {}
-  return { ok: true, branch };
+  return res;
 });
 
-ipcMain.handle('get-git-user-info', (_event, projectPath) => {
-  try {
-    const name = projectGit(projectPath, ['config', 'user.name']).trim();
-    const email = projectGit(projectPath, ['config', 'user.email']).trim();
-    return { ok: true, name, email };
-  } catch { return { ok: false, name: '', email: '' }; }
-});
+ipcMain.handle('get-git-user-info', (_event, projectPath) => projectGit.userInfo(projectPath));
 
 ipcMain.handle('get-file-tree', (_event, projectPath) => {
   const IGNORE = new Set(['.git', 'node_modules', '.next', 'dist', 'build', '__pycache__', '.venv', 'venv', '.DS_Store', 'target', '.cache', 'coverage', '.turbo']);
@@ -1165,18 +1051,14 @@ ipcMain.handle('get-project-sessions', (_event, projectPath) => {
   } catch (e) { return { ok: false, sessions: [] }; }
 });
 
-ipcMain.handle('get-file-diff', (_event, projectPath, filePath) => {
-  const { execFileSync } = require('child_process');
-  let oldContent = '';
-  try {
-    const [file, args, options] = projectExecFile(['git', 'show', `HEAD:${filePath}`], projectPath, {
-      encoding: 'utf8', timeout: 5000, stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    oldContent = execFileSync(file, args, options);
-  } catch {}
+// A file absent from HEAD is genuinely new, and empty old content is the right
+// reading of that. Any other failure now reaches the module rather than being
+// swallowed here, which is what made a spaced filename look new.
+ipcMain.handle('get-file-diff', async (_event, projectPath, filePath) => {
+  const shown = await projectGit.showFile(projectPath, filePath);
   try {
     const newContent = fs.readFileSync(hostPath(projectJoin(projectPath, filePath)), 'utf8');
-    return { ok: true, oldContent, newContent, filePath };
+    return { ok: true, oldContent: shown.ok ? shown.content : '', newContent };
   } catch (e) {
     return { ok: false, error: e.message };
   }

@@ -446,18 +446,19 @@ function pgc() {
   if (_pgc) return _pgc;
   _pgc = {
     get: db.prepare('SELECT * FROM project_git_cache WHERE projectPath = ?'),
-    getAll: db.prepare('SELECT projectPath, unpushedCount, changedCount FROM project_git_cache'),
+    getAll: db.prepare('SELECT projectPath, unpushedCount FROM project_git_cache'),
+    // changedCount is not written: nothing ever read it. Its column stays behind with
+    // its DEFAULT 0 rather than costing a migration.
     upsert: db.prepare(`
       INSERT INTO project_git_cache
-        (projectPath, branch, upstream, remoteUrl, tags, unpushedCount, changedCount, totalAdded, totalDeleted, containers, unpushedCommits, changedFiles, commits, updatedAt)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        (projectPath, branch, upstream, remoteUrl, tags, unpushedCount, totalAdded, totalDeleted, containers, unpushedCommits, changedFiles, commits, updatedAt)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(projectPath) DO UPDATE SET
         branch = excluded.branch,
         upstream = excluded.upstream,
         remoteUrl = excluded.remoteUrl,
         tags = excluded.tags,
         unpushedCount = excluded.unpushedCount,
-        changedCount = excluded.changedCount,
         totalAdded = excluded.totalAdded,
         totalDeleted = excluded.totalDeleted,
         containers = excluded.containers,
@@ -491,7 +492,6 @@ function setProjectGitCache(projectPath, data) {
     data.remoteUrl || null,
     JSON.stringify(data.tags || []),
     data.unpushedCommits?.length || 0,
-    data.changedFiles?.length || 0,
     data.totalAdded || 0,
     data.totalDeleted || 0,
     JSON.stringify(data.containers || []),
@@ -505,7 +505,7 @@ function setProjectGitCache(projectPath, data) {
 function getAllProjectGitCounts() {
   const rows = pgc().getAll.all();
   const map = new Map();
-  for (const r of rows) map.set(r.projectPath, { unpushedCount: r.unpushedCount, changedCount: r.changedCount });
+  for (const r of rows) map.set(r.projectPath, { unpushedCount: r.unpushedCount });
   return map;
 }
 
