@@ -9,11 +9,10 @@ const COMMIT_FORMAT = `--format=%h${FIELD}%s${FIELD}%an${FIELD}%ar`;
 const RECENT_COMMITS = 15;
 const MAX_TAGS = 20;
 
-// Deleting the branch a Worktree sat on is fine; deleting these is not.
-const PROTECTED_BRANCHES = new Set(['HEAD', 'main', 'master']);
+// Safe to delete the branch a Worktree sat on, never these — HEAD being what a detached one reports.
+const PROTECTED_REFS = new Set(['HEAD', 'main', 'master']);
 
-// A path that was never a worktree exits 128, the same code as a genuine failure, so
-// only the text tells them apart. Git's constraint, not a choice; the only match left.
+// A path that was never a worktree exits 128 like a real failure; only this text tells them apart.
 const NOT_A_WORKTREE = /is not a working tree|not a git/;
 
 function parseCommits(stdout) {
@@ -23,8 +22,7 @@ function parseCommits(stdout) {
   });
 }
 
-// The first block of `worktree list --porcelain` is the main worktree, which is the
-// Project itself and never a Worktree in the app's sense.
+// The first block is the main worktree — the Project itself, never a Worktree here.
 function parseWorktreePaths(stdout) {
   return (stdout || '').trim().split('\n\n').slice(1).map(block => {
     const match = block.match(/^worktree (.+)/m);
@@ -60,8 +58,7 @@ function parseLocalBranches(stdout) {
     .filter(Boolean);
 }
 
-// Remotes are shown without their `origin/` prefix and only when no local branch already
-// carries the name — the panel offers them as branches to create, not as refs to inspect.
+// The panel offers these as branches to create, so a name a local branch already has is dropped.
 function parseRemoteBranches(stdout, localBranches) {
   return (stdout || '').trim().split('\n')
     .map(b => b.trim().replace(/^origin\//, ''))
@@ -69,8 +66,7 @@ function parseRemoteBranches(stdout, localBranches) {
 }
 
 function createProjectGit({ run }) {
-  // The runner is injected and may be anything; a rejection here would surface as an
-  // unhandled rejection in the renderer's `res.ok`, so it is flattened into an exit code.
+  // An injected runner may reject; flattened here into an exit code so nothing throws.
   async function git(argv, cwd, timeout) {
     try {
       const res = await run(argv, cwd, { timeout });
@@ -89,27 +85,24 @@ function createProjectGit({ run }) {
 
   const failed = res => ({ ok: false, code: res.code, stderr: (res.stderr || '').trim() });
   const text = res => (res.stdout || '').trim();
-  // A mutation answers with its verdict and nothing else — no caller reads git's output.
-  const ran = async (run, argv, cwd) => {
-    const res = await run(argv, cwd);
+  const ran = async (tier, argv, cwd) => {
+    const res = await tier(argv, cwd);
     return res.code === 0 ? { ok: true } : failed(res);
   };
 
   // The sidebar badge: a branch and the size of the working diff, nothing more.
   async function lightSnapshot(projectPath) {
-    const [head, shortstat] = [
-      await local(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath),
-      await local(['diff', '--shortstat', 'HEAD'], projectPath),
-    ];
+    const [head, shortstat] = await Promise.all([
+      local(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath),
+      local(['diff', '--shortstat', 'HEAD'], projectPath),
+    ]);
     const counts = shortstat.code === 0 ? parseShortstat(shortstat.stdout) : { added: null, deleted: null };
     return { ok: true, branch: head.code === 0 ? text(head) : null, ...counts };
   }
 
-  // A folder that is not a repository comes back empty rather than failing — the panel
-  // renders the empty shape, and every field below is independently optional.
+  // A folder that is not a repository comes back empty rather than failing.
   async function fullSnapshot(projectPath) {
-    // worktreePaths stays absent until git answers: the Project Viewer deletes every
-    // Worktree this field omits, so [] from a failed read would delete live ones.
+    // worktreePaths stays absent until git answers: the panel deletes every Worktree it omits.
     const snap = {
       ok: true,
       branch: null, upstream: null, remoteUrl: null,
@@ -176,8 +169,7 @@ function createProjectGit({ run }) {
       return res.code === 0 ? { ok: true, content: res.stdout } : failed(res);
     },
 
-    // A repository with no identity configured is ordinary, so the empty strings come
-    // back alongside the failure rather than instead of a result.
+    // No identity configured is ordinary: the empty strings come back with the failure.
     async userInfo(projectPath) {
       const name = await local(['config', 'user.name'], projectPath);
       const email = await local(['config', 'user.email'], projectPath);
@@ -208,8 +200,7 @@ function createProjectGit({ run }) {
       return ran(network, ['pull'], projectPath);
     },
 
-    // A branch with no upstream is the common first push, not an error — retry naming one.
-    // If the retry fails too, its own message is the one that describes what went wrong.
+    // No upstream is the common first push, not an error — retry naming one.
     async push(projectPath) {
       const first = await network(['push'], projectPath);
       if (first.code === 0) return { ok: true };
@@ -221,8 +212,7 @@ function createProjectGit({ run }) {
       return retry.code === 0 ? { ok: true } : failed(retry);
     },
 
-    // The one destructive operation in the app. It reads the branch first, because once
-    // the worktree is gone there is nothing left to ask.
+    // The branch is read first: once the worktree is gone there is nothing left to ask.
     async removeWorktree(projectPath, worktreePath) {
       const head = await local(['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
       const branch = head.code === 0 ? text(head) : null;
@@ -231,7 +221,7 @@ function createProjectGit({ run }) {
       if (removed.code !== 0 && !NOT_A_WORKTREE.test(removed.stderr)) return failed(removed);
 
       await local(['worktree', 'prune'], projectPath);
-      if (branch && !PROTECTED_BRANCHES.has(branch)) {
+      if (branch && !PROTECTED_REFS.has(branch)) {
         await local(['branch', '-D', branch], projectPath);
       }
       return { ok: true, branch };

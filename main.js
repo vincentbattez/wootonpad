@@ -219,9 +219,7 @@ function projectExecFile(argv, cwd, options = {}) {
   return ['wsl.exe', wslExecArgs(distro, cwd, argv), rest];
 }
 
-// The one place that binds project-git to this process. The module owns every
-// decision about git; projectExecFile owns where the command runs, which is what
-// keeps a WSL-backed project's git inside its distribution. See docs/adr/0007.
+// The module decides about git, projectExecFile decides where it runs. See docs/adr/0007.
 const projectGit = createProjectGit({
   run: (argv, cwd, { timeout } = {}) => new Promise(resolve => {
     const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
@@ -232,8 +230,7 @@ const projectGit = createProjectGit({
         // A timeout kills the child without an exit code; git's own codes are numbers.
         code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
         stdout,
-        // A spawn failure or a timeout produces no stderr at all, and the message is
-        // then the only description of what went wrong the user will ever get.
+        // A spawn failure or timeout prints no stderr; its message is all the user gets.
         stderr: stderr || (err ? err.message : ''),
       });
     });
@@ -699,16 +696,35 @@ function infoJitter() {
   return PROJECT_INFO_TTL_MS + (Math.random() * 60000 - 30000);
 }
 
-// Docker is not git and keeps its own route to the project — for a WSL account
-// that means inside the distribution, where the daemon is. Both readers of it
-// want the same thing: the raw lines, or nothing.
-function dockerComposePs(projectPath) {
+// Docker is not git and keeps its own route: inside the distribution, where the daemon is.
+function dockerComposePs(projectPath, { withPorts = false } = {}) {
   return new Promise((resolve) => {
     const [file, args, options] = projectExecFile(['docker', 'compose', 'ps', '--format', 'json'], projectPath, {
       encoding: 'utf8', timeout: 8000, env: { ...process.env, PATH: DOCKER_PATH },
     });
-    execFile(file, args, options, (err, stdout) => resolve(err ? '' : (stdout || '').trim()));
+    execFile(file, args, options, (err, stdout) => {
+      if (err) return resolve(null);
+      resolve(parseComposeContainers(stdout, withPorts));
+    });
   });
+}
+
+// One JSON object per line. Only the Project Viewer renders ports.
+function parseComposeContainers(stdout, withPorts) {
+  const lines = (stdout || '').trim().split('\n').filter(Boolean);
+  if (!lines.length) return null;
+  return lines.map(line => {
+    try {
+      const c = JSON.parse(line);
+      const container = { name: c.Service || c.Name, state: (c.State || '').toLowerCase(), status: c.Status || '' };
+      if (!withPorts) return container;
+      container.ports = (c.Publishers || [])
+        .map(p => `${p.PublishedPort}→${p.TargetPort}/${p.Protocol}`)
+        .filter(p => !p.startsWith('0→'))
+        .join(', ');
+      return container;
+    } catch { return null; }
+  }).filter(Boolean);
 }
 
 function fetchProjectInfo(projectPath) {
@@ -716,18 +732,11 @@ function fetchProjectInfo(projectPath) {
   return Promise.all([
     projectGit.snapshot(projectPath, { depth: 'light' }),
     dockerComposePs(projectPath),
-  ]).then(([snapshot, dockerOut]) => {
+  ]).then(([snapshot, containers]) => {
     data.branch = snapshot.branch;
     data.added = snapshot.added;
     data.deleted = snapshot.deleted;
-    if (dockerOut) {
-      data.containers = dockerOut.split('\n').filter(Boolean).map(line => {
-        try {
-          const c = JSON.parse(line);
-          return { name: c.Service || c.Name, state: (c.State || '').toLowerCase(), status: c.Status || '' };
-        } catch { return null; }
-      }).filter(Boolean);
-    }
+    data.containers = containers;
     return data;
   });
 }
@@ -787,9 +796,7 @@ ipcMain.handle('get-project-info', (_event, projectPath) => {
 });
 
 // --- IPC: get-project-detail (full Git Snapshot + docker containers, no cache) ---
-// The channel name is inherited; what it returns is a Git Snapshot with the two
-// things the panel shows beside it. One call, because the Project Viewer assigns
-// it wholesale and re-reads it after every mutation.
+// One call: the Project Viewer assigns it wholesale and re-reads it after every mutation.
 ipcMain.handle('get-project-detail', async (_event, projectPath) => {
   if (!projectPath || !fs.existsSync(hostPath(projectPath))) return null;
 
@@ -800,18 +807,11 @@ ipcMain.handle('get-project-detail', async (_event, projectPath) => {
     if (fs.existsSync(hostPath(fp))) { overview.readmePath = fp; break; }
   }
 
-  const raw = await dockerComposePs(projectPath);
-  if (raw) {
-    overview.containers = raw.split('\n').filter(Boolean).map(line => {
-      try {
-        const c = JSON.parse(line);
-        const ports = (c.Publishers || []).map(p => `${p.PublishedPort}→${p.TargetPort}/${p.Protocol}`).filter(p => !p.startsWith('0→')).join(', ');
-        return { name: c.Service || c.Name, state: (c.State || '').toLowerCase(), status: c.Status || '', ports };
-      } catch { return null; }
-    }).filter(Boolean);
-  }
+  overview.containers = await dockerComposePs(projectPath, { withPorts: true }) || [];
   try {
-    setProjectGitCache(projectPath, overview);
+    // Dropped, not merely unwritten: the panel deletes every Worktree a Snapshot omits.
+    const { worktreePaths: _paths, ...cacheable } = overview;
+    setProjectGitCache(projectPath, cacheable);
     notifyRendererProjectsChanged();
   } catch {}
   return overview;
@@ -831,9 +831,7 @@ ipcMain.on('mcp-diff-response', (_event, sessionId, diffId, action, editedConten
   resolvePendingDiff(sessionId, diffId, action, editedContent);
 });
 
-// --- IPC: git operations ---
-// The handlers below are a call and a return: everything git knows lives in
-// project-git.js (see docs/adr/0007).
+// --- IPC: git operations (everything git knows lives in project-git.js, docs/adr/0007) ---
 ipcMain.handle('git-branches', (_event, projectPath) => projectGit.branches(projectPath));
 
 ipcMain.handle('git-checkout', (_event, projectPath, branch) => projectGit.checkout(projectPath, branch));
@@ -962,7 +960,8 @@ ipcMain.handle('git-generate-commit-msg', async (_event, projectPath, style = 's
   const { spawn } = require('child_process');
   try {
     const res = await projectGit.diff(projectPath);
-    const diff = res.ok ? res.diff : '';
+    if (!res.ok) return res;
+    const diff = res.diff;
     if (!diff.trim()) return { ok: false, stderr: 'No changes to describe' };
     const globalSettings = getSetting('global') || {};
     const baseInstruction = globalSettings.commitMessagePrompt || COMMIT_MSG_PROMPT_DEFAULT;
@@ -1042,9 +1041,8 @@ ipcMain.handle('get-project-sessions', (_event, projectPath) => {
   } catch (e) { return { ok: false, sessions: [] }; }
 });
 
-// git exits 128 both for a file absent from HEAD and for a repository it cannot
-// read, so empty old content still stands for either — the likelier by far being
-// that the file is new, which is what the panel then shows.
+// git exits 128 both for a file absent from HEAD and for a repository it cannot read,
+// so empty old content stands for either — the likelier being a new file, as shown.
 ipcMain.handle('get-file-diff', async (_event, projectPath, filePath) => {
   const shown = await projectGit.showFile(projectPath, filePath);
   try {
