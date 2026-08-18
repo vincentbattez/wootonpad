@@ -116,7 +116,8 @@ test('a folder that is not a repository yields an empty Snapshot from the real b
   const snap = await git.snapshot(dir, { depth: 'full' });
   assert.equal(snap.ok, true);
   assert.equal(snap.branch, null);
-  assert.deepEqual(snap.worktreePaths, []);
+  // Absent, not empty: the panel must not read this as "your Worktrees are gone".
+  assert.equal('worktreePaths' in snap, false);
   assert.equal((await git.branches(dir)).ok, false);
 
   fs.rmSync(dir, { recursive: true, force: true });

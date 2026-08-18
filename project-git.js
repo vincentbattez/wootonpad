@@ -116,10 +116,14 @@ function createProjectGit({ run }) {
   // mutation. A folder that is not a repository comes back empty rather than failing:
   // the panel renders the empty shape, and every field below is independently optional.
   async function fullSnapshot(projectPath) {
+    // worktreePaths is deliberately absent until git actually answers. The Project
+    // Viewer reconciles its Worktree list against this field and deletes every one it
+    // no longer sees, so an empty list from a failed read would delete live Worktrees.
+    // Absent means "unknown" and skips the reconciliation; [] means "git says none".
     const snap = {
       ok: true,
       branch: null, upstream: null, remoteUrl: null,
-      tags: [], worktreePaths: [], commits: [], unpushedCommits: [],
+      tags: [], commits: [], unpushedCommits: [],
       changedFiles: [], totalAdded: 0, totalDeleted: 0,
     };
 

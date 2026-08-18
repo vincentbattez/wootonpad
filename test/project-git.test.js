@@ -102,6 +102,26 @@ test('a repository with no Worktree yields an empty Worktree list, not a missing
   assert.deepEqual(snap.worktreePaths, []);
 });
 
+// The Project Viewer deletes every Worktree missing from this field, so "git did not
+// answer" must not arrive looking like "git says there are none".
+test('a Worktree listing that fails leaves the field absent rather than empty', async () => {
+  const unreadable = { ...FULL_REPO };
+  delete unreadable['worktree list --porcelain'];
+  const { git } = fakeGit(unreadable);
+  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+
+  assert.equal(snap.ok, true);
+  assert.equal('worktreePaths' in snap, false);
+  assert.equal(snap.branch, 'feature/vin-91', 'the rest of the Snapshot still arrives');
+});
+
+test('a folder that is not a repository never claims its Worktrees are gone', async () => {
+  const { git } = fakeGit({});
+  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+
+  assert.equal('worktreePaths' in snap, false);
+});
+
 test('a Branch with no upstream still yields a Snapshot, with origin as the remote', async () => {
   const noUpstream = { ...FULL_REPO };
   delete noUpstream[LOG_UNPUSHED];
