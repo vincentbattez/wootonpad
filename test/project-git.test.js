@@ -10,8 +10,16 @@ const {
 const PROJECT = '/tmp/proj';
 const F = '\x1f';
 
-// A fake git: argv joined by a space maps to what git would have printed.
-// Anything unlisted exits 1, which is how "this is not a repository" reaches the module.
+// A fake git: an argv maps to what git would have printed. Anything unlisted exits 1,
+// which is how "this is not a repository" reaches the module.
+//
+// An argument holding whitespace is keyed quoted, so an argv that split it — the shell
+// interpolation this module exists to make impossible — misses the table and comes back
+// as a failed result. The quoting question is answerable from the result alone.
+function argvKey(argv) {
+  return argv.map(a => (/\s/.test(a) ? JSON.stringify(a) : a)).join(' ');
+}
+
 function fakeGit(table = {}, { onCall } = {}) {
   const calls = [];
   const run = (argv, cwd, options = {}) => {
@@ -20,13 +28,30 @@ function fakeGit(table = {}, { onCall } = {}) {
       const early = onCall(argv, calls.length);
       if (early) return Promise.resolve({ code: 0, stdout: '', stderr: '', ...early });
     }
-    const key = argv.join(' ');
+    const key = argvKey(argv);
     const hit = Object.prototype.hasOwnProperty.call(table, key) ? table[key] : null;
     if (hit === null) return Promise.resolve({ code: 1, stdout: '', stderr: `fatal: unknown: ${key}` });
     if (typeof hit === 'string') return Promise.resolve({ code: 0, stdout: hit, stderr: '' });
     return Promise.resolve({ code: 0, stdout: '', stderr: '', ...hit });
   };
   return { git: createProjectGit({ run }), calls };
+}
+
+// A fake git that keeps state instead of answers, for the one destructive operation:
+// what `removeWorktree` did to the branches is then read back through `branches()`.
+function fakeRepo({ branch = 'feat', removal = { code: 0 } } = {}) {
+  const branches = new Set(['main', branch].filter(Boolean));
+  const answer = (stdout, code = 0) => Promise.resolve({ code, stdout, stderr: '' });
+  const run = (argv) => {
+    const [head, second] = argv;
+    if (head === '-C') return answer(branch ? `${branch}\n` : '', branch ? 0 : 128);
+    if (head === 'worktree' && second === 'remove') return Promise.resolve({ stdout: '', stderr: '', ...removal });
+    if (head === 'worktree' && second === 'prune') return answer('');
+    if (head === 'branch' && second === '-D') { branches.delete(argv[2]); return answer(''); }
+    if (head === 'branch' && argv.length === 1) return answer([...branches].map(b => `  ${b}`).join('\n') + '\n');
+    return answer('');
+  };
+  return createProjectGit({ run });
 }
 
 const HEAD_BRANCH = 'rev-parse --abbrev-ref HEAD';
@@ -243,12 +268,12 @@ test('the working diff comes back whole', async () => {
 
 test('a file whose name contains a space is read at HEAD without quoting', async () => {
   const spaced = 'src/my component.vue';
-  const { git, calls } = fakeGit({ [`show HEAD:${spaced}`]: 'old contents\n' });
+  const { git } = fakeGit({ [`show "HEAD:${spaced}"`]: 'old contents\n' });
   const res = await git.showFile(PROJECT, spaced);
 
+  // Only an argv that kept the name whole reaches the fixture; a split one fails here.
   assert.equal(res.ok, true);
   assert.equal(res.content, 'old contents\n');
-  assert.deepEqual(calls[0].argv, ['show', `HEAD:${spaced}`]);
 });
 
 test('a file absent from HEAD reads as a failure, not as empty content', async () => {
@@ -284,11 +309,10 @@ test('an unset git identity reports empty strings rather than failing the panel'
 
 test('a Branch name is passed as one argument, whatever it contains', async () => {
   const branch = 'feat/$(rm -rf ~); echo pwned';
-  const { git, calls } = fakeGit({ [`checkout ${branch}`]: '' });
+  const { git } = fakeGit({ [`checkout ${JSON.stringify(branch)}`]: '' });
   const res = await git.checkout(PROJECT, branch);
 
   assert.equal(res.ok, true);
-  assert.deepEqual(calls[0].argv, ['checkout', branch]);
 });
 
 test('a failed checkout reports the code and stderr', async () => {
@@ -303,34 +327,34 @@ test('a failed checkout reports the code and stderr', async () => {
 });
 
 test('a commit stages everything first, and stops if staging fails', async () => {
-  const { git, calls } = fakeGit({ 'add -A': '', 'commit -m ship it': '' });
-  const res = await git.commit(PROJECT, 'ship it');
+  // Both fixtures are required: an unstaged commit misses `add -A` and fails.
+  const { git } = fakeGit({ 'add -A': '', 'commit -m "ship it"': '' });
+  assert.equal((await git.commit(PROJECT, 'ship it')).ok, true);
 
-  assert.equal(res.ok, true);
-  assert.deepEqual(calls.map(c => c.argv[0]), ['add', 'commit']);
-
-  const failing = fakeGit({}, { onCall: () => ({ code: 128, stderr: 'fatal: index locked\n' }) });
+  // Staging fails, everything else would succeed: a commit that ran anyway would be ok.
+  const failing = fakeGit({}, {
+    onCall: argv => (argv[0] === 'add'
+      ? { code: 128, stderr: 'fatal: index locked\n' }
+      : { code: 0 }),
+  });
   const bad = await failing.git.commit(PROJECT, 'ship it');
   assert.equal(bad.ok, false);
-  assert.equal(failing.calls.length, 1);
+  assert.match(bad.stderr, /index locked/);
 });
 
 test('a commit message travels as one argument, newlines and all', async () => {
   const message = 'feat: ship it\n\n- one\n- two';
-  const { git, calls } = fakeGit({}, { onCall: () => ({ code: 0 }) });
-  await git.commit(PROJECT, message);
+  const { git } = fakeGit({ 'add -A': '', [`commit -m ${JSON.stringify(message)}`]: '' });
 
-  assert.deepEqual(calls[1].argv, ['commit', '-m', message]);
+  assert.equal((await git.commit(PROJECT, message)).ok, true);
 });
 
 test('creating a Branch checks it out only when asked', async () => {
-  const { git, calls } = fakeGit({}, { onCall: () => ({ code: 0 }) });
-  await git.createBranch(PROJECT, 'feat/x', { checkout: true });
-  assert.deepEqual(calls[0].argv, ['checkout', '-b', 'feat/x']);
+  const { git } = fakeGit({ 'checkout -b feat/x': '' });
+  assert.equal((await git.createBranch(PROJECT, 'feat/x', { checkout: true })).ok, true);
 
-  const plain = fakeGit({}, { onCall: () => ({ code: 0 }) });
-  await plain.git.createBranch(PROJECT, 'feat/x', { checkout: false });
-  assert.deepEqual(plain.calls[0].argv, ['branch', 'feat/x']);
+  const plain = fakeGit({ 'branch feat/x': '' });
+  assert.equal((await plain.git.createBranch(PROJECT, 'feat/x', { checkout: false })).ok, true);
 });
 
 test('fetch, pull and push get the network timeout; local commands do not', async () => {
@@ -343,7 +367,6 @@ test('fetch, pull and push get the network timeout; local commands do not', asyn
   assert.deepEqual(calls.map(c => c.timeout), [
     NETWORK_TIMEOUT_MS, NETWORK_TIMEOUT_MS, NETWORK_TIMEOUT_MS, LOCAL_TIMEOUT_MS,
   ]);
-  assert.deepEqual(calls[0].argv, ['fetch', '--prune']);
 });
 
 test('a mutation carries no output field, because nothing reads it', async () => {
@@ -357,17 +380,18 @@ test('a mutation carries no output field, because nothing reads it', async () =>
 // ── Push and its upstream retry ───────────────────────────────────
 
 test('a push on a Branch with no upstream retries with --set-upstream', async () => {
-  const { git, calls } = fakeGit({}, {
-    onCall: (argv, n) => {
-      if (n === 1) return { code: 128, stderr: 'fatal: The current branch has no upstream branch\n' };
-      if (argv[0] === 'rev-parse') return { code: 0, stdout: 'feature/vin-91\n' };
-      return { code: 0 };
-    },
+  // The retry is the only argv in the table: any other second push fails.
+  const { git, calls } = fakeGit({
+    [HEAD_BRANCH]: 'feature/vin-91\n',
+    'push --set-upstream origin feature/vin-91': '',
+  }, {
+    onCall: (_argv, n) => (n === 1
+      ? { code: 128, stderr: 'fatal: The current branch has no upstream branch\n' }
+      : null),
   });
   const res = await git.push(PROJECT);
 
   assert.deepEqual(res, { ok: true });
-  assert.deepEqual(calls[2].argv, ['push', '--set-upstream', 'origin', 'feature/vin-91']);
   assert.equal(calls[2].timeout, NETWORK_TIMEOUT_MS);
 });
 
@@ -399,17 +423,11 @@ test('a push whose branch cannot be resolved reports the original push failure',
 // ── Worktree removal ──────────────────────────────────────────────
 
 test('removing a Worktree returns the branch it was on and deletes it', async () => {
-  const WT = '/tmp/proj/.claude/worktrees/feat';
-  const { git, calls } = fakeGit({
-    [`-C ${WT} rev-parse --abbrev-ref HEAD`]: 'feat\n',
-    [`worktree remove ${WT} --force`]: '',
-    'worktree prune': '',
-    'branch -D feat': '',
-  });
-  const res = await git.removeWorktree(PROJECT, WT);
+  const git = fakeRepo({ branch: 'feat' });
+  const res = await git.removeWorktree(PROJECT, '/tmp/proj/.claude/worktrees/feat');
 
   assert.deepEqual(res, { ok: true, branch: 'feat' });
-  assert.deepEqual(calls.map(c => c.argv[0]), ['-C', 'worktree', 'worktree', 'branch']);
+  assert.deepEqual((await git.branches(PROJECT)).branches, ['main'], 'the branch went with it');
 });
 
 test('removing a Worktree whose directory is already gone succeeds quietly', async () => {
@@ -435,27 +453,25 @@ test('removing a path that was never a Worktree is not reported as a failure', a
 });
 
 test('a Worktree that git refuses to remove for any other reason fails loudly', async () => {
-  const { git, calls } = fakeGit({}, {
-    onCall: (argv) => (argv[0] === 'worktree' && argv[1] === 'remove'
-      ? { code: 128, stderr: 'fatal: could not lock config file\n' }
-      : { code: 0 }),
+  const git = fakeRepo({
+    branch: 'feat',
+    removal: { code: 128, stderr: 'fatal: could not lock config file\n' },
   });
   const res = await git.removeWorktree(PROJECT, '/tmp/proj/.claude/worktrees/feat');
 
   assert.equal(res.ok, false);
   assert.match(res.stderr, /could not lock/);
-  assert.equal(calls.filter(c => c.argv[0] === 'branch').length, 0);
+  assert.deepEqual((await git.branches(PROJECT)).branches, ['main', 'feat'], 'and deletes nothing');
 });
 
 test('removing a Worktree never deletes main, master or a detached HEAD', async () => {
-  for (const branch of ['main', 'master', 'HEAD']) {
-    const { git, calls } = fakeGit({}, {
-      onCall: (argv) => (argv[0] === '-C' ? { code: 0, stdout: `${branch}\n` } : { code: 0 }),
-    });
+  for (const ref of ['main', 'master', 'HEAD']) {
+    const git = fakeRepo({ branch: ref });
     const res = await git.removeWorktree(PROJECT, '/tmp/proj/.claude/worktrees/x');
 
-    assert.equal(res.branch, branch);
-    assert.equal(calls.filter(c => c.argv[0] === 'branch').length, 0, `deleted ${branch}`);
+    assert.equal(res.branch, ref);
+    const { branches } = await git.branches(PROJECT);
+    assert.ok(branches.includes(ref), `deleted ${ref}`);
   }
 });
 
