@@ -274,7 +274,10 @@ test('an unset git identity reports empty strings rather than failing the panel'
   const { git } = fakeGit({});
   const res = await git.userInfo(PROJECT);
 
-  assert.deepEqual(res, { ok: false, name: '', email: '' });
+  assert.equal(res.ok, false);
+  assert.equal(res.name, '');
+  assert.equal(res.email, '');
+  assert.equal(res.code, 1, 'the failure keeps the shape every other operation uses');
 });
 
 // ── Mutations ─────────────────────────────────────────────────────

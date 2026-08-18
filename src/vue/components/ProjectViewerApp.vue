@@ -719,7 +719,7 @@ async function generateCommitMsg(style = 'short') {
   const res = await window.api.gitGenerateCommitMsg(viewedPath.value, style);
   generating.value = false; gitBusy.value = false;
   if (res.ok) commitMessage.value = res.message;
-  else showGitMsg(res.error || 'Generation failed', true);
+  else showGitMsg(res.stderr || 'Generation failed', true);
 }
 
 async function doCommit() {

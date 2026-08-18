@@ -19,8 +19,9 @@ const git = createProjectGit({
   }),
 });
 
-function makeRepo() {
+function makeRepo(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-git-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const run = (...argv) => execFileSync('git', argv, { cwd: dir, stdio: 'ignore' });
   run('init', '-b', 'main');
   run('config', 'user.name', 'Test User');
@@ -31,8 +32,8 @@ function makeRepo() {
   return { dir, run };
 }
 
-test('a real repository yields a Snapshot whose shape matches the recorded fixtures', async () => {
-  const { dir, run } = makeRepo();
+test('a real repository yields a Snapshot whose shape matches the recorded fixtures', async (t) => {
+  const { dir, run } = makeRepo(t);
   run('tag', 'v1.0.0');
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\nworld\n');
   fs.writeFileSync(path.join(dir, 'a file with spaces.txt'), 'new\n');
@@ -53,12 +54,10 @@ test('a real repository yields a Snapshot whose shape matches the recorded fixtu
 
   const light = await git.snapshot(dir, { depth: 'light' });
   assert.deepEqual(light, { ok: true, branch: 'main', added: 1, deleted: null });
-
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('a real file whose name contains a space reads back at HEAD', async () => {
-  const { dir, run } = makeRepo();
+test('a real file whose name contains a space reads back at HEAD', async (t) => {
+  const { dir, run } = makeRepo(t);
   const name = 'src/a file with spaces.txt';
   fs.mkdirSync(path.join(dir, 'src'));
   fs.writeFileSync(path.join(dir, name), 'committed\n');
@@ -72,12 +71,10 @@ test('a real file whose name contains a space reads back at HEAD', async () => {
 
   const missing = await git.showFile(dir, 'src/never-committed.txt');
   assert.equal(missing.ok, false);
-
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('a real Worktree is listed, then removed with its branch, then removed again quietly', async () => {
-  const { dir, run } = makeRepo();
+test('a real Worktree is listed, then removed with its branch, then removed again quietly', async (t) => {
+  const { dir, run } = makeRepo(t);
   const worktree = path.join(dir, '.claude', 'worktrees', 'feat');
   run('worktree', 'add', '-b', 'feat', worktree);
 
@@ -95,23 +92,20 @@ test('a real Worktree is listed, then removed with its branch, then removed agai
 
   // The same call again: the path is no longer a worktree, and that is not a failure.
   assert.equal((await git.removeWorktree(dir, worktree)).ok, true);
-
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('a real push with no remote configured fails without throwing', async () => {
-  const { dir } = makeRepo();
+test('a real push with no remote configured fails without throwing', async (t) => {
+  const { dir } = makeRepo(t);
 
   const res = await git.push(dir);
   assert.equal(res.ok, false);
   assert.equal(typeof res.code, 'number');
   assert.ok(res.stderr.length > 0, 'the failure carries something displayable');
-
-  fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('a folder that is not a repository yields an empty Snapshot from the real binary', async () => {
+test('a folder that is not a repository yields an empty Snapshot from the real binary', async (t) => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-git-bare-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
   const snap = await git.snapshot(dir, { depth: 'full' });
   assert.equal(snap.ok, true);
@@ -119,6 +113,4 @@ test('a folder that is not a repository yields an empty Snapshot from the real b
   // Absent, not empty: the panel must not read this as "your Worktrees are gone".
   assert.equal('worktreePaths' in snap, false);
   assert.equal((await git.branches(dir)).ok, false);
-
-  fs.rmSync(dir, { recursive: true, force: true });
 });

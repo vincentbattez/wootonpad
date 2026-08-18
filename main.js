@@ -699,23 +699,23 @@ function infoJitter() {
   return PROJECT_INFO_TTL_MS + (Math.random() * 60000 - 30000);
 }
 
-function fetchProjectInfo(projectPath) {
-  // argv form: for a WSL account this runs inside the distribution, where the
-  // project's docker lives, instead of over the 9p share. Git took the same route
-  // and now goes through project-git; docker is not git, so it stays here.
-  const run = (argv, opts = {}) => new Promise((resolve) => {
-    const [file, args, options] = projectExecFile(argv, projectPath, { encoding: 'utf8', timeout: 10000, ...opts });
-    execFile(file, args, options, (err, stdout) => {
-      resolve(err ? null : (stdout || '').trim());
+// Docker is not git and keeps its own route to the project — for a WSL account
+// that means inside the distribution, where the daemon is. Both readers of it
+// want the same thing: the raw lines, or nothing.
+function dockerComposePs(projectPath) {
+  return new Promise((resolve) => {
+    const [file, args, options] = projectExecFile(['docker', 'compose', 'ps', '--format', 'json'], projectPath, {
+      encoding: 'utf8', timeout: 8000, env: { ...process.env, PATH: DOCKER_PATH },
     });
+    execFile(file, args, options, (err, stdout) => resolve(err ? '' : (stdout || '').trim()));
   });
+}
+
+function fetchProjectInfo(projectPath) {
   const data = { branch: null, added: null, deleted: null, containers: null };
   return Promise.all([
     projectGit.snapshot(projectPath, { depth: 'light' }),
-    run(['docker', 'compose', 'ps', '--format', 'json'], {
-      timeout: 8000,
-      env: { ...process.env, PATH: DOCKER_PATH },
-    }),
+    dockerComposePs(projectPath),
   ]).then(([snapshot, dockerOut]) => {
     data.branch = snapshot.branch;
     data.added = snapshot.added;
@@ -786,32 +786,23 @@ ipcMain.handle('get-project-info', (_event, projectPath) => {
   return base && sizeMb !== null ? { ...base, sizeMb } : base;
 });
 
-// --- IPC: get-project-detail (full Git Snapshot + docker details, no cache) ---
-// The Snapshot is assigned wholesale by the Project Viewer and re-read after every
-// mutation, which is why it stays one call rather than ten. Docker is not git and
-// stays here; it only becomes async so this handler stops blocking the process.
+// --- IPC: get-project-detail (full Git Snapshot + docker containers, no cache) ---
+// The channel name is inherited; what it returns is a Git Snapshot with the two
+// things the panel shows beside it. One call, because the Project Viewer assigns
+// it wholesale and re-reads it after every mutation.
 ipcMain.handle('get-project-detail', async (_event, projectPath) => {
   if (!projectPath || !fs.existsSync(hostPath(projectPath))) return null;
-  const docker = (argv, opts = {}) => new Promise(resolve => {
-    const [file, args, options] = projectExecFile(argv, projectPath, {
-      encoding: 'utf8', ...opts,
-    });
-    execFile(file, args, options, (err, stdout) => resolve(err ? '' : (stdout || '').trim()));
-  });
 
   const { ok: _ok, ...snapshot } = await projectGit.snapshot(projectPath, { depth: 'full' });
-  const detail = { ...snapshot, containers: [], readmePath: null };
+  const overview = { ...snapshot, containers: [], readmePath: null };
   for (const name of ['README.md', 'readme.md', 'Readme.md', 'README.rst', 'README']) {
     const fp = projectJoin(projectPath, name);
-    if (fs.existsSync(hostPath(fp))) { detail.readmePath = fp; break; }
+    if (fs.existsSync(hostPath(fp))) { overview.readmePath = fp; break; }
   }
 
-  const raw = await docker(['docker', 'compose', 'ps', '--format', 'json'], {
-    timeout: 8000,
-    env: { ...process.env, PATH: DOCKER_PATH },
-  });
+  const raw = await dockerComposePs(projectPath);
   if (raw) {
-    detail.containers = raw.split('\n').filter(Boolean).map(line => {
+    overview.containers = raw.split('\n').filter(Boolean).map(line => {
       try {
         const c = JSON.parse(line);
         const ports = (c.Publishers || []).map(p => `${p.PublishedPort}→${p.TargetPort}/${p.Protocol}`).filter(p => !p.startsWith('0→')).join(', ');
@@ -820,10 +811,10 @@ ipcMain.handle('get-project-detail', async (_event, projectPath) => {
     }).filter(Boolean);
   }
   try {
-    setProjectGitCache(projectPath, detail);
+    setProjectGitCache(projectPath, overview);
     notifyRendererProjectsChanged();
   } catch {}
-  return detail;
+  return overview;
 });
 
 ipcMain.handle('get-project-git-cache', (_event, projectPath) => {
@@ -972,7 +963,7 @@ ipcMain.handle('git-generate-commit-msg', async (_event, projectPath, style = 's
   try {
     const res = await projectGit.diff(projectPath);
     const diff = res.ok ? res.diff : '';
-    if (!diff.trim()) return { ok: false, error: 'No changes to describe' };
+    if (!diff.trim()) return { ok: false, stderr: 'No changes to describe' };
     const globalSettings = getSetting('global') || {};
     const baseInstruction = globalSettings.commitMessagePrompt || COMMIT_MSG_PROMPT_DEFAULT;
     const styleSuffix = style === 'descriptive'
@@ -997,10 +988,10 @@ ipcMain.handle('git-generate-commit-msg', async (_event, projectPath, style = 's
       });
       child.on('error', err => { clearTimeout(timer); reject(err); });
     });
-    if (!msg) return { ok: false, error: 'No output from claude' };
+    if (!msg) return { ok: false, stderr: 'No output from claude' };
     const clean = msg.replace(/^```[a-z]*\n?/, '').replace(/\n?```$/, '').trim();
     return { ok: true, message: clean };
-  } catch (e) { return { ok: false, error: e.message }; }
+  } catch (e) { return { ok: false, stderr: e.message }; }
 });
 
 ipcMain.handle('delete-worktree', async (_event, projectPath, worktreePath) => {
@@ -1051,16 +1042,16 @@ ipcMain.handle('get-project-sessions', (_event, projectPath) => {
   } catch (e) { return { ok: false, sessions: [] }; }
 });
 
-// A file absent from HEAD is genuinely new, and empty old content is the right
-// reading of that. Any other failure now reaches the module rather than being
-// swallowed here, which is what made a spaced filename look new.
+// git exits 128 both for a file absent from HEAD and for a repository it cannot
+// read, so empty old content still stands for either — the likelier by far being
+// that the file is new, which is what the panel then shows.
 ipcMain.handle('get-file-diff', async (_event, projectPath, filePath) => {
   const shown = await projectGit.showFile(projectPath, filePath);
   try {
     const newContent = fs.readFileSync(hostPath(projectJoin(projectPath, filePath)), 'utf8');
     return { ok: true, oldContent: shown.ok ? shown.content : '', newContent };
   } catch (e) {
-    return { ok: false, error: e.message };
+    return { ok: false, stderr: e.message };
   }
 });
 

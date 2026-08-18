@@ -1,11 +1,5 @@
-// The single place that knows how to invoke git.
-// Pure Node — no fs, no Electron, no db: the caller injects the runner, which is what
-// keeps this reachable from `node --test` and what lets a WSL-backed account re-target
-// every command into its distribution. See docs/adr/0007.
-//
-// Two rules hold the module together: commands are argv arrays run without a shell, and
-// nothing here ever throws. Git reports information through exit codes — a branch with no
-// upstream, a worktree already gone — so deciding what counts as a failure is the caller's.
+// The single place that knows how to invoke git. Argv only, async, never throws.
+// Pure Node — the caller injects the runner (see docs/adr/0007).
 
 const LOCAL_TIMEOUT_MS = 5000;
 const NETWORK_TIMEOUT_MS = 30000;
@@ -18,10 +12,8 @@ const MAX_TAGS = 20;
 // Deleting the branch a Worktree sat on is fine; deleting these is not.
 const PROTECTED_BRANCHES = new Set(['HEAD', 'main', 'master']);
 
-// `git worktree remove --force` on a worktree whose directory is gone exits 0, so the
-// common idempotent case needs nothing. A path that was never a worktree exits 128 with
-// this text — the same code as a genuine failure. Git draws no distinction, so we match
-// the string. It is a constraint git imposes, not a choice, and the only one left here.
+// A path that was never a worktree exits 128, the same code as a genuine failure, so
+// only the text tells them apart. Git's constraint, not a choice; the only match left.
 const NOT_A_WORKTREE = /is not a working tree|not a git/;
 
 function parseCommits(stdout) {
@@ -97,8 +89,9 @@ function createProjectGit({ run }) {
 
   const failed = res => ({ ok: false, code: res.code, stderr: (res.stderr || '').trim() });
   const text = res => (res.stdout || '').trim();
-  const ran = async (argv, cwd) => {
-    const res = await local(argv, cwd);
+  // A mutation answers with its verdict and nothing else — no caller reads git's output.
+  const ran = async (run, argv, cwd) => {
+    const res = await run(argv, cwd);
     return res.code === 0 ? { ok: true } : failed(res);
   };
 
@@ -112,14 +105,11 @@ function createProjectGit({ run }) {
     return { ok: true, branch: head.code === 0 ? text(head) : null, ...counts };
   }
 
-  // The Project Viewer's whole reading, assigned wholesale and re-read after every
-  // mutation. A folder that is not a repository comes back empty rather than failing:
-  // the panel renders the empty shape, and every field below is independently optional.
+  // A folder that is not a repository comes back empty rather than failing — the panel
+  // renders the empty shape, and every field below is independently optional.
   async function fullSnapshot(projectPath) {
-    // worktreePaths is deliberately absent until git actually answers. The Project
-    // Viewer reconciles its Worktree list against this field and deletes every one it
-    // no longer sees, so an empty list from a failed read would delete live Worktrees.
-    // Absent means "unknown" and skips the reconciliation; [] means "git says none".
+    // worktreePaths stays absent until git answers: the Project Viewer deletes every
+    // Worktree this field omits, so [] from a failed read would delete live ones.
     const snap = {
       ok: true,
       branch: null, upstream: null, remoteUrl: null,
@@ -186,37 +176,36 @@ function createProjectGit({ run }) {
       return res.code === 0 ? { ok: true, content: res.stdout } : failed(res);
     },
 
-    // Failure is an answer here — a repository with no identity configured is ordinary —
-    // so the empty strings come back alongside `ok: false` rather than instead of a result.
+    // A repository with no identity configured is ordinary, so the empty strings come
+    // back alongside the failure rather than instead of a result.
     async userInfo(projectPath) {
       const name = await local(['config', 'user.name'], projectPath);
       const email = await local(['config', 'user.email'], projectPath);
-      if (name.code !== 0 || email.code !== 0) return { ok: false, name: '', email: '' };
+      const broken = name.code !== 0 ? name : email;
+      if (broken.code !== 0) return { ...failed(broken), name: '', email: '' };
       return { ok: true, name: text(name), email: text(email) };
     },
 
     checkout(projectPath, branch) {
-      return ran(['checkout', branch], projectPath);
+      return ran(local, ['checkout', branch], projectPath);
     },
 
     createBranch(projectPath, branchName, { checkout = true } = {}) {
-      return ran(checkout ? ['checkout', '-b', branchName] : ['branch', branchName], projectPath);
+      return ran(local, checkout ? ['checkout', '-b', branchName] : ['branch', branchName], projectPath);
     },
 
     async commit(projectPath, message) {
       const staged = await local(['add', '-A'], projectPath);
       if (staged.code !== 0) return failed(staged);
-      return ran(['commit', '-m', message], projectPath);
+      return ran(local, ['commit', '-m', message], projectPath);
     },
 
-    async fetch(projectPath) {
-      const res = await network(['fetch', '--prune'], projectPath);
-      return res.code === 0 ? { ok: true } : failed(res);
+    fetch(projectPath) {
+      return ran(network, ['fetch', '--prune'], projectPath);
     },
 
-    async pull(projectPath) {
-      const res = await network(['pull'], projectPath);
-      return res.code === 0 ? { ok: true } : failed(res);
+    pull(projectPath) {
+      return ran(network, ['pull'], projectPath);
     },
 
     // A branch with no upstream is the common first push, not an error — retry naming one.
