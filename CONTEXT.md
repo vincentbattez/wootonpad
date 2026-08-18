@@ -53,6 +53,12 @@ _Avoid_: Dev server, run tab, console
 The command a Run Terminal starts on. User-authored, global with a per-Project override, empty by default — WootonPad never guesses it from a manifest. Sent to the shell verbatim, exactly as the user would type it.
 _Avoid_: Dev command, start script
 
+### Git
+
+**Git Snapshot**:
+The reading of a Project's git state at one moment — branch, upstream, unpushed commits, changed files, tags, and the paths of its Worktrees. Always a reading, never an authority: it is re-read after every mutation. It comes in two depths — _light_ for the sidebar badge, _full_ for the Project Viewer — and the copy persisted to the cache deliberately omits the Worktree paths, so a stale Snapshot can never be mistaken for proof that a Worktree is gone.
+_Avoid_: detail, info, status
+
 ### Editors
 
 **External IDE**:

@@ -1,0 +1,27 @@
+# Git runs behind one argv interface, and never throws
+
+Git could have stayed where it was — thirteen handlers in `main.js` each shelling out for themselves — or moved behind a library like `simple-git`. Every git invocation goes through `project-git.js` instead, a module whose interface speaks Project, Worktree and Branch rather than git, because the thirty call sites had already made the same decisions thirty times over: four different `child_process` APIs, twenty copies of the same options literal, five timeout values, three error shapes. A library would replace those with someone else's thirty decisions. A module of our own concentrates ours.
+
+Commands are passed as **argv arrays and executed without a shell**, and there is no escape hatch. None of the sixteen subcommands the app uses needs a pipe, a glob or a redirection, and an escape hatch is an invitation to write `git checkout ${branch}` again — one of five places where a branch name, a remote name or a filename was interpolated into a shell string. A filename containing a space works for the first time as a result.
+
+The module **never throws**. Every operation returns `{ ok, … }` or `{ ok: false, code, stderr }`. Git uses exit codes as information rather than as failure — `git rev-parse @{u}` on a branch with no upstream, `git worktree remove` on a worktree whose directory is already gone — and deciding which of those counts as an error is the caller's business, not the module's. The renderer reinforces this: the mutating handlers read `res.ok` with no optional chaining and no `try`, so a rejected promise would produce an unhandled rejection and a silent button.
+
+Everything is **async**, reads included. `git fetch`, `git pull` and `git push` carried 30-second `execSync` timeouts, which froze the main process — and with it every terminal in the app — for the duration. Timeouts come in two tiers, five seconds for local commands and thirty for the ones that touch the network, because that is the only variance that was ever real. `git config` gains a timeout for the first time.
+
+## Consequences
+
+The module does not know `db.js`. It reads git and returns a [Git Snapshot](../../CONTEXT.md); the handler writes `project_git_cache` and calls `notifyRendererProjectsChanged`. `db.js` opens the real database at import, which is why nothing that requires it can be tested — holding the module clear of it is what keeps the parsers reachable from `node --test`.
+
+**The Snapshot persisted to the cache omits the Worktree paths, and must keep omitting them.** The Project Viewer reconciles its Worktree list against the Snapshot it has just received and calls `worktreeDeleted()` for every one it no longer sees; the only thing stopping it doing that from cached data is the absence of that field. Unifying the two shapes — an obvious-looking tidy-up — would delete live Worktrees.
+
+Nothing is serialized. Two git commands can run at once against one repository, the 30-second auto-refresh and a user's click, and a Worktree shares its parent's object store and refs. Git's own locking reports contention as an exit code, which reaches the renderer as the same transient notification as any other failure. Should a queue prove necessary, it goes inside the module and no caller changes — which is the point of putting the interface where it is.
+
+`git-generate-commit-msg` splits. The module supplies the diff; the `spawn('claude', …)` stays in `main.js`. It is not git, and it is the one command in the file with a hand-rolled timeout-and-capture — its own problem, for its own day. `fetchProjectInfo` splits the same way: its two git commands go through the module, `du -sk` and `docker compose ps` stay in the handler. Docker deserves the same treatment and does not get it here; two call sites is not yet a module, and a generic "external command" module would be shallow by construction.
+
+`git worktree remove --force` on a worktree whose directory has been deleted exits **0**, so the common idempotent case needs no handling at all. A path that was never a worktree exits **128** with `fatal: '…' is not a working tree` — the same code as a genuine failure. Git does not distinguish the two, so the match on that stderr text survives the move. It is a compromise git forces, not one we chose, and it is the only string-matching left in the module.
+
+Six returned fields died in the move because no renderer ever read them: `output` on fetch, pull and push, `current` and `error` on the branch listing, `filePath` on the file diff, `ports` on containers, and `changedCount`, which was written to SQLite end to end and read by nobody. Error strings elsewhere are display-only — the renderer hands them to a toast and never inspects them — so their wording stays free to change.
+
+Tests come in three kinds: the parsers on fixture strings, the composition with the executor injected, and two or three against a real `git init` in a temporary directory. Those last ones live in `test/`, not `e2e/`, because they anchor output formats rather than user journeys, and `npm test` has to stay the fast loop.
+
+The decision follows [ADR 0003](0003-external-ide-shell-command.md) and [ADR 0006](0006-run-command-in-a-run-terminal.md) in shape — a module that decides, a thin caller that acts — and inverts their quoting rule. There the shell is unavoidable, so quoting is the builder's job; here the shell is avoidable, so quoting stops being anyone's job.
