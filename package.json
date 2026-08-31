@@ -7,7 +7,7 @@
   "main": "main.js",
   "scripts": {
     "start": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && electron .",
-    "test": "node --test --test-timeout=60000",
+    "test": "node --test --test-timeout=60000 --test-force-exit",
     "test:e2e": "npm run bundle:radix && npm run bundle:codemirror && npm run bundle:vue && playwright test",
     "sandcastle": "tsx .sandcastle/main.mts",
     "sandcastle:build-image": "sandcastle docker build-image",
