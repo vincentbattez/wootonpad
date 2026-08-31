@@ -1015,62 +1015,63 @@ body { display: flex; flex-direction: column; }
 }
 
 #sidebar-header {
-  padding: 12px 12px 10px;
+  padding: 10px 12px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
 }
 
 /* ---- Sidebar tabs ---- */
 #sidebar-tabs {
   display: flex;
-  gap: 0;
-  border-bottom: 1px solid var(--border-subtle);
+  gap: 2px;
   align-items: center;
 }
 
 .sidebar-tab {
   background: none;
   border: none;
-  border-bottom: 2px solid transparent;
   color: var(--text-tertiary);
-  font-size: 13px;
-  font-weight: 600;
-  padding: 8px 12px;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: all 0.15s;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
   font-family: inherit;
-  letter-spacing: 0.01em;
   display: flex;
   align-items: center;
   justify-content: center;
 }
 
 .sidebar-tab svg {
-  width: 18px;
-  height: 18px;
+  width: 17px;
+  height: 17px;
 }
 
 .sidebar-tab:hover {
-  color: var(--gray-200);
+  color: var(--text-secondary);
 }
 
 .sidebar-tab.active {
-  color: var(--orange-500);
-  border-bottom-color: var(--orange-500);
+  background: var(--neutral-a3);
+  color: var(--text-primary);
 }
 
-#session-filters {
+#sidebar-toolbar {
   display: flex;
-  gap: 8px;
   align-items: center;
+  gap: 6px;
+  padding: 0 12px 12px;
 }
 
 #loading-status {
   font-size: 11px;
   color: var(--text-secondary);
-  margin-left: auto;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 90px;
+  flex: 0 1 auto;
 }
 
 @keyframes loading-pulse {
@@ -1082,7 +1083,7 @@ body { display: flex; flex-direction: column; }
   animation: loading-pulse 1.2s ease-in-out infinite;
 }
 
-#star-toggle, #running-toggle, #today-toggle {
+#filters-btn {
   background: transparent;
   border: none;
   color: var(--text-tertiary);
@@ -1090,37 +1091,52 @@ body { display: flex; flex-direction: column; }
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  position: relative;
 }
 
-#star-toggle:hover, #running-toggle:hover, #today-toggle:hover {
-  background: var(--surface-card);
+#filters-btn:hover {
+  background: var(--neutral-a3);
   color: var(--text-secondary);
 }
 
-#star-toggle.active {
-  background: color-mix(in srgb, var(--amber-500) 12%, transparent);
-  color: var(--amber-500);
+/* The filters are hidden in the menu, so an active one has to show on the button. */
+#filters-btn.active {
+  color: var(--orange-500);
 }
 
-#running-toggle.active {
-  background: color-mix(in srgb, var(--green-500) 12%, transparent);
-  color: var(--green-500);
+#filters-btn.active::after {
+  content: '';
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--orange-500);
 }
 
-#today-toggle.active {
-  background: color-mix(in srgb, var(--blue-500) 12%, transparent);
-  color: var(--blue-500);
+/* A toggled row reads as on without an extra control. */
+.project-menu .project-menu-item.active {
+  color: var(--orange-500);
+}
+
+.project-menu-sep {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--neutral-a4);
 }
 
 /* ---- Search ---- */
 #search-bar {
-  padding: 0 12px 12px;
   position: relative;
+  flex: 1;
+  min-width: 0;
 }
 
 #search-input {
@@ -1140,7 +1156,7 @@ body { display: flex; flex-direction: column; }
   position: absolute;
   right: 40px;
   top: 0;
-  height: calc(100% - 14px);
+  bottom: 0;
   display: none;
   align-items: center;
   background: none;
@@ -1174,7 +1190,7 @@ body { display: flex; flex-direction: column; }
   position: absolute;
   right: 22px;
   top: 0;
-  height: calc(100% - 14px);
+  bottom: 0;
   display: flex;
   align-items: center;
   background: none;
@@ -3930,9 +3946,6 @@ body { display: flex; flex-direction: column; }
 }
 
 /* ========== ADD PROJECT BUTTON ========== */
-#grid-toggle-btn,
-#resort-btn,
-#add-area-btn,
 #add-project-btn {
   background: transparent;
   border: none;
@@ -3941,30 +3954,17 @@ body { display: flex; flex-direction: column; }
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
-  width: 28px;
-  height: 28px;
+  width: 30px;
+  height: 30px;
+  flex: none;
   display: inline-flex;
   align-items: center;
   justify-content: center;
 }
 
-#grid-toggle-btn { margin-left: auto; }
-#resort-btn { margin-left: 2px; }
-#add-area-btn { margin-left: 2px; }
-#add-project-btn { margin-left: 2px; }
-
-#grid-toggle-btn:hover,
-#resort-btn:hover,
-#add-area-btn:hover,
 #add-project-btn:hover {
-  background: var(--surface-card);
+  background: var(--neutral-a3);
   color: var(--text-secondary);
-}
-
-#grid-toggle-btn.active {
-  background: color-mix(in srgb, var(--orange-500) 12%, transparent);
-  border-color: color-mix(in srgb, var(--orange-500) 35%, transparent);
-  color: var(--orange-500);
 }
 
 /* ========== ADD PROJECT DIALOG ========== */

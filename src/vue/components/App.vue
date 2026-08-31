@@ -23,36 +23,71 @@
         <button id="sidebar-collapse-btn" data-tooltip="Hide sidebar" @click="store.sidebarCollapsed = true" v-html="COLLAPSE_SVG"></button>
       </div>
 
-      <div id="session-filters" v-show="store.activeTab === 'sessions'">
-        <button id="running-toggle" :class="{ active: store.showRunningOnly }" data-tooltip="Show running only" @click="toggleFilter('showRunningOnly')" v-html="RUNNING_SVG"></button>
-        <button id="star-toggle" :class="{ active: store.showStarredOnly }" data-tooltip="Show pinned only" @click="toggleFilter('showStarredOnly')" v-html="STAR_SVG"></button>
-        <button id="today-toggle" :class="{ active: store.showTodayOnly }" data-tooltip="Show today's sessions only" @click="toggleFilter('showTodayOnly')" v-html="TODAY_SVG"></button>
-        <span id="loading-status" v-show="store.loadingStatus">{{ store.loadingStatus }}</span>
-        <button id="grid-toggle-btn" :class="{ active: store.gridViewActive }" data-tooltip="Session overview" @click="onToggleGrid" v-html="GRID_SVG"></button>
-        <button id="resort-btn" data-tooltip="Re-sort sessions" @click="onResort" v-html="RESORT_SVG"></button>
-        <button id="add-area-btn" data-tooltip="New area" @click="onAddArea" v-html="ADD_AREA_SVG"></button>
-        <button id="add-project-btn" data-tooltip="Add project" @click="onAddProject" v-html="ADD_PROJECT_SVG"></button>
-      </div>
     </div>
 
-    <div id="search-bar" :class="{ 'has-query': store.searchQuery }">
-      <input
-        id="search-input"
-        type="text"
-        :placeholder="searchPlaceholder"
-        :value="store.searchQuery"
-        @input="onSearchInput"
-      />
-      <button id="search-clear" type="button" aria-label="Clear search" @click="doClearSearch">&times;</button>
+    <!-- One row: the search field, then the only two actions worth a permanent slot. -->
+    <div id="sidebar-toolbar">
+      <div id="search-bar" :class="{ 'has-query': store.searchQuery }">
+        <input
+          id="search-input"
+          type="text"
+          :placeholder="searchPlaceholder"
+          :value="store.searchQuery"
+          @input="onSearchInput"
+        />
+        <button id="search-clear" type="button" aria-label="Clear search" @click="doClearSearch">&times;</button>
+        <button
+          id="search-titles-toggle"
+          type="button"
+          :class="{ active: store.searchTitlesOnly }"
+          data-tooltip="Search titles only"
+          aria-label="Search titles only"
+          @click="toggleTitlesOnly"
+        >Tt</button>
+      </div>
+      <span id="loading-status" v-show="store.loadingStatus">{{ store.loadingStatus }}</span>
       <button
-        id="search-titles-toggle"
-        type="button"
-        :class="{ active: store.searchTitlesOnly }"
-        data-tooltip="Search titles only"
-        aria-label="Search titles only"
-        @click="toggleTitlesOnly"
-      >Tt</button>
+        v-show="store.activeTab === 'sessions'"
+        id="filters-btn"
+        :class="{ active: anyFilterActive }"
+        data-tooltip="Filters and view"
+        aria-label="Filters and view"
+        @click.stop="openFilterMenu"
+        v-html="FILTERS_SVG"
+      ></button>
+      <button v-show="store.activeTab === 'sessions'" id="add-project-btn" data-tooltip="Add project" @click="onAddProject" v-html="ADD_PROJECT_SVG"></button>
     </div>
+
+    <!-- Teleported for the same reason as .project-menu: the sidebar scrolls and would clip it. -->
+    <Teleport to="body">
+      <div v-if="filterMenuOpen" class="project-menu" :style="filterMenuStyle" @click.stop>
+        <button id="running-toggle" class="project-menu-item" :class="{ active: store.showRunningOnly }" @click="toggleFilter('showRunningOnly')">
+          <span class="project-menu-icon" v-html="RUNNING_SVG"></span>
+          <span class="project-menu-label">Running only</span>
+        </button>
+        <button id="star-toggle" class="project-menu-item" :class="{ active: store.showStarredOnly }" @click="toggleFilter('showStarredOnly')">
+          <span class="project-menu-icon" v-html="STAR_SVG"></span>
+          <span class="project-menu-label">Pinned only</span>
+        </button>
+        <button id="today-toggle" class="project-menu-item" :class="{ active: store.showTodayOnly }" @click="toggleFilter('showTodayOnly')">
+          <span class="project-menu-icon" v-html="TODAY_SVG"></span>
+          <span class="project-menu-label">Today only</span>
+        </button>
+        <div class="project-menu-sep"></div>
+        <button id="grid-toggle-btn" class="project-menu-item" :class="{ active: store.gridViewActive }" @click="onToggleGrid(); closeFilterMenu()">
+          <span class="project-menu-icon" v-html="GRID_SVG"></span>
+          <span class="project-menu-label">Session overview</span>
+        </button>
+        <button id="resort-btn" class="project-menu-item" @click="onResort(); closeFilterMenu()">
+          <span class="project-menu-icon" v-html="RESORT_SVG"></span>
+          <span class="project-menu-label">Re-sort sessions</span>
+        </button>
+        <button id="add-area-btn" class="project-menu-item" @click="onAddArea(); closeFilterMenu()">
+          <span class="project-menu-icon" v-html="ADD_AREA_SVG"></span>
+          <span class="project-menu-label">New area</span>
+        </button>
+      </div>
+    </Teleport>
 
     <!-- Sidebar content panels (v-show keeps DOM alive for vanilla JS queries) -->
     <div id="sidebar-content" v-show="store.activeTab === 'sessions' && !store.accountSwitching">
@@ -225,6 +260,7 @@ const RUNNING_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="curre
 const STAR_SVG = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path d="M9.828.722a.5.5 0 0 1 .354.146l4.95 4.95a.5.5 0 0 1-.707.707c-.28-.28-.576-.49-.888-.656L10.073 9.333l-.07 3.181a.5.5 0 0 1-.853.354l-3.535-3.536-4.243 4.243a.5.5 0 1 1-.707-.707l4.243-4.243L1.372 5.11a.5.5 0 0 1 .354-.854l3.18-.07L8.37.722A3.37 3.37 0 0 1 9.12.074a.5.5 0 0 1 .708.002l-.707.707z"/></svg>';
 const TODAY_SVG = '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-12a2 2 0 0 1-2-2v-12z"/><path d="M16 3v4"/><path d="M8 3v4"/><path d="M4 11h16"/><path d="M11 15h1"/><path d="M12 15v3"/></svg>';
 const GRID_SVG = '<svg width="14" height="14" stroke="currentColor" fill="none" stroke-width="2" viewBox="0 0 24 24" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>';
+const FILTERS_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></svg>';
 const RESORT_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
 const ADD_AREA_SVG = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="12" y1="9" x2="12" y2="15"/><line x1="9" y1="12" x2="15" y2="12"/></svg>';
 const ADD_PROJECT_SVG = '<svg width="14" height="14" viewBox="0 0 512 512" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="M512 416c0 35.3-28.7 64-64 64L64 480c-35.3 0-64-28.7-64-64L0 96C0 60.7 28.7 32 64 32l128 0c20.1 0 39.1 9.5 51.2 25.6l19.2 25.6c6 8.1 15.5 12.8 25.6 12.8l160 0c35.3 0 64 28.7 64 64l0 256zM232 376c0 13.3 10.7 24 24 24s24-10.7 24-24l0-64 64 0c13.3 0 24-10.7 24-24s-10.7-24-24-24l-64 0 0-64c0-13.3-10.7-24-24-24s-24 10.7-24 24l0 64-64 0c-13.3 0-24 10.7-24 24s10.7 24 24 24l64 0 0 64z"/></svg>';
@@ -278,6 +314,31 @@ function setTab(tabId) {
 }
 
 // ── Filter toggles ───────────────────────────────────────────────
+const filterMenuOpen = ref(false);
+const filterMenuPos = ref({ top: 0, left: 0 });
+const filterMenuStyle = computed(() => ({ top: filterMenuPos.value.top + 'px', left: filterMenuPos.value.left + 'px' }));
+
+// Folded behind one button, so the badge is the only thing left telling the user a filter is on.
+const anyFilterActive = computed(() =>
+  store.showRunningOnly || store.showStarredOnly || store.showTodayOnly || store.gridViewActive
+);
+
+function openFilterMenu(ev) {
+  if (filterMenuOpen.value) return closeFilterMenu();
+  const rect = ev.currentTarget.getBoundingClientRect();
+  filterMenuPos.value = { top: rect.bottom + 4, left: Math.max(8, rect.right - 200) };
+  filterMenuOpen.value = true;
+  document.addEventListener('click', closeFilterMenu);
+  window.addEventListener('resize', closeFilterMenu);
+}
+
+function closeFilterMenu() {
+  if (!filterMenuOpen.value) return;
+  filterMenuOpen.value = false;
+  document.removeEventListener('click', closeFilterMenu);
+  window.removeEventListener('resize', closeFilterMenu);
+}
+
 function toggleFilter(filterName) {
   store[filterName] = !store[filterName];
   // Mutual exclusion: starred and running can't both be on
