@@ -661,6 +661,23 @@ ipcMain.handle('add-project', (_event, rawProjectPath) => {
   }
 });
 
+// --- IPC: rename-project ---
+// A label, not an identity: the POSIX projectPath stays the key everywhere. An empty
+// name clears the override and the sidebar falls back to the path.
+ipcMain.handle('rename-project', (_event, projectPath, name) => {
+  try {
+    const settings = getSetting('project:' + projectPath) || {};
+    const trimmed = (name || '').trim();
+    if (trimmed) settings.displayName = trimmed;
+    else delete settings.displayName;
+    setSetting('project:' + projectPath, settings);
+    notifyRendererProjectsChanged();
+    return { ok: true, displayName: trimmed || null };
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
 // --- IPC: remove-project ---
 ipcMain.handle('remove-project', (_event, projectPath) => {
   try {

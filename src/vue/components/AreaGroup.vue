@@ -10,6 +10,7 @@
       @dragover.prevent.stop="onDragOver"
       @dragleave="dropHover = false"
       @drop.prevent.stop="onDrop($event)"
+      @contextmenu.prevent.stop="openMenu"
     >
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <AreaAvatar class="area-header-avatar" :area-id="node.id" :name="node.name" @click.stop="toggle" />
@@ -27,6 +28,20 @@
       <button v-if="!isRenaming" class="area-edit-btn" data-tooltip="Edit area"
         @click.stop="openDialog">&#9998;</button>
     </div>
+
+    <!-- Right-click shortcut to what the Area dialog already does; fixed coordinates because the sidebar scrolls. -->
+    <Teleport to="body">
+      <div v-if="menuOpen" class="project-menu" :style="menuStyle" @click.stop>
+        <button class="project-menu-item area-rename-btn" @click="renameFromMenu">
+          <span class="project-menu-icon" v-html="pencilSvg"></span>
+          <span class="project-menu-label">Rename</span>
+        </button>
+        <button class="project-menu-item project-menu-item-danger area-delete-btn" @click="deleteFromMenu">
+          <span class="project-menu-icon" v-html="trashSvg"></span>
+          <span class="project-menu-label">Delete area</span>
+        </button>
+      </div>
+    </Teleport>
 
     <div class="area-children">
       <template v-for="child in node.children" :key="child.type === 'area' ? 'area-' + child.id : child.projectPath">
@@ -49,7 +64,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch } from 'vue';
+import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
 import { store } from '../store.js';
 import { removeArea } from '../area-tree.mjs';
 import { startDrag, endDrag, dropOnTarget, isDragging } from '../area-drag.js';
@@ -123,6 +138,41 @@ function openDialog() {
     { onRename: applyRename, onDelete: applyDelete },
   );
 }
+
+const menuOpen = ref(false);
+const menuPos = ref({ top: 0, left: 0 });
+const menuStyle = computed(() => ({ top: menuPos.value.top + 'px', left: menuPos.value.left + 'px' }));
+
+function openMenu(ev) {
+  if (menuOpen.value) return closeMenu();
+  menuPos.value = { top: ev.clientY + 2, left: Math.max(8, ev.clientX) };
+  menuOpen.value = true;
+  document.addEventListener('click', closeMenu);
+  document.addEventListener('keydown', onMenuKeydown);
+  window.addEventListener('scroll', closeMenu, true);
+  window.addEventListener('resize', closeMenu);
+}
+
+function closeMenu() {
+  if (!menuOpen.value) return;
+  menuOpen.value = false;
+  document.removeEventListener('click', closeMenu);
+  document.removeEventListener('keydown', onMenuKeydown);
+  window.removeEventListener('scroll', closeMenu, true);
+  window.removeEventListener('resize', closeMenu);
+}
+
+function onMenuKeydown(ev) {
+  if (ev.key === 'Escape') closeMenu();
+}
+
+onUnmounted(closeMenu);
+
+function renameFromMenu() { closeMenu(); store.renamingAreaId = props.node.id; }
+function deleteFromMenu() { closeMenu(); applyDelete(); }
+
+const pencilSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const trashSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
 async function applyRename(name) {
   const result = await window.api.renameArea(props.node.id, name).catch(() => null);

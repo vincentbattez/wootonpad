@@ -2,7 +2,7 @@
   <div :class="isWorktree ? 'worktree-group' : 'project-group'" :id="folderId">
 
     <!-- Worktree header -->
-    <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle" @mouseenter="refreshCommands">
+    <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle" @mouseenter="refreshCommands" @contextmenu.prevent.stop="openMenu">
       <span class="worktree-branch-icon" v-html="branchSvg" @click.stop="toggle"></span>
       <span class="worktree-name" @click.stop="toggle">{{ worktreeName }}</span>
       <button class="project-menu-btn worktree-menu-btn" data-tooltip="More actions" @click.stop="openMenu" v-html="dotsSvg"></button>
@@ -23,10 +23,21 @@
       @dragover.prevent.stop="onDragOver"
       @dragleave="dropHover = false"
       @drop.prevent.stop="onDrop"
+      @contextmenu.prevent.stop="openMenu"
     >
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <ProjectAvatar class="project-header-avatar" :project-path="project.projectPath" @click.stop="toggle" />
-      <span class="project-name" @click.stop="toggle">{{ shortName }}</span>
+      <input
+        v-if="isRenaming"
+        ref="nameInput"
+        class="project-name-input"
+        :value="shortName"
+        @click.stop
+        @keydown.enter="commitRename($event.target.value)"
+        @keydown.esc="cancelRename"
+        @blur="commitRename($event.target.value)"
+      />
+      <span v-else class="project-name" @click.stop="toggle">{{ shortName }}</span>
       <button class="project-menu-btn" data-tooltip="More actions" @click.stop="openMenu" v-html="dotsSvg"></button>
       <button class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
     </div>
@@ -47,6 +58,10 @@
           <span class="project-menu-label">Open Project Folder</span>
         </button>
         <template v-if="!isWorktree">
+          <button class="project-menu-item project-rename-btn" @click="renameFromMenu">
+            <span class="project-menu-icon" v-html="pencilSvg"></span>
+            <span class="project-menu-label">Rename</span>
+          </button>
           <button class="project-menu-item project-settings-btn" @click="settingsFromMenu">
             <span class="project-menu-icon" v-html="gearSvg"></span>
             <span class="project-menu-label">Project settings</span>
@@ -54,6 +69,10 @@
           <button class="project-menu-item project-archive-btn" @click="archiveAllFromMenu">
             <span class="project-menu-icon" v-html="archiveSvg"></span>
             <span class="project-menu-label">Archive all sessions</span>
+          </button>
+          <button class="project-menu-item project-menu-item-danger project-hide-btn" @click="hideFromMenu">
+            <span class="project-menu-icon" v-html="eyeOffSvg"></span>
+            <span class="project-menu-label">Hide project</span>
           </button>
         </template>
         <button v-else class="project-menu-item project-menu-item-danger worktree-hide-btn" @click="hideWorktreeFromMenu">
@@ -229,7 +248,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watchEffect, onUnmounted } from 'vue';
+import { computed, nextTick, ref, watch, watchEffect, onUnmounted } from 'vue';
 import SessionItem from './SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
@@ -277,9 +296,32 @@ const avatar = computed(() =>
   window.getProjectAvatar ? window.getProjectAvatar(props.project.projectPath) : { initials: '?', color: '#666' }
 );
 
+// A user-set label wins over the path; clearing it falls back to the last two segments.
 const shortName = computed(() =>
-  props.project.projectPath.split('/').filter(Boolean).slice(-2).join('/')
+  props.project.displayName || props.project.projectPath.split('/').filter(Boolean).slice(-2).join('/')
 );
+
+const nameInput = ref(null);
+const isRenaming = computed(() => store.renamingProjectPath === props.project.projectPath);
+
+watch(isRenaming, async (renaming) => {
+  if (!renaming) return;
+  await nextTick();
+  nameInput.value?.focus();
+  nameInput.value?.select();
+});
+
+async function commitRename(value) {
+  if (!isRenaming.value) return;
+  store.renamingProjectPath = null;
+  const name = (value || '').trim();
+  if (name === shortName.value) return;
+  await window.api.renameProject(props.project.projectPath, name).catch(() => {});
+}
+
+function cancelRename() {
+  store.renamingProjectPath = null;
+}
 
 const hasActiveSession = computed(() =>
   !!props.activeSessionId && (props.project.sessions || []).some(s => s.sessionId === props.activeSessionId)
@@ -380,8 +422,12 @@ const menuStyle = computed(() => ({ top: menuPos.value.top + 'px', left: menuPos
 
 function openMenu(ev) {
   if (menuOpen.value) return closeMenu();
-  const rect = ev.currentTarget.getBoundingClientRect();
-  menuPos.value = { top: rect.bottom + 4, left: Math.max(8, rect.right - 200) };
+  if (ev.type === 'contextmenu') {
+    menuPos.value = { top: ev.clientY + 2, left: Math.max(8, ev.clientX) };
+  } else {
+    const rect = ev.currentTarget.getBoundingClientRect();
+    menuPos.value = { top: rect.bottom + 4, left: Math.max(8, rect.right - 200) };
+  }
   menuOpen.value = true;
   refreshCommands();
   document.addEventListener('click', closeMenu);
@@ -411,6 +457,8 @@ function folderFromMenu() { closeMenu(); openProjectFolder(); }
 function settingsFromMenu() { closeMenu(); emit('settings', props.project.projectPath); }
 function archiveAllFromMenu() { closeMenu(); archiveAll(); }
 function hideWorktreeFromMenu() { closeMenu(); emit('remove-project', props.project.projectPath); }
+function renameFromMenu() { closeMenu(); store.renamingProjectPath = props.project.projectPath; }
+function hideFromMenu() { closeMenu(); emit('remove-project', props.project.projectPath); }
 
 function openInExternalIde() {
   emit('open-external-ide', props.project.projectPath);
@@ -438,6 +486,8 @@ const playSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" str
 const folderSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 const plusSvg = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const plusSmSvg = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
+const pencilSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const eyeOffSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
 const dotsSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
 const closeSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 const branchSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8c0-2.76-2.46-5-5.5-5S2 5.24 2 8h2l1-1 1 1h4"/><path d="M13 7.14A5.82 5.82 0 0 1 16.5 6c3.04 0 5.5 2.24 5.5 5h-3l-1-1-1 1h-3"/><path d="M5.89 9.71c-2.15 2.15-2.3 5.47-.35 7.43l4.24-4.25.7-.7.71-.71 2.12-2.12c-1.95-1.96-5.27-1.8-7.42.35"/><path d="M11 15.5c.5 2.5-.17 4.5-1 6.5h4c2-5.5-.5-12-1-14"/></svg>';

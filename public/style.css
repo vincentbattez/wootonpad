@@ -1252,6 +1252,20 @@ body { display: flex; flex-direction: column; }
   white-space: nowrap;
 }
 
+.project-header .project-name-input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: var(--text-primary);
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 1px 4px;
+  outline: none;
+}
+
 .project-archive-btn,
 .project-new-btn {
   background: transparent;

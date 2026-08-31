@@ -271,6 +271,9 @@ function buildProjectsFromCache() {
     proj.sessions.sort((a, b) => new Date(b.modified) - new Date(a.modified));
     const gc = gitCounts.get(proj.projectPath);
     if (gc) proj.unpushedCount = gc.unpushedCount || 0;
+    // Cosmetic only: the sidebar label. projectPath stays the canonical key.
+    const displayName = getSetting('project:' + proj.projectPath)?.displayName;
+    if (displayName) proj.displayName = displayName;
     projects.push(proj);
   }
 

@@ -1864,7 +1864,7 @@ window.__sb = {
 
   removeProject: async (path) => {
     const name = path.split('/').pop();
-    if (!confirm(`Hide worktree "${name}"?\n\nSession files are not deleted.`)) return;
+    if (!confirm(`Hide "${name}" from the sidebar?\n\nSession files are not deleted; re-add the project to bring it back.`)) return;
     await window.api.removeProject(path);
     loadProjects();
   },

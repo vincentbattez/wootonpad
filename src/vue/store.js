@@ -27,6 +27,8 @@ export const store = reactive({
   areas: [],
   areaAssignments: [],
   renamingAreaId: null,
+  // Path of the Project whose sidebar label is being edited inline.
+  renamingProjectPath: null,
 
   // Visibility settings
   visibleSessionCount: 10,
