@@ -27,7 +27,6 @@
           </template>
           <template v-else>{{ displayName }}</template>
         </div>
-        <div v-if="session.aiTitle && !renaming" class="session-subtitle">{{ cleanName(session.aiTitle) }}</div>
         <div class="session-meta">{{ timeStr }}{{ msgSuffix }}</div>
       </div>
 
@@ -92,6 +91,7 @@ const isTerminalLike = computed(() =>
 );
 
 const itemClasses = computed(() => ({
+  'session-item--row': true,
   active: props.isActive,
   'has-running-pty': props.isRunning,
   'cli-busy': props.isBusy,
