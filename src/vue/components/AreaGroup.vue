@@ -12,7 +12,7 @@
       @drop.prevent.stop="onDrop($event)"
       @contextmenu.prevent.stop="openMenu"
     >
-      <span class="arrow" @click.stop="toggle">&#9660;</span>
+      <span class="arrow" @click.stop="toggle" v-html="chevronSvg"></span>
       <AreaAvatar class="area-header-avatar" :area-id="node.id" :name="node.name" @click.stop="toggle" />
       <input
         v-if="isRenaming"
@@ -171,6 +171,7 @@ onUnmounted(closeMenu);
 function renameFromMenu() { closeMenu(); store.renamingAreaId = props.node.id; }
 function deleteFromMenu() { closeMenu(); applyDelete(); }
 
+const chevronSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
 const pencilSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 const trashSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
