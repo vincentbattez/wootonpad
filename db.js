@@ -447,7 +447,7 @@ function pgc() {
   _pgc = {
     get: db.prepare('SELECT * FROM project_git_cache WHERE projectPath = ?'),
     getAll: db.prepare('SELECT projectPath, unpushedCount FROM project_git_cache'),
-    // changedCount is not written: nothing read it. Its column stays on its DEFAULT 0.
+    // changedCount stays on its DEFAULT 0: nothing ever read it.
     upsert: db.prepare(`
       INSERT INTO project_git_cache
         (projectPath, branch, upstream, remoteUrl, tags, unpushedCount, totalAdded, totalDeleted, containers, unpushedCommits, changedFiles, commits, updatedAt)

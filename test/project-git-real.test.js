@@ -38,7 +38,7 @@ test('a real repository yields a Snapshot whose shape matches the recorded fixtu
   fs.writeFileSync(path.join(dir, 'README.md'), 'hello\nworld\n');
   fs.writeFileSync(path.join(dir, 'a file with spaces.txt'), 'new\n');
 
-  const snap = await git.snapshot(dir, { depth: 'full' });
+  const snap = await git.snapshot(dir);
 
   assert.equal(snap.ok, true);
   assert.equal(snap.branch, 'main');
@@ -52,7 +52,7 @@ test('a real repository yields a Snapshot whose shape matches the recorded fixtu
   assert.deepEqual(snap.changedFiles, [{ file: 'README.md', added: 1, deleted: 0 }]);
   assert.equal(snap.totalAdded, 1);
 
-  const light = await git.snapshot(dir, { depth: 'light' });
+  const light = await git.lightSnapshot(dir);
   assert.deepEqual(light, { ok: true, branch: 'main', added: 1, deleted: null });
 });
 
@@ -78,14 +78,14 @@ test('a real Worktree is listed, then removed with its branch, then removed agai
   const worktree = path.join(dir, '.claude', 'worktrees', 'feat');
   run('worktree', 'add', '-b', 'feat', worktree);
 
-  const listed = await git.snapshot(dir, { depth: 'full' });
+  const listed = await git.snapshot(dir);
   assert.deepEqual(listed.worktreePaths.map(p => fs.realpathSync(p)), [fs.realpathSync(worktree)]);
 
   const removed = await git.removeWorktree(dir, worktree);
   assert.deepEqual(removed, { ok: true, branch: 'feat' });
   assert.equal(fs.existsSync(worktree), false);
 
-  const after = await git.snapshot(dir, { depth: 'full' });
+  const after = await git.snapshot(dir);
   assert.deepEqual(after.worktreePaths, []);
   const branches = await git.branches(dir);
   assert.deepEqual(branches.branches, ['main'], 'the branch goes with the Worktree');
@@ -107,7 +107,7 @@ test('a folder that is not a repository yields an empty Snapshot from the real b
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-git-bare-'));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
 
-  const snap = await git.snapshot(dir, { depth: 'full' });
+  const snap = await git.snapshot(dir);
   assert.equal(snap.ok, true);
   assert.equal(snap.branch, null);
   // Absent, not empty: the panel must not read this as "your Worktrees are gone".

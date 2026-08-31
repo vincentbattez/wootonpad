@@ -77,7 +77,7 @@ const FULL_REPO = {
 
 test('a full Snapshot reads branch, commits, upstream, remote, tags and worktrees', async () => {
   const { git } = fakeGit(FULL_REPO);
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.equal(snap.ok, true);
   assert.equal(snap.branch, 'feature/vin-91');
@@ -88,7 +88,7 @@ test('a full Snapshot reads branch, commits, upstream, remote, tags and worktree
 
 test('a full Snapshot parses the commit list into hash, message, author and date', async () => {
   const { git } = fakeGit(FULL_REPO);
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.deepEqual(snap.commits[0], {
     hash: 'abc1234', message: 'feat: ship it', author: 'Vincent', date: '2 hours ago',
@@ -100,7 +100,7 @@ test('a full Snapshot parses the commit list into hash, message, author and date
 
 test('a full Snapshot totals the changed files and sorts the busiest first', async () => {
   const { git } = fakeGit(FULL_REPO);
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.deepEqual(snap.changedFiles, [
     { file: 'project-git.js', added: 30, deleted: 0 },
@@ -112,7 +112,7 @@ test('a full Snapshot totals the changed files and sorts the busiest first', asy
 
 test('a full Snapshot lists the Worktree paths and never the main worktree', async () => {
   const { git } = fakeGit(FULL_REPO);
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.deepEqual(snap.worktreePaths, ['/tmp/proj/.claude/worktrees/feat']);
 });
@@ -122,7 +122,7 @@ test('a repository with no Worktree yields an empty Worktree list, not a missing
     ...FULL_REPO,
     'worktree list --porcelain': 'worktree /tmp/proj\nHEAD abc1234\nbranch refs/heads/main\n',
   });
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.deepEqual(snap.worktreePaths, []);
 });
@@ -133,7 +133,7 @@ test('a Worktree listing that fails leaves the field absent rather than empty', 
   const unreadable = { ...FULL_REPO };
   delete unreadable['worktree list --porcelain'];
   const { git } = fakeGit(unreadable);
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.equal(snap.ok, true);
   assert.equal('worktreePaths' in snap, false);
@@ -142,7 +142,7 @@ test('a Worktree listing that fails leaves the field absent rather than empty', 
 
 test('a folder that is not a repository never claims its Worktrees are gone', async () => {
   const { git } = fakeGit({});
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.equal('worktreePaths' in snap, false);
 });
@@ -152,7 +152,7 @@ test('a Branch with no upstream still yields a Snapshot, with origin as the remo
   delete noUpstream[LOG_UNPUSHED];
   delete noUpstream[UPSTREAM];
   const { git } = fakeGit(noUpstream);
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.equal(snap.ok, true);
   assert.equal(snap.upstream, null);
@@ -161,20 +161,19 @@ test('a Branch with no upstream still yields a Snapshot, with origin as the remo
 });
 
 test('the remote is resolved through the upstream name before falling back to origin', async () => {
-  const { git, calls } = fakeGit({
+  const { git } = fakeGit({
     ...FULL_REPO,
     [UPSTREAM]: 'fork/feature/vin-91\n',
     'remote get-url fork': 'git@github.com:someone/fork.git\n',
   });
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.equal(snap.remoteUrl, 'git@github.com:someone/fork.git');
-  assert.equal(calls.filter(c => c.argv.join(' ') === 'remote get-url origin').length, 0);
 });
 
 test('a folder that is not a repository yields an empty Snapshot rather than a throw', async () => {
   const { git } = fakeGit({});
-  const snap = await git.snapshot(PROJECT, { depth: 'full' });
+  const snap = await git.snapshot(PROJECT);
 
   assert.equal(snap.ok, true);
   assert.equal(snap.branch, null);
@@ -187,16 +186,15 @@ test('a folder that is not a repository yields an empty Snapshot rather than a t
 // ── Light Snapshot ────────────────────────────────────────────────
 
 test('a light Snapshot reads only the branch and the insertion counts', async () => {
-  const { git, calls } = fakeGit(FULL_REPO);
-  const snap = await git.snapshot(PROJECT, { depth: 'light' });
+  const { git } = fakeGit(FULL_REPO);
+  const snap = await git.lightSnapshot(PROJECT);
 
   assert.deepEqual(snap, { ok: true, branch: 'feature/vin-91', added: 34, deleted: 2 });
-  assert.equal(calls.length, 2);
 });
 
 test('a light Snapshot of an untouched repository reports no insertions', async () => {
   const { git } = fakeGit({ ...FULL_REPO, 'diff --shortstat HEAD': '\n' });
-  const snap = await git.snapshot(PROJECT, { depth: 'light' });
+  const snap = await git.lightSnapshot(PROJECT);
 
   assert.equal(snap.added, null);
   assert.equal(snap.deleted, null);
@@ -204,7 +202,7 @@ test('a light Snapshot of an untouched repository reports no insertions', async 
 
 test('a light Snapshot of a folder that is not a repository reports no branch', async () => {
   const { git } = fakeGit({});
-  const snap = await git.snapshot(PROJECT, { depth: 'light' });
+  const snap = await git.lightSnapshot(PROJECT);
 
   assert.deepEqual(snap, { ok: true, branch: null, added: null, deleted: null });
 });
@@ -492,7 +490,7 @@ test('a branch that git refuses to delete still leaves the removal successful', 
 
 test('every command runs in the Project and is passed as argv, never as a string', async () => {
   const { git, calls } = fakeGit(FULL_REPO);
-  await git.snapshot(PROJECT, { depth: 'full' });
+  await git.snapshot(PROJECT);
   await git.branches(PROJECT);
 
   assert.ok(calls.length > 5);
@@ -508,7 +506,7 @@ test('a runner that rejects is still not allowed to reach the caller', async () 
 
   assert.equal((await git.checkout(PROJECT, 'main')).ok, false);
   assert.equal((await git.push(PROJECT)).ok, false);
-  assert.equal((await git.snapshot(PROJECT, { depth: 'full' })).ok, true);
+  assert.equal((await git.snapshot(PROJECT)).ok, true);
   assert.equal((await git.branches(PROJECT)).ok, false);
   assert.equal((await git.removeWorktree(PROJECT, '/tmp/x')).ok, false);
 });

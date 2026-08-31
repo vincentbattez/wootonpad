@@ -219,7 +219,7 @@ function projectExecFile(argv, cwd, options = {}) {
   return ['wsl.exe', wslExecArgs(distro, cwd, argv), rest];
 }
 
-// The module decides about git, projectExecFile decides where it runs. See docs/adr/0007.
+// projectExecFile decides where git runs — inside the distribution for a WSL-backed account.
 const projectGit = createProjectGit({
   run: (argv, cwd, { timeout } = {}) => new Promise(resolve => {
     const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
@@ -728,17 +728,10 @@ function parseComposeContainers(stdout, withPorts) {
 }
 
 function fetchProjectInfo(projectPath) {
-  const data = { branch: null, added: null, deleted: null, containers: null };
   return Promise.all([
-    projectGit.snapshot(projectPath, { depth: 'light' }),
+    projectGit.lightSnapshot(projectPath),
     dockerComposePs(projectPath),
-  ]).then(([snapshot, containers]) => {
-    data.branch = snapshot.branch;
-    data.added = snapshot.added;
-    data.deleted = snapshot.deleted;
-    data.containers = containers;
-    return data;
-  });
+  ]).then(([{ branch, added, deleted }, containers]) => ({ branch, added, deleted, containers }));
 }
 
 // du -sk: only run on add-project and when the long-TTL size cache expires
@@ -795,12 +788,12 @@ ipcMain.handle('get-project-info', (_event, projectPath) => {
   return base && sizeMb !== null ? { ...base, sizeMb } : base;
 });
 
-// --- IPC: get-project-detail (full Git Snapshot + docker containers, no cache) ---
+// --- IPC: get-project-overview (full Git Snapshot + docker containers, no cache) ---
 // One call: the Project Viewer assigns it wholesale and re-reads it after every mutation.
-ipcMain.handle('get-project-detail', async (_event, projectPath) => {
+ipcMain.handle('get-project-overview', async (_event, projectPath) => {
   if (!projectPath || !fs.existsSync(hostPath(projectPath))) return null;
 
-  const { ok: _ok, ...snapshot } = await projectGit.snapshot(projectPath, { depth: 'full' });
+  const { ok: _ok, ...snapshot } = await projectGit.snapshot(projectPath);
   const overview = { ...snapshot, containers: [], readmePath: null };
   for (const name of ['README.md', 'readme.md', 'Readme.md', 'README.rst', 'README']) {
     const fp = projectJoin(projectPath, name);

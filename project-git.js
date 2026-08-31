@@ -83,6 +83,8 @@ function createProjectGit({ run }) {
   const local = (argv, cwd) => git(argv, cwd, LOCAL_TIMEOUT_MS);
   const network = (argv, cwd) => git(argv, cwd, NETWORK_TIMEOUT_MS);
 
+  const head = (cwd, at) => local([...(at ? ['-C', at] : []), 'rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+
   const failed = res => ({ ok: false, code: res.code, stderr: (res.stderr || '').trim() });
   const text = res => (res.stdout || '').trim();
   const ran = async (tier, argv, cwd) => {
@@ -92,12 +94,12 @@ function createProjectGit({ run }) {
 
   // The sidebar badge: a branch and the size of the working diff, nothing more.
   async function lightSnapshot(projectPath) {
-    const [head, shortstat] = await Promise.all([
-      local(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath),
+    const [branch, shortstat] = await Promise.all([
+      head(projectPath),
       local(['diff', '--shortstat', 'HEAD'], projectPath),
     ]);
     const counts = shortstat.code === 0 ? parseShortstat(shortstat.stdout) : { added: null, deleted: null };
-    return { ok: true, branch: head.code === 0 ? text(head) : null, ...counts };
+    return { ok: true, branch: branch.code === 0 ? text(branch) : null, ...counts };
   }
 
   // A folder that is not a repository comes back empty rather than failing.
@@ -110,9 +112,9 @@ function createProjectGit({ run }) {
       changedFiles: [], totalAdded: 0, totalDeleted: 0,
     };
 
-    const head = await local(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
-    if (head.code !== 0) return snap;
-    snap.branch = text(head);
+    const branch = await head(projectPath);
+    if (branch.code !== 0) return snap;
+    snap.branch = text(branch);
 
     const log = await local(['log', COMMIT_FORMAT, `-${RECENT_COMMITS}`], projectPath);
     if (log.code === 0) snap.commits = parseCommits(log.stdout);
@@ -143,9 +145,8 @@ function createProjectGit({ run }) {
   }
 
   return {
-    snapshot(projectPath, { depth = 'full' } = {}) {
-      return depth === 'light' ? lightSnapshot(projectPath) : fullSnapshot(projectPath);
-    },
+    snapshot: fullSnapshot,
+    lightSnapshot,
 
     async branches(projectPath) {
       const listed = await local(['branch'], projectPath);
@@ -205,17 +206,17 @@ function createProjectGit({ run }) {
       const first = await network(['push'], projectPath);
       if (first.code === 0) return { ok: true };
 
-      const head = await local(['rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
-      if (head.code !== 0) return failed(first);
+      const branch = await head(projectPath);
+      if (branch.code !== 0) return failed(first);
 
-      const retry = await network(['push', '--set-upstream', 'origin', text(head)], projectPath);
+      const retry = await network(['push', '--set-upstream', 'origin', text(branch)], projectPath);
       return retry.code === 0 ? { ok: true } : failed(retry);
     },
 
     // The branch is read first: once the worktree is gone there is nothing left to ask.
     async removeWorktree(projectPath, worktreePath) {
-      const head = await local(['-C', worktreePath, 'rev-parse', '--abbrev-ref', 'HEAD'], projectPath);
-      const branch = head.code === 0 ? text(head) : null;
+      const at = await head(projectPath, worktreePath);
+      const branch = at.code === 0 ? text(at) : null;
 
       const removed = await local(['worktree', 'remove', worktreePath, '--force'], projectPath);
       if (removed.code !== 0 && !NOT_A_WORKTREE.test(removed.stderr)) return failed(removed);

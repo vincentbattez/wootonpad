@@ -64,7 +64,7 @@ contextBridge.exposeInMainWorld('api', {
   addProject: (projectPath) => ipcRenderer.invoke('add-project', projectPath),
   removeProject: (projectPath) => ipcRenderer.invoke('remove-project', projectPath),
   getProjectInfo: (projectPath) => ipcRenderer.invoke('get-project-info', projectPath),
-  getProjectDetail: (projectPath) => ipcRenderer.invoke('get-project-detail', projectPath),
+  getProjectOverview: (projectPath) => ipcRenderer.invoke('get-project-overview', projectPath),
   getProjectGitCache: (projectPath) => ipcRenderer.invoke('get-project-git-cache', projectPath),
   getFileDiff: (projectPath, filePath) => ipcRenderer.invoke('get-file-diff', projectPath, filePath),
   gitBranches: (projectPath) => ipcRenderer.invoke('git-branches', projectPath),
