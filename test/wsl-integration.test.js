@@ -174,7 +174,7 @@ test('a command that runs in the project is routed into the distribution', async
   // git is not installed in the simulated distro, so this fails — but on the
   // command it actually tried to run, which is what is under test.
   assert.equal(result.ok, false);
-  assert.match(result.error, /wsl\.exe -d Ubuntu --cd \/home\/delirus\/work\/proj/);
+  assert.match(result.stderr, /wsl\.exe -d Ubuntu --cd \/home\/delirus\/work\/proj/);
 });
 
 test('a Claude session for a WSL account is spawned inside the distribution', async () => {

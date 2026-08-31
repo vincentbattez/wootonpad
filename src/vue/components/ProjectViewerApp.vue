@@ -80,12 +80,12 @@
         <div v-if="loading" class="pv-loading">Loading…</div>
 
         <!-- ── OVERVIEW TAB ──────────────────────────────────────── -->
-        <template v-else-if="activeTab === 'overview' && detail">
+        <template v-else-if="activeTab === 'overview' && overview">
           <!-- Git toolbar -->
           <div class="pv-git-toolbar">
             <div class="pv-branch-wrap">
               <svg class="pv-branch-icon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>
-              <select class="pv-branch-select" :value="detail.branch" @change="switchBranch($event.target.value)" :disabled="gitBusy">
+              <select class="pv-branch-select" :value="overview.branch" @change="switchBranch($event.target.value)" :disabled="gitBusy">
                 <optgroup label="Local">
                   <option v-for="b in branches" :key="b" :value="b">{{ b }}</option>
                 </optgroup>
@@ -111,9 +111,9 @@
               Refresh
             </button>
             <span v-if="gitMessage" class="pv-git-msg" :class="{ error: gitError }">{{ gitMessage }}</span>
-            <span v-if="detail.totalAdded || detail.totalDeleted" class="pv-git-stats">
-              <span class="pv-added" v-if="detail.totalAdded">+{{ detail.totalAdded }}</span>
-              <span class="pv-deleted" v-if="detail.totalDeleted">−{{ detail.totalDeleted }}</span>
+            <span v-if="overview.totalAdded || overview.totalDeleted" class="pv-git-stats">
+              <span class="pv-added" v-if="overview.totalAdded">+{{ overview.totalAdded }}</span>
+              <span class="pv-deleted" v-if="overview.totalDeleted">−{{ overview.totalDeleted }}</span>
             </span>
           </div>
 
@@ -121,14 +121,14 @@
             <!-- Left: changed files + commit -->
             <div class="pv-col-left">
               <!-- Changed files -->
-              <div class="pv-card" v-if="detail.changedFiles.length">
+              <div class="pv-card" v-if="overview.changedFiles.length">
                 <div class="pv-card-title">
                   <span>Uncommitted changes</span>
-                  <span class="pv-count-badge">{{ detail.changedFiles.length }}</span>
+                  <span class="pv-count-badge">{{ overview.changedFiles.length }}</span>
                 </div>
                 <div class="pv-file-list">
                   <div
-                    v-for="f in detail.changedFiles" :key="f.file"
+                    v-for="f in overview.changedFiles" :key="f.file"
                     class="pv-file-row pv-file-row--clickable"
                     :class="{ loading: loadingFile === f.file }"
                     @click="openDiff(f.file)" :title="f.file"
@@ -181,10 +181,10 @@
 
             <!-- Right: containers + sessions -->
             <div class="pv-col-right">
-              <div class="pv-card" v-if="detail.containers.length">
+              <div class="pv-card" v-if="overview.containers.length">
                 <div class="pv-card-title">Docker Compose</div>
                 <div class="pv-container-list">
-                  <div v-for="c in detail.containers" :key="c.name" class="pv-container-row" :class="{ running: c.state.includes('running') }">
+                  <div v-for="c in overview.containers" :key="c.name" class="pv-container-row" :class="{ running: c.state.includes('running') }">
                     <span class="pv-container-dot"></span>
                     <span class="pv-container-name">{{ c.name }}</span>
                     <span class="pv-container-state">{{ c.status || c.state }}</span>
@@ -218,22 +218,22 @@
         </template>
 
         <!-- ── COMMITS TAB ───────────────────────────────────────── -->
-        <template v-else-if="activeTab === 'commits' && detail">
+        <template v-else-if="activeTab === 'commits' && overview">
 
           <!-- Push destination panel -->
           <div class="pv-push-panel">
             <div class="pv-push-panel-row">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
               <span class="pv-push-panel-label">Remote</span>
-              <span class="pv-push-panel-val" v-if="detail.upstream">{{ detail.upstream }}</span>
+              <span class="pv-push-panel-val" v-if="overview.upstream">{{ overview.upstream }}</span>
               <span class="pv-push-panel-val pv-push-panel-val--muted" v-else>no upstream set</span>
-              <span class="pv-push-panel-url" v-if="detail.remoteUrl" :title="detail.remoteUrl">{{ detail.remoteUrl }}</span>
+              <span class="pv-push-panel-url" v-if="overview.remoteUrl" :title="overview.remoteUrl">{{ overview.remoteUrl }}</span>
             </div>
-            <div class="pv-push-panel-row" v-if="detail.tags && detail.tags.length">
+            <div class="pv-push-panel-row" v-if="overview.tags && overview.tags.length">
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
               <span class="pv-push-panel-label">Tags</span>
               <div class="pv-push-panel-tags">
-                <span v-for="tag in detail.tags" :key="tag" class="pv-push-tag">{{ tag }}</span>
+                <span v-for="tag in overview.tags" :key="tag" class="pv-push-tag">{{ tag }}</span>
               </div>
             </div>
             <div class="pv-push-panel-row pv-push-panel-row--mr" v-if="mrLink">
@@ -247,7 +247,7 @@
               </div>
             </div>
             <div class="pv-push-panel-actions">
-              <button class="pv-action-btn pv-push-btn" @click="confirmPush = true" :disabled="gitBusy || !detail.upstream" title="Push to remote">
+              <button class="pv-action-btn pv-push-btn" @click="confirmPush = true" :disabled="gitBusy || !overview.upstream" title="Push to remote">
                 <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="19" x2="12" y2="5"/><polyline points="5 12 12 5 19 12"/></svg>
                 Push{{ unpushedCount ? ` (${unpushedCount})` : '' }}
               </button>
@@ -280,15 +280,15 @@
           </template>
 
           <!-- History -->
-          <div v-if="detail.commits.length" class="pv-commits-section-label">History</div>
+          <div v-if="overview.commits.length" class="pv-commits-section-label">History</div>
           <div class="pv-commit-list-full">
-            <div v-for="c in detail.commits" :key="c.hash" class="pv-commit-item">
+            <div v-for="c in overview.commits" :key="c.hash" class="pv-commit-item">
               <span class="pv-commit-hash">{{ c.hash }}</span>
               <span class="pv-commit-msg">{{ c.message }}</span>
               <span class="pv-commit-author">{{ c.author }}</span>
               <span class="pv-commit-date">{{ c.date }}</span>
             </div>
-            <div v-if="!detail.commits.length" class="pv-empty">No commits found.</div>
+            <div v-if="!overview.commits.length" class="pv-empty">No commits found.</div>
           </div>
         </template>
 
@@ -398,7 +398,7 @@ const TABS = computed(() => [
   { id: 'commits', label: unpushedCount.value ? `Commits (${unpushedCount.value})` : 'Commits' },
   { id: 'files', label: 'Files' },
   { id: 'sessions', label: activeSessions.value.length ? `Sessions (${activeSessions.value.length})` : 'Sessions' },
-  ...(detail.value?.readmePath ? [{ id: 'readme', label: 'README' }] : []),
+  ...(overview.value?.readmePath ? [{ id: 'readme', label: 'README' }] : []),
 ]);
 
 const props = defineProps({ callbacks: { type: Object, required: true } });
@@ -406,7 +406,7 @@ const props = defineProps({ callbacks: { type: Object, required: true } });
 const project = ref(null);
 const worktrees = ref([]);
 const viewedPath = ref('');
-const detail = ref(null);
+const overview = ref(null);
 const loading = ref(false);
 const activeTab = ref('overview');
 watch(activeTab, (tab) => props.callbacks.onTabChange?.(tab));
@@ -471,8 +471,8 @@ const avatar = computed(() =>
 const projectName = computed(() =>
   project.value?.projectPath.split('/').filter(Boolean).pop() || ''
 );
-const changedFiles = computed(() => detail.value?.changedFiles || []);
-const unpushedCommits = computed(() => detail.value?.unpushedCommits || []);
+const changedFiles = computed(() => overview.value?.changedFiles || []);
+const unpushedCommits = computed(() => overview.value?.unpushedCommits || []);
 const unpushedCount = computed(() => unpushedCommits.value.length);
 const currentFileIndex = computed(() =>
   changedFiles.value.findIndex(f => f.file === activeDiff.value?.filePath)
@@ -490,8 +490,8 @@ const filteredTree = computed(() => {
 });
 
 const mrLink = computed(() => {
-  const url = detail.value?.remoteUrl;
-  const branch = detail.value?.branch;
+  const url = overview.value?.remoteUrl;
+  const branch = overview.value?.branch;
   if (!url) return null;
   // Normalise SSH → HTTPS: git@host:path.git → https://host/path
   let base = url.trim();
@@ -551,23 +551,23 @@ watch([viewedPath, _openCount], async ([p]) => {
   // Show stale cache immediately — no blank flash
   const cached = await window.api.getProjectGitCache(p).catch(() => null);
   if (cached) {
-    detail.value = cached;
+    overview.value = cached;
     loading.value = false;
   } else {
-    detail.value = null;
+    overview.value = null;
     loading.value = true;
   }
-  // Load branches + sessions in parallel with fresh detail
+  // Load branches + sessions in parallel with fresh overview
   const rootPath = project.value?.projectPath;
-  const [det, br, sess, terminals, userInfo] = await Promise.all([
-    window.api.getProjectDetail(p).catch(() => null),
+  const [fresh, br, sess, terminals, userInfo] = await Promise.all([
+    window.api.getProjectOverview(p).catch(() => null),
     window.api.gitBranches(p).catch(() => null),
     window.api.getProjectSessions(rootPath || p).catch(() => null),
     window.api.getActiveTerminals().catch(() => null),
     window.api.getGitUserInfo(p).catch(() => null),
   ]);
-  detail.value = det || detail.value;
-  if (det) _pushProjectInfo(p, det);
+  overview.value = fresh || overview.value;
+  if (fresh) _pushProjectInfo(p, fresh);
   branches.value = br?.ok ? br.branches : [];
   remoteBranches.value = br?.ok ? (br.remotes || []) : [];
   if (sess?.ok) sessions.value = sess.sessions;
@@ -578,9 +578,9 @@ watch([viewedPath, _openCount], async ([p]) => {
       .map(t => ({ id: t.id, name: t.title || t.id?.slice(0, 12), busy: t.busy || false }));
   }
   // Reconcile worktrees against actual git state (source of truth: git worktree list)
-  if (det?.worktreePaths !== undefined) {
+  if (fresh?.worktreePaths !== undefined) {
     const wtPattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
-    const actualPaths = new Set(det.worktreePaths);
+    const actualPaths = new Set(fresh.worktreePaths);
     // Remove stale entries
     const stale = worktrees.value.filter(w => !actualPaths.has(w.projectPath));
     if (stale.length) {
@@ -589,7 +589,7 @@ watch([viewedPath, _openCount], async ([p]) => {
     }
     // Add new entries not yet in store.projects
     const known = new Set(worktrees.value.map(w => w.projectPath));
-    const added = det.worktreePaths
+    const added = fresh.worktreePaths
       .filter(wp => !known.has(wp))
       .map(wp => { const m = wp.match(wtPattern); return m ? { projectPath: wp, name: m[2] } : null; })
       .filter(Boolean);
@@ -610,8 +610,8 @@ watch(activeTab, async (tab) => {
     if (res?.ok) fileTree.value = res.tree;
     treeLoading.value = false;
   }
-  if (tab === 'readme' && !readmeHtml.value && detail.value?.readmePath) {
-    const res = await window.api.readFileForPanel(detail.value.readmePath).catch(() => null);
+  if (tab === 'readme' && !readmeHtml.value && overview.value?.readmePath) {
+    const res = await window.api.readFileForPanel(overview.value.readmePath).catch(() => null);
     const content = res?.ok ? res.content : '';
     readmeHtml.value = content && window.marked ? window.marked.parse(content) : content;
   }
@@ -688,12 +688,12 @@ function showGitMsg(msg, isError = false, ms = 4000) {
 }
 
 async function switchBranch(branch) {
-  if (branch === detail.value?.branch) return;
+  if (branch === overview.value?.branch) return;
   gitBusy.value = true;
   const res = await window.api.gitCheckout(viewedPath.value, branch);
   gitBusy.value = false;
   if (res.ok) { showGitMsg(`Switched to ${branch}`); await reload(); }
-  else showGitMsg(res.error || 'Checkout failed', true);
+  else showGitMsg(res.stderr || 'Checkout failed', true);
 }
 
 async function doFetch() {
@@ -702,7 +702,7 @@ async function doFetch() {
   const res = await window.api.gitFetch(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Fetched'); const br = await window.api.gitBranches(viewedPath.value); if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; } }
-  else showGitMsg(res.error || 'Fetch failed', true);
+  else showGitMsg(res.stderr || 'Fetch failed', true);
 }
 
 async function doPull() {
@@ -711,7 +711,7 @@ async function doPull() {
   const res = await window.api.gitPull(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Pulled'); await reload(); }
-  else showGitMsg(res.error || 'Pull failed', true);
+  else showGitMsg(res.stderr || 'Pull failed', true);
 }
 
 async function generateCommitMsg(style = 'short') {
@@ -719,7 +719,7 @@ async function generateCommitMsg(style = 'short') {
   const res = await window.api.gitGenerateCommitMsg(viewedPath.value, style);
   generating.value = false; gitBusy.value = false;
   if (res.ok) commitMessage.value = res.message;
-  else showGitMsg(res.error || 'Generation failed', true);
+  else showGitMsg(res.stderr || 'Generation failed', true);
 }
 
 async function doCommit() {
@@ -728,7 +728,7 @@ async function doCommit() {
   const res = await window.api.gitCommit(viewedPath.value, commitMessage.value.trim());
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Committed'); commitMessage.value = ''; await reload(); }
-  else showGitMsg(res.error || 'Commit failed', true);
+  else showGitMsg(res.stderr || 'Commit failed', true);
 }
 
 async function doPush() {
@@ -738,7 +738,7 @@ async function doPush() {
   const res = await window.api.gitPush(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Pushed successfully'); await reload(); }
-  else showGitMsg(res.error || 'Push failed', true);
+  else showGitMsg(res.stderr || 'Push failed', true);
 }
 
 async function doCreateBranch() {
@@ -756,16 +756,16 @@ async function doCreateBranch() {
     if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
     await reload();
   } else {
-    showGitMsg(res.error || 'Failed to create branch', true);
+    showGitMsg(res.stderr || 'Failed to create branch', true);
   }
 }
 
 async function reload() {
   const p = viewedPath.value;
   if (!p) return;
-  const det = await window.api.getProjectDetail(p).catch(() => null);
-  detail.value = det;
-  _pushProjectInfo(p, det);
+  const fresh = await window.api.getProjectOverview(p).catch(() => null);
+  overview.value = fresh;
+  _pushProjectInfo(p, fresh);
 }
 
 const statsRefreshing = ref(false);
@@ -775,26 +775,26 @@ async function refreshStats() {
   if (!p || statsRefreshing.value) return;
   statsRefreshing.value = true;
   try {
-    const [det, br] = await Promise.all([
-      window.api.getProjectDetail(p).catch(() => null),
+    const [fresh, br] = await Promise.all([
+      window.api.getProjectOverview(p).catch(() => null),
       window.api.gitBranches(p).catch(() => null),
     ]);
-    if (det) detail.value = det;
+    if (fresh) overview.value = fresh;
     if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
-    _pushProjectInfo(p, det);
+    _pushProjectInfo(p, fresh);
   } finally {
     statsRefreshing.value = false;
   }
 }
 
-function _pushProjectInfo(path, det) {
-  if (!det) return;
+function _pushProjectInfo(path, fresh) {
+  if (!fresh) return;
   window.vueProjects?.updateProjectInfo?.(path, {
-    branch: det.branch,
-    added: det.totalAdded,
-    deleted: det.totalDeleted,
-    unpushedCount: det.unpushedCommits?.length ?? 0,
-    containers: det.containers,
+    branch: fresh.branch,
+    added: fresh.totalAdded,
+    deleted: fresh.totalDeleted,
+    unpushedCount: fresh.unpushedCommits?.length ?? 0,
+    containers: fresh.containers,
   });
 }
 
@@ -807,7 +807,7 @@ function setViewedPath(path) {
 async function deleteWorktree(wt) {
   if (!confirm(`Delete worktree "${wt.name}" and its branch?\n\nThis cannot be undone.`)) return;
   const res = await window.api.deleteWorktree(project.value.projectPath, wt.projectPath);
-  if (!res.ok) { showGitMsg(res.error || 'Failed to delete worktree', true); return; }
+  if (!res.ok) { showGitMsg(res.stderr || 'Failed to delete worktree', true); return; }
   if (viewedPath.value === wt.projectPath) setViewedPath(project.value.projectPath);
   worktrees.value = worktrees.value.filter(w => w.projectPath !== wt.projectPath);
   showGitMsg(`Deleted worktree "${wt.name}"${res.branch ? ` and branch "${res.branch}"` : ''}`);
@@ -825,10 +825,10 @@ async function loadAvatar() {
 }
 
 async function updateAvatar() {
-  if (!project.value || !detail.value?.remoteUrl) return;
+  if (!project.value || !overview.value?.remoteUrl) return;
   avatarLoading.value = true;
   try {
-    const url = await window.api.fetchGitlabAvatar(project.value.projectPath, detail.value.remoteUrl);
+    const url = await window.api.fetchGitlabAvatar(project.value.projectPath, overview.value.remoteUrl);
     avatarDataUrl.value = url;
     if (url) store.avatarDataUrls[project.value.projectPath] = url;
     else delete store.avatarDataUrls[project.value.projectPath];
@@ -847,8 +847,8 @@ onMounted(() => {
   _gitRefreshTimer = setInterval(async () => {
     const p = viewedPath.value;
     if (!p || !activeSessions.value.length) return;
-    const det = await window.api.getProjectDetail(p).catch(() => null);
-    if (det) detail.value = det;
+    const fresh = await window.api.getProjectOverview(p).catch(() => null);
+    if (fresh) overview.value = fresh;
   }, 30000);
 });
 
@@ -862,7 +862,7 @@ defineExpose({
     viewedPath.value = proj?.projectPath || '';
     _openCount.value++;
   },
-  close() { project.value = null; worktrees.value = []; viewedPath.value = ''; detail.value = null; activeDiff.value = null; activeFile.value = null; },
+  close() { project.value = null; worktrees.value = []; viewedPath.value = ''; overview.value = null; activeDiff.value = null; activeFile.value = null; },
   setTab(tab) { activeTab.value = tab; },
   setViewedPath,
 });

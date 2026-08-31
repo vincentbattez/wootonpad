@@ -1,7 +1,7 @@
 import { createApp } from 'vue';
 import { store } from '../vue/store.js';
 import LandingApp from './LandingApp.vue';
-import { MOCK_PROJECTS, MOCK_ACCOUNTS, MOCK_ACTIVE_PTY_IDS, MOCK_WAITING_PTY_IDS, MOCK_PROJECT_INFO, MOCK_PROJECT_DETAIL, getProjectAvatar } from './mock-data.js';
+import { MOCK_PROJECTS, MOCK_ACCOUNTS, MOCK_ACTIVE_PTY_IDS, MOCK_WAITING_PTY_IDS, MOCK_PROJECT_INFO, MOCK_PROJECT_OVERVIEW, getProjectAvatar } from './mock-data.js';
 import '../../public/style.css';
 
 const MOCK_DIFF_CONTENT = `const { RateLimiterMemory } = require('rate-limiter-flexible');
@@ -30,7 +30,7 @@ window.api = new Proxy({}, {
     if (prop === 'getProjectAvatar') return async () => null;
     if (prop === 'getProjectGitCache') return async () => null;
     if (prop === 'getProjectInfo') return async (path) => MOCK_PROJECT_INFO[path] ?? null;
-    if (prop === 'getProjectDetail') return async (path) => MOCK_PROJECT_DETAIL[path] ?? null;
+    if (prop === 'getProjectOverview') return async (path) => MOCK_PROJECT_OVERVIEW[path] ?? null;
     if (prop === 'gitBranches') return async () => ({ ok: true, branches: ['feat/rate-limiting', 'main'], remotes: ['origin/main'] });
     if (prop === 'getProjectSessions') return async () => ({ ok: true, sessions: [] });
     if (prop === 'getActiveTerminals') return async () => ({});
