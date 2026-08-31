@@ -28,16 +28,18 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue';
+import { computed } from 'vue';
 import MemoryGroup from './MemoryGroup.vue';
+import { memoryStore } from '../stores/memory.js';
 
 const props = defineProps({
   callbacks: { type: Object, required: true },
 });
 
-const data = ref({ global: { files: [] }, projects: [] });
-const filterIds = ref(null);
-const activeFile = ref(null);
+// Read the feature store the memory bridge writes.
+const data = computed(() => memoryStore.data);
+const filterIds = computed(() => memoryStore.filterIds);
+const activeFile = computed(() => memoryStore.activeFile);
 
 const allFiles = computed(() =>
   [...data.value.global.files, ...data.value.projects.flatMap(p => p.files)]
@@ -58,17 +60,7 @@ const filteredProjects = computed(() => {
 });
 
 function openMemory(file) {
-  activeFile.value = file.filePath;
+  memoryStore.activeFile = file.filePath;
   props.callbacks.openMemory?.(file);
 }
-
-defineExpose({
-  setMemories(memData, ids = null) {
-    data.value = memData;
-    filterIds.value = ids;
-  },
-  setFilter(ids) { filterIds.value = ids; },
-  setActive(filePath) { activeFile.value = filePath; },
-  clearActive() { activeFile.value = null; },
-});
 </script>

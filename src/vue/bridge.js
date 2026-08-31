@@ -56,3 +56,85 @@ export function createSidebarBridge(store) {
     },
   };
 }
+
+// window.vuePlans: the Plans list and which plan is open. PlansApp reads the
+// store these write; the old defineExpose setters are gone.
+export function createPlansBridge(store) {
+  return {
+    setPlans(list) { store.plans = list; },
+    setActive(filename) { store.activePlan = filename; },
+    clearActive() { store.activePlan = null; },
+  };
+}
+
+// window.vueMemory: the Agent Files tree, the active-file highlight and the
+// search filter. MemoryApp reads the store reactively.
+export function createMemoryBridge(store) {
+  return {
+    setMemories(data, ids = null) {
+      store.data = data;
+      store.filterIds = ids;
+    },
+    setFilter(ids) { store.filterIds = ids; },
+    setActive(filePath) { store.activeFile = filePath; },
+    clearActive() { store.activeFile = null; },
+  };
+}
+
+// window.vueAccounts: the Accounts panel list, its active account and usage.
+// The WSL-home discovery that setAccounts used to trigger is now a watcher in
+// AccountsApp, so this stays a pure store write.
+export function createAccountsBridge(store) {
+  return {
+    setAccounts(list, activeId) {
+      store.accounts = list;
+      if (activeId !== undefined) store.activeAccountId = activeId;
+    },
+    setActiveAccount(id) { store.activeAccountId = id; },
+    setUsage(usage) { store.usage = { ...usage }; },
+  };
+}
+
+// window.vueAccountDropdown: the sidebar account switcher. `close()` writes the
+// store's open flag, which the component renders from.
+export function createAccountDropdownBridge(store) {
+  return {
+    setAccounts(list, activeId, usage) {
+      store.accounts = list;
+      if (activeId !== undefined) store.activeAccountId = activeId;
+      if (usage !== undefined) store.usage = usage;
+    },
+    setActiveAccount(id) { store.activeAccountId = id; },
+    setUsage(usage) { store.usage = { ...usage }; },
+    close() { store.open = false; },
+  };
+}
+
+// window.vueStatusBar: the three status-bar slots. The auto-clear timers that
+// lived in the component's setters live here now, so the component is a pure
+// reader of the store.
+export function createStatusBarBridge(store) {
+  let activityTimer = null;
+  let updaterTimer = null;
+  return {
+    setInfo(text) { store.info = text; },
+    setActivity(text, type) {
+      if (activityTimer) clearTimeout(activityTimer);
+      store.activity = text;
+      store.activityClass = type === 'done' ? 'status-done' : '';
+      if (!text || type === 'done') {
+        activityTimer = setTimeout(() => {
+          store.activity = '';
+          store.activityClass = '';
+        }, type === 'done' ? 3000 : 0);
+      }
+    },
+    setUpdater(text, duration) {
+      if (updaterTimer) clearTimeout(updaterTimer);
+      store.updater = text;
+      if (duration) {
+        updaterTimer = setTimeout(() => { store.updater = ''; }, duration);
+      }
+    },
+  };
+}

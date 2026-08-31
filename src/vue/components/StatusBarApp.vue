@@ -1,43 +1,11 @@
 <template>
-  <span>{{ info }}</span>
-  <span :class="activityClass">{{ activity }}</span>
-  <span>{{ updater }}</span>
+  <span>{{ statusBarStore.info }}</span>
+  <span :class="statusBarStore.activityClass">{{ statusBarStore.activity }}</span>
+  <span>{{ statusBarStore.updater }}</span>
 </template>
 
 <script setup>
-import { ref } from 'vue';
-
-const info = ref('');
-const activity = ref('');
-const activityClass = ref('');
-const updater = ref('');
-
-let activityTimer = null;
-let updaterTimer = null;
-
-defineExpose({
-  setInfo(text) {
-    info.value = text;
-  },
-
-  setActivity(text, type) {
-    if (activityTimer) clearTimeout(activityTimer);
-    activity.value = text;
-    activityClass.value = type === 'done' ? 'status-done' : '';
-    if (!text || type === 'done') {
-      activityTimer = setTimeout(() => {
-        activity.value = '';
-        activityClass.value = '';
-      }, type === 'done' ? 3000 : 0);
-    }
-  },
-
-  setUpdater(text, duration) {
-    if (updaterTimer) clearTimeout(updaterTimer);
-    updater.value = text;
-    if (duration) {
-      updaterTimer = setTimeout(() => { updater.value = ''; }, duration);
-    }
-  },
-});
+// A pure reader of the status-bar feature store. The bridge owns the text and
+// the auto-clear timers; this component only renders the three slots.
+import { statusBarStore } from '../stores/status-bar.js';
 </script>
