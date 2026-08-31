@@ -270,10 +270,7 @@ function buildProjectsFromCache() {
   for (const proj of projectMap.values()) {
     proj.sessions.sort((a, b) => new Date(b.modified) - new Date(a.modified));
     const gc = gitCounts.get(proj.projectPath);
-    if (gc) {
-      proj.unpushedCount = gc.unpushedCount || 0;
-      proj.changedCount = gc.changedCount || 0;
-    }
+    if (gc) proj.unpushedCount = gc.unpushedCount || 0;
     projects.push(proj);
   }
 

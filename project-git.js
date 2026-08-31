@@ -1,0 +1,233 @@
+// The single place that knows how to invoke git. Argv only, async, never throws.
+// Pure Node — the caller injects the runner (see docs/adr/0007).
+
+const LOCAL_TIMEOUT_MS = 5000;
+const NETWORK_TIMEOUT_MS = 30000;
+
+const FIELD = '\x1f';
+const COMMIT_FORMAT = `--format=%h${FIELD}%s${FIELD}%an${FIELD}%ar`;
+const RECENT_COMMITS = 15;
+const MAX_TAGS = 20;
+
+// Safe to delete the branch a Worktree sat on, never these — HEAD being what a detached one reports.
+const PROTECTED_REFS = new Set(['HEAD', 'main', 'master']);
+
+// A path that was never a worktree exits 128 like a real failure; only this text tells them apart.
+const NOT_A_WORKTREE = /is not a working tree|not a git/;
+
+function parseCommits(stdout) {
+  return (stdout || '').trim().split('\n').filter(Boolean).map(line => {
+    const [hash, message, author, date] = line.split(FIELD);
+    return { hash, message, author, date };
+  });
+}
+
+// The first block is the main worktree — the Project itself, never a Worktree here.
+function parseWorktreePaths(stdout) {
+  return (stdout || '').trim().split('\n\n').slice(1).map(block => {
+    const match = block.match(/^worktree (.+)/m);
+    return match ? match[1].trim() : null;
+  }).filter(Boolean);
+}
+
+function parseNumstat(stdout) {
+  const files = (stdout || '').trim().split('\n').filter(Boolean).map(line => {
+    const [added, deleted, file] = line.split('\t');
+    return { file, added: parseInt(added) || 0, deleted: parseInt(deleted) || 0 };
+  });
+  files.sort((a, b) => (b.added + b.deleted) - (a.added + a.deleted));
+  return {
+    changedFiles: files,
+    totalAdded: files.reduce((n, f) => n + f.added, 0),
+    totalDeleted: files.reduce((n, f) => n + f.deleted, 0),
+  };
+}
+
+function parseShortstat(stdout) {
+  const added = (stdout || '').match(/(\d+) insertion/);
+  const deleted = (stdout || '').match(/(\d+) deletion/);
+  return {
+    added: added ? parseInt(added[1]) : null,
+    deleted: deleted ? parseInt(deleted[1]) : null,
+  };
+}
+
+function parseLocalBranches(stdout) {
+  return (stdout || '').trim().split('\n')
+    .map(b => b.replace(/^[*+]\s*/, '').trim())
+    .filter(Boolean);
+}
+
+// The panel offers these as branches to create, so a name a local branch already has is dropped.
+function parseRemoteBranches(stdout, localBranches) {
+  return (stdout || '').trim().split('\n')
+    .map(b => b.trim().replace(/^origin\//, ''))
+    .filter(b => b && b !== 'HEAD' && !b.includes('->') && !localBranches.includes(b));
+}
+
+function createProjectGit({ run }) {
+  // An injected runner may reject; flattened here into an exit code so nothing throws.
+  async function git(argv, cwd, timeout) {
+    try {
+      const res = await run(argv, cwd, { timeout });
+      return {
+        code: res?.code ?? 0,
+        stdout: res?.stdout ?? '',
+        stderr: res?.stderr ?? '',
+      };
+    } catch (err) {
+      return { code: -1, stdout: '', stderr: err?.message || String(err) };
+    }
+  }
+
+  const local = (argv, cwd) => git(argv, cwd, LOCAL_TIMEOUT_MS);
+  const network = (argv, cwd) => git(argv, cwd, NETWORK_TIMEOUT_MS);
+
+  const head = (cwd, at) => local([...(at ? ['-C', at] : []), 'rev-parse', '--abbrev-ref', 'HEAD'], cwd);
+
+  const failed = res => ({ ok: false, code: res.code, stderr: (res.stderr || '').trim() });
+  const text = res => (res.stdout || '').trim();
+  const ran = async (tier, argv, cwd) => {
+    const res = await tier(argv, cwd);
+    return res.code === 0 ? { ok: true } : failed(res);
+  };
+
+  // The sidebar badge: a branch and the size of the working diff, nothing more.
+  async function lightSnapshot(projectPath) {
+    const [branch, shortstat] = await Promise.all([
+      head(projectPath),
+      local(['diff', '--shortstat', 'HEAD'], projectPath),
+    ]);
+    const counts = shortstat.code === 0 ? parseShortstat(shortstat.stdout) : { added: null, deleted: null };
+    return { ok: true, branch: branch.code === 0 ? text(branch) : null, ...counts };
+  }
+
+  // A folder that is not a repository comes back empty rather than failing.
+  async function fullSnapshot(projectPath) {
+    // worktreePaths stays absent until git answers: the panel deletes every Worktree it omits.
+    const snap = {
+      ok: true,
+      branch: null, upstream: null, remoteUrl: null,
+      tags: [], commits: [], unpushedCommits: [],
+      changedFiles: [], totalAdded: 0, totalDeleted: 0,
+    };
+
+    const branch = await head(projectPath);
+    if (branch.code !== 0) return snap;
+    snap.branch = text(branch);
+
+    const log = await local(['log', COMMIT_FORMAT, `-${RECENT_COMMITS}`], projectPath);
+    if (log.code === 0) snap.commits = parseCommits(log.stdout);
+
+    const upstream = await local(['rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'], projectPath);
+    if (upstream.code === 0) {
+      snap.upstream = text(upstream);
+      const unpushed = await local(['log', COMMIT_FORMAT, '@{u}..HEAD'], projectPath);
+      if (unpushed.code === 0) snap.unpushedCommits = parseCommits(unpushed.stdout);
+      const named = await local(['remote', 'get-url', snap.upstream.split('/')[0]], projectPath);
+      if (named.code === 0) snap.remoteUrl = text(named);
+    }
+    if (!snap.remoteUrl) {
+      const origin = await local(['remote', 'get-url', 'origin'], projectPath);
+      if (origin.code === 0) snap.remoteUrl = text(origin);
+    }
+
+    const tags = await local(['tag', '--sort=-version:refname'], projectPath);
+    if (tags.code === 0) snap.tags = text(tags).split('\n').filter(Boolean).slice(0, MAX_TAGS);
+
+    const worktrees = await local(['worktree', 'list', '--porcelain'], projectPath);
+    if (worktrees.code === 0) snap.worktreePaths = parseWorktreePaths(worktrees.stdout);
+
+    const numstat = await local(['diff', '--numstat', 'HEAD'], projectPath);
+    if (numstat.code === 0) Object.assign(snap, parseNumstat(numstat.stdout));
+
+    return snap;
+  }
+
+  return {
+    snapshot: fullSnapshot,
+    lightSnapshot,
+
+    async branches(projectPath) {
+      const listed = await local(['branch'], projectPath);
+      if (listed.code !== 0) return failed(listed);
+      const branches = parseLocalBranches(listed.stdout);
+      const remote = await local(['branch', '-r'], projectPath);
+      return {
+        ok: true,
+        branches,
+        remotes: remote.code === 0 ? parseRemoteBranches(remote.stdout, branches) : [],
+      };
+    },
+
+    async diff(projectPath) {
+      const res = await local(['diff', 'HEAD'], projectPath);
+      return res.code === 0 ? { ok: true, diff: res.stdout } : failed(res);
+    },
+
+    async showFile(projectPath, filePath) {
+      const res = await local(['show', `HEAD:${filePath}`], projectPath);
+      return res.code === 0 ? { ok: true, content: res.stdout } : failed(res);
+    },
+
+    // No identity configured is ordinary: the empty strings come back with the failure.
+    async userInfo(projectPath) {
+      const name = await local(['config', 'user.name'], projectPath);
+      const email = await local(['config', 'user.email'], projectPath);
+      const broken = name.code !== 0 ? name : email;
+      if (broken.code !== 0) return { ...failed(broken), name: '', email: '' };
+      return { ok: true, name: text(name), email: text(email) };
+    },
+
+    checkout(projectPath, branch) {
+      return ran(local, ['checkout', branch], projectPath);
+    },
+
+    createBranch(projectPath, branchName, { checkout = true } = {}) {
+      return ran(local, checkout ? ['checkout', '-b', branchName] : ['branch', branchName], projectPath);
+    },
+
+    async commit(projectPath, message) {
+      const staged = await local(['add', '-A'], projectPath);
+      if (staged.code !== 0) return failed(staged);
+      return ran(local, ['commit', '-m', message], projectPath);
+    },
+
+    fetch(projectPath) {
+      return ran(network, ['fetch', '--prune'], projectPath);
+    },
+
+    pull(projectPath) {
+      return ran(network, ['pull'], projectPath);
+    },
+
+    // No upstream is the common first push, not an error — retry naming one.
+    async push(projectPath) {
+      const first = await network(['push'], projectPath);
+      if (first.code === 0) return { ok: true };
+
+      const branch = await head(projectPath);
+      if (branch.code !== 0) return failed(first);
+
+      const retry = await network(['push', '--set-upstream', 'origin', text(branch)], projectPath);
+      return retry.code === 0 ? { ok: true } : failed(retry);
+    },
+
+    // The branch is read first: once the worktree is gone there is nothing left to ask.
+    async removeWorktree(projectPath, worktreePath) {
+      const at = await head(projectPath, worktreePath);
+      const branch = at.code === 0 ? text(at) : null;
+
+      const removed = await local(['worktree', 'remove', worktreePath, '--force'], projectPath);
+      if (removed.code !== 0 && !NOT_A_WORKTREE.test(removed.stderr)) return failed(removed);
+
+      await local(['worktree', 'prune'], projectPath);
+      if (branch && !PROTECTED_REFS.has(branch)) {
+        await local(['branch', '-D', branch], projectPath);
+      }
+      return { ok: true, branch };
+    },
+  };
+}
+
+module.exports = { createProjectGit, LOCAL_TIMEOUT_MS, NETWORK_TIMEOUT_MS };

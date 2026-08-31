@@ -158,7 +158,7 @@ export const MOCK_MEMORIES = {
   ],
 };
 
-export const MOCK_PROJECT_DETAIL = {
+export const MOCK_PROJECT_OVERVIEW = {
   '/Users/demo/Projects/my-api': {
     branch: 'feat/rate-limiting',
     totalAdded: 168,
