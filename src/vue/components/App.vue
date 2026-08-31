@@ -109,7 +109,7 @@
       <AccountsApp :callbacks="accountsCallbacks" />
     </div>
     <div id="projects-content" v-show="store.activeTab === 'projects'">
-      <ProjectsApp ref="projectsRef" :callbacks="projectsCallbacks" />
+      <ProjectsApp :callbacks="projectsCallbacks" />
     </div>
   </div>
 
@@ -197,7 +197,7 @@
     <StatusBarApp />
   </Teleport>
   <Teleport to="#vue-grid-cards">
-    <GridCardsApp ref="gridCardsRef" />
+    <GridCardsApp />
   </Teleport>
 
   <!-- Dialogs (overlays + popover, rendered via Teleport to body inside the component) -->
@@ -224,10 +224,9 @@ import ViewerContentApp from './ViewerContentApp.vue';
 import DialogsApp from './DialogsApp.vue';
 
 // ── Template refs ────────────────────────────────────────────────
-// Plans, Memory, Accounts, the account dropdown and the status bar read their
-// feature stores directly, so they no longer need a ref here.
-const projectsRef = ref(null);
-const gridCardsRef = ref(null);
+// Plans, Memory, Accounts, the account dropdown, the status bar, Projects and
+// the overview grid read their feature stores directly, so they no longer need
+// a ref here.
 const projectViewerRef = ref(null);
 const statsRef = ref(null);
 const jsonlRef = ref(null);
@@ -422,19 +421,10 @@ const projectViewerCallbacks = {
 
 // ── Mount lifecycle ───────────────────────────────────────────────
 onMounted(async () => {
-  // Plans, Memory, Accounts, the account dropdown and the status bar are now
-  // store-backed: their bridges are installed in main.js and write feature
-  // stores the panels read reactively. The remaining panels below still expose
-  // their setters through template refs.
-  Object.assign(window.vueProjects, {
-    setProjects: (list) => projectsRef.value?.setProjects(list),
-    setSearch: (q) => projectsRef.value?.setSearch(q),
-    clearActive: () => projectsRef.value?.clearActive(),
-    updateProjectInfo: (path, info) => projectsRef.value?.updateProjectInfo(path, info),
-  });
-  // GridCardsApp exposes addCard/updateCard/removeCard/clearAll directly
-  window.vueGrid = gridCardsRef.value;
-
+  // Plans, Memory, Accounts, the account dropdown, the status bar, Projects and
+  // the overview grid are now store-backed: their bridges are installed in
+  // main.js and write feature stores the panels read reactively. The remaining
+  // panels below still expose their setters through template refs.
   const worktreePattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
   window.vueProjectViewer = {
     open: (proj) => {

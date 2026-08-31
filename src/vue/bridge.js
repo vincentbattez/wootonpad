@@ -110,6 +110,105 @@ export function createAccountDropdownBridge(store) {
   };
 }
 
+// window.vueGrid: the Session-overview cards. Each method mutates the store's
+// card Map; GridCardsApp teleports each card into the header/footer element the
+// vanilla grid renderer built. The old defineExpose setters are gone.
+export function createGridBridge(store) {
+  return {
+    addCard(sessionId, headerEl, footerEl, { name, project, initials, color, running, busy, time }) {
+      store.cards.set(sessionId, { headerEl, footerEl, name, project, initials, color, running: !!running, busy: !!busy, time: time || '' });
+    },
+    updateCard(sessionId, running, busy, time) {
+      const card = store.cards.get(sessionId);
+      if (!card) return;
+      card.running = !!running;
+      card.busy = !!busy;
+      if (time !== undefined) card.time = time;
+    },
+    removeCard(sessionId) { store.cards.delete(sessionId); },
+    clearAll() { store.cards.clear(); },
+  };
+}
+
+// window.vueProjects: the Projects panel. The per-project info queue — a lazy
+// fetch of git/container info that setProjects used to kick inside the component
+// — lives here now, so ProjectsApp is a pure reader of the store. The queue and
+// its rAF batching are guarded so the bridge is inert when window.api or
+// requestAnimationFrame are absent (as under node:test).
+export function createProjectsBridge(store) {
+  let queueGen = 0;
+  let pendingInfoUpdates = {};
+  let flushScheduled = false;
+
+  const api = typeof window !== 'undefined' ? window.api : undefined;
+
+  function flush() {
+    flushScheduled = false;
+    for (const [path, info] of Object.entries(pendingInfoUpdates)) {
+      store.projectInfo[path] = store.projectInfo[path] ? { ...store.projectInfo[path], ...info } : info;
+      store.loadingPaths.delete(path);
+    }
+    pendingInfoUpdates = {};
+  }
+
+  // Batch reactive info writes into one rAF flush to avoid per-project churn;
+  // fall back to a synchronous flush where rAF is unavailable (node:test).
+  function scheduleInfoFlush() {
+    if (flushScheduled) return;
+    flushScheduled = true;
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(flush);
+    else flush();
+  }
+
+  async function runInfoQueue(gen, list) {
+    if (!api?.getProjectInfo) return;
+    for (const project of list) {
+      if (queueGen !== gen) break;
+      if (store.projectInfo[project.projectPath]) continue; // already loaded
+      store.loadingPaths.add(project.projectPath);
+      try {
+        const info = await api.getProjectInfo(project.projectPath);
+        if (queueGen !== gen) break;
+        if (info) {
+          pendingInfoUpdates[project.projectPath] = info;
+          scheduleInfoFlush();
+        } else {
+          store.loadingPaths.delete(project.projectPath);
+        }
+      } catch {
+        store.loadingPaths.delete(project.projectPath);
+      }
+    }
+  }
+
+  // Main-process push events: a row starts syncing, or its info arrives.
+  api?.onProjectInfoLoading?.((path) => { store.loadingPaths.add(path); });
+  api?.onProjectInfoUpdated?.((path, info) => {
+    if (info) {
+      pendingInfoUpdates[path] = info;
+      scheduleInfoFlush();
+    } else {
+      store.loadingPaths.delete(path);
+    }
+  });
+
+  return {
+    setProjects(list) {
+      store.projects = list;
+      queueGen++;
+      runInfoQueue(queueGen, list);
+    },
+    setSearch(q) { store.searchQuery = q || ''; },
+    clearActive() { store.activeProjectPath = null; },
+    updateProjectInfo(path, info) {
+      if (info) {
+        pendingInfoUpdates[path] = info;
+        scheduleInfoFlush();
+      }
+    },
+  };
+}
+
 // window.vueStatusBar: the three status-bar slots. The auto-clear timers that
 // lived in the component's setters live here now, so the component is a pure
 // reader of the store.

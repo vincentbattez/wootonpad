@@ -7,12 +7,16 @@ import {
   createAccountsBridge,
   createAccountDropdownBridge,
   createStatusBarBridge,
+  createGridBridge,
+  createProjectsBridge,
 } from './bridge.js';
 import { plansStore } from './stores/plans.js';
 import { memoryStore } from './stores/memory.js';
 import { accountsStore } from './stores/accounts.js';
 import { accountDropdownStore } from './stores/account-dropdown.js';
 import { statusBarStore } from './stores/status-bar.js';
+import { gridStore } from './stores/grid.js';
+import { projectsStore } from './stores/projects.js';
 import App from './components/App.vue';
 import ViewerContentApp from './components/ViewerContentApp.vue';
 
@@ -34,6 +38,8 @@ window.vueMemory = createMemoryBridge(memoryStore);
 window.vueAccounts = createAccountsBridge(accountsStore);
 window.vueAccountDropdown = createAccountDropdownBridge(accountDropdownStore);
 window.vueStatusBar = createStatusBarBridge(statusBarStore);
+window.vueGrid = createGridBridge(gridStore);
+window.vueProjects = createProjectsBridge(projectsStore);
 
 // Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
 window.createViewerPanel = function(container, opts = {}) {
@@ -55,10 +61,8 @@ window.createViewerPanel = function(container, opts = {}) {
 
 // Stubs for the component bridge APIs still installed from App.vue onMounted via
 // template refs (their panels are not yet store-backed).
-window.vueProjects = {};
 window.vuePlanViewer = {};
 window.vueMemoryViewer = {};
-window.vueGrid = {};
 window.vueDialogs = {};
 
 // Mount the single root app (synchronous — all onMounted hooks run before returning)
