@@ -1,3 +1,5 @@
+import { markRaw } from 'vue';
+
 // The single bridge module: it declares the renderer-to-Vue surface that
 // `public/app.js` calls, and every method writes into the feature stores
 // rather than into a component through a template ref. `public/app.js` is
@@ -205,6 +207,39 @@ export function createProjectsBridge(store) {
         pendingInfoUpdates[path] = info;
         scheduleInfoFlush();
       }
+    },
+  };
+}
+
+// window.vueJsonlViewer: the Message History viewer. `open(session)` used to be
+// a defineExpose method reached through a template ref; it now writes an open
+// request the component watches and renders. The seq bump makes re-opening the
+// same session re-trigger the watcher.
+export function createJsonlViewerBridge(store) {
+  let seq = 0;
+  return {
+    // markRaw the session: the component reads it once to render, so there is no
+    // gain in deep-proxying it, and it keeps the stored reference identical to the
+    // one handed in.
+    open(session) { store.openRequest = { session: markRaw(session), seq: ++seq }; },
+  };
+}
+
+// window.vueApp: the sidebar tab switch. It used to be a closure over App.vue's
+// onMounted; it now lives here and writes the aggregate store's tab and search
+// fields directly — the same fields the sidebar/header render from — and pings
+// the vanilla search host. App.vue's tab buttons delegate to this so there is
+// one code path.
+export function createAppBridge(store) {
+  return {
+    setTab(tabId) {
+      if (tabId === store.activeTab) return;
+      store.activeTab = tabId;
+      // Clear search on tab switch
+      store.searchQuery = '';
+      store.searchMatchIds = null;
+      store.searchMatchProjectPaths = null;
+      if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
     },
   };
 }

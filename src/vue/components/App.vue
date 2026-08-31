@@ -160,7 +160,7 @@
       <ProjectViewerApp ref="projectViewerRef" :callbacks="projectViewerCallbacks" />
     </div>
     <div id="jsonl-viewer" v-show="store.showJsonl">
-      <JsonlViewerApp ref="jsonlRef" />
+      <JsonlViewerApp />
     </div>
     <div id="terminal-area">
       <div id="vue-session-header">
@@ -224,12 +224,12 @@ import ViewerContentApp from './ViewerContentApp.vue';
 import DialogsApp from './DialogsApp.vue';
 
 // ── Template refs ────────────────────────────────────────────────
-// Plans, Memory, Accounts, the account dropdown, the status bar, Projects and
-// the overview grid read their feature stores directly, so they no longer need
-// a ref here.
+// Plans, Memory, Accounts, the account dropdown, the status bar, Projects, the
+// overview grid and the JSONL viewer read their feature stores directly, so they
+// no longer need a ref here; the tab switch (window.vueApp) is a pure store
+// write and lives in the bridge too.
 const projectViewerRef = ref(null);
 const statsRef = ref(null);
-const jsonlRef = ref(null);
 const planViewerRef = ref(null);
 const memoryViewerRef = ref(null);
 const dialogsRef = ref(null);
@@ -299,15 +299,9 @@ async function toggleTitlesOnly() {
 }
 
 // ── Tab switching ────────────────────────────────────────────────
-function setTab(tabId) {
-  if (tabId === store.activeTab) return;
-  store.activeTab = tabId;
-  // Clear search on tab switch
-  store.searchQuery = '';
-  store.searchMatchIds = null;
-  store.searchMatchProjectPaths = null;
-  window.__sb?.onTabChange?.(tabId);
-}
+// The switch itself lives in the app bridge (window.vueApp, installed in
+// main.js); the tab buttons delegate to it so there is a single code path.
+function setTab(tabId) { window.vueApp?.setTab(tabId); }
 
 // ── Filter toggles ───────────────────────────────────────────────
 const filterMenuOpen = ref(false);
@@ -421,10 +415,11 @@ const projectViewerCallbacks = {
 
 // ── Mount lifecycle ───────────────────────────────────────────────
 onMounted(async () => {
-  // Plans, Memory, Accounts, the account dropdown, the status bar, Projects and
-  // the overview grid are now store-backed: their bridges are installed in
-  // main.js and write feature stores the panels read reactively. The remaining
-  // panels below still expose their setters through template refs.
+  // Plans, Memory, Accounts, the account dropdown, the status bar, Projects, the
+  // overview grid and the JSONL viewer are now store-backed, and the tab switch
+  // (window.vueApp) is a store write: their bridges are installed in main.js and
+  // write feature stores the panels read reactively. The remaining panels below
+  // still expose their setters through template refs.
   const worktreePattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
   window.vueProjectViewer = {
     open: (proj) => {
@@ -436,12 +431,10 @@ onMounted(async () => {
     close: () => projectViewerRef.value?.close(),
     setTab: (tab) => projectViewerRef.value?.setTab(tab),
   };
-  window.vueApp = { setTab };
   window.vueStats = {
     load: () => statsRef.value?.load(),
     invalidate: () => statsRef.value?.invalidate(),
   };
-  window.vueJsonlViewer = { open: (s) => jsonlRef.value?.open(s) };
   Object.assign(window.vueDialogs, {
     openNewSession: (...args) => dialogsRef.value?.openNewSession(...args),
     openResumeSession: (...args) => dialogsRef.value?.openResumeSession(...args),

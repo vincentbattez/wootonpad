@@ -9,6 +9,8 @@ import {
   createStatusBarBridge,
   createGridBridge,
   createProjectsBridge,
+  createJsonlViewerBridge,
+  createAppBridge,
 } from './bridge.js';
 import { plansStore } from './stores/plans.js';
 import { memoryStore } from './stores/memory.js';
@@ -17,6 +19,7 @@ import { accountDropdownStore } from './stores/account-dropdown.js';
 import { statusBarStore } from './stores/status-bar.js';
 import { gridStore } from './stores/grid.js';
 import { projectsStore } from './stores/projects.js';
+import { jsonlStore } from './stores/jsonl.js';
 import App from './components/App.vue';
 import ViewerContentApp from './components/ViewerContentApp.vue';
 
@@ -40,6 +43,10 @@ window.vueAccountDropdown = createAccountDropdownBridge(accountDropdownStore);
 window.vueStatusBar = createStatusBarBridge(statusBarStore);
 window.vueGrid = createGridBridge(gridStore);
 window.vueProjects = createProjectsBridge(projectsStore);
+window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
+// The tab switch is store-only, so it lives in the bridge too; App.vue's tab
+// buttons delegate to it.
+window.vueApp = createAppBridge(store);
 
 // Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
 window.createViewerPanel = function(container, opts = {}) {

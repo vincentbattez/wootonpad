@@ -9,6 +9,8 @@ import {
   createStatusBarBridge,
   createGridBridge,
   createProjectsBridge,
+  createJsonlViewerBridge,
+  createAppBridge,
 } from '../src/vue/bridge.js';
 import { plansStore } from '../src/vue/stores/plans.js';
 import { memoryStore } from '../src/vue/stores/memory.js';
@@ -17,6 +19,8 @@ import { accountDropdownStore } from '../src/vue/stores/account-dropdown.js';
 import { statusBarStore } from '../src/vue/stores/status-bar.js';
 import { gridStore } from '../src/vue/stores/grid.js';
 import { projectsStore } from '../src/vue/stores/projects.js';
+import { jsonlStore } from '../src/vue/stores/jsonl.js';
+import { store } from '../src/vue/store.js';
 
 // The panel bridges invert the old template-ref setters: every method writes a
 // feature store the panel reads reactively, instead of calling into a component
@@ -225,6 +229,65 @@ test('projects clearActive nulls the active path', () => {
   projectsStore.activeProjectPath = '/a';
   bridge.clearActive();
   assert.equal(projectsStore.activeProjectPath, null);
+});
+
+// The jsonl-viewer bridge inverts JsonlViewerApp's defineExpose({ open }): it
+// writes an open request into the store, which the component watches and renders,
+// instead of the bridge calling a template-ref method.
+test('jsonl-viewer bridge writes the session as an open request', () => {
+  const bridge = createJsonlViewerBridge(jsonlStore);
+  const session = { sessionId: 'abc', name: 'Sess' };
+  bridge.open(session);
+  assert.equal(jsonlStore.openRequest.session, session);
+  jsonlStore.openRequest = null;
+});
+
+test('jsonl-viewer open bumps the seq so re-opening the same session re-triggers', () => {
+  const bridge = createJsonlViewerBridge(jsonlStore);
+  const session = { sessionId: 'abc' };
+  bridge.open(session);
+  const first = jsonlStore.openRequest.seq;
+  bridge.open(session);
+  assert.equal(jsonlStore.openRequest.seq, first + 1, 'seq advances on each open');
+  jsonlStore.openRequest = null;
+});
+
+test('a jsonl-store write triggers effects that read the request', () => {
+  const bridge = createJsonlViewerBridge(jsonlStore);
+  let seen = 0;
+  const stop = effect(() => { seen = jsonlStore.openRequest?.seq ?? 0; });
+  assert.equal(seen, 0);
+  bridge.open({ sessionId: 'x' });
+  assert.equal(seen, jsonlStore.openRequest.seq, 'effect reading the request saw the bridge write');
+  jsonlStore.openRequest = null;
+  stop.effect.stop();
+});
+
+// The app bridge inverts window.vueApp.setTab off App.vue's onMounted closure:
+// it writes the active tab into the aggregate store and clears the search, the
+// same store fields the sidebar and header components render from.
+test('app bridge setTab writes the active tab and clears the search', () => {
+  const bridge = createAppBridge(store);
+  store.activeTab = 'sessions';
+  store.searchQuery = 'foo';
+  store.searchMatchIds = new Set(['a']);
+  store.searchMatchProjectPaths = new Set(['/p']);
+  bridge.setTab('plans');
+  assert.equal(store.activeTab, 'plans');
+  assert.equal(store.searchQuery, '');
+  assert.equal(store.searchMatchIds, null);
+  assert.equal(store.searchMatchProjectPaths, null);
+  store.activeTab = 'sessions';
+});
+
+test('app bridge setTab is a no-op when the tab is already active', () => {
+  const bridge = createAppBridge(store);
+  store.activeTab = 'plans';
+  store.searchQuery = 'keep';
+  bridge.setTab('plans');
+  assert.equal(store.searchQuery, 'keep', 'same-tab setTab does not clear the search');
+  store.activeTab = 'sessions';
+  store.searchQuery = '';
 });
 
 test('projects updateProjectInfo merges info into the store', () => {
