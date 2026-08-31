@@ -1,55 +1,18 @@
 import { createApp } from 'vue';
 import { store } from './store.js';
+import { createSidebarBridge } from './bridge.js';
 import App from './components/App.vue';
 import ViewerContentApp from './components/ViewerContentApp.vue';
 
-// Expose store for direct mutation from app.js
+// Expose the aggregate store facade for direct mutation from app.js. It reads
+// and writes through to the feature slices, so every field app.js addresses by
+// name still resolves.
 window.vueStore = store;
 
-// Stub bridge objects — populated by App.vue onMounted (via template refs).
-// These run synchronously during app.mount(), before any other script executes.
-window.vueSidebar = {
-  store,
-  setProjects(projects) { store.projects = projects.map(p => ({ ...p })); },
-  setActivePtyIds(ids) { store.activePtyIds = new Set(ids); },
-  setActiveSession(id) { store.activeSessionId = id; },
-  setBusy(sessionId, busy) {
-    if (busy) store.sessionBusyState.set(sessionId, true);
-    else store.sessionBusyState.delete(sessionId);
-  },
-  addAttention(sessionId) { store.attentionSessions.add(sessionId); },
-  setResponseReady(sessionId) {
-    store.responseReadySessions.add(sessionId);
-    store.sessionBusyState.delete(sessionId);
-  },
-  clearNotifications(sessionId) {
-    store.attentionSessions.delete(sessionId);
-    store.responseReadySessions.delete(sessionId);
-  },
-  setFilters({ showStarredOnly, showRunningOnly, showTodayOnly }) {
-    if (showStarredOnly !== undefined) store.showStarredOnly = showStarredOnly;
-    if (showRunningOnly !== undefined) store.showRunningOnly = showRunningOnly;
-    if (showTodayOnly !== undefined) store.showTodayOnly = showTodayOnly;
-  },
-  setSearch(matchIds, matchProjectPaths) {
-    store.searchMatchIds = matchIds;
-    store.searchMatchProjectPaths = matchProjectPaths;
-  },
-  setVisibility(count, ageDays) {
-    store.visibleSessionCount = count;
-    store.sessionMaxAgeDays = ageDays;
-  },
-  setHeaderSession(session) { store.headerSession = session; },
-  setHeaderPtyTitle(title) { store.headerPtyTitle = title || null; },
-  setHeaderShellProfile(profile) { store.headerShellProfile = profile || null; },
-  setHeaderAccount(name) { store.headerAccount = name || null; },
-  clearHeader() {
-    store.headerSession = null;
-    store.headerPtyTitle = null;
-    store.headerShellProfile = null;
-    store.headerAccount = null;
-  },
-};
+// The store-writing bridge (sidebar tree, PTY sets, filters, header) is declared
+// in the single bridge module and mutates the store rather than a component ref.
+// It runs synchronously during app.mount(), before any other script executes.
+window.vueSidebar = createSidebarBridge(store);
 
 // Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
 window.createViewerPanel = function(container, opts = {}) {
