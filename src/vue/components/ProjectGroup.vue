@@ -5,10 +5,7 @@
     <div v-if="isWorktree" class="worktree-header" :class="{ collapsed }" :id="'ph-' + folderId" @click.self="toggle" @mouseenter="refreshCommands">
       <span class="worktree-branch-icon" v-html="branchSvg" @click.stop="toggle"></span>
       <span class="worktree-name" @click.stop="toggle">{{ worktreeName }}</span>
-      <button class="worktree-hide-btn" data-tooltip="Hide worktree" @click.stop="$emit('remove-project', project.projectPath)" v-html="closeSvg"></button>
-      <button class="project-run-btn worktree-run-btn" :data-tooltip="runTooltip" @click.stop="runProject" v-html="playSvg"></button>
-      <button class="project-ide-btn worktree-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
-      <button class="project-folder-btn worktree-folder-btn" data-tooltip="Open Project Folder" @click.stop="openProjectFolder" v-html="folderSvg"></button>
+      <button class="project-menu-btn worktree-menu-btn" data-tooltip="More actions" @click.stop="openMenu" v-html="dotsSvg"></button>
       <button class="project-new-btn worktree-new-btn" data-tooltip="New session in worktree" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSmSvg"></button>
     </div>
 
@@ -30,13 +27,41 @@
       <span class="arrow" @click.stop="toggle">&#9660;</span>
       <ProjectAvatar class="project-header-avatar" :project-path="project.projectPath" @click.stop="toggle" />
       <span class="project-name" @click.stop="toggle">{{ shortName }}</span>
-      <button class="project-run-btn" :data-tooltip="runTooltip" @click.stop="runProject" v-html="playSvg"></button>
-      <button class="project-ide-btn" :data-tooltip="ideTooltip" @click.stop="openInExternalIde" v-html="codeSvg"></button>
-      <button class="project-folder-btn" data-tooltip="Open Project Folder" @click.stop="openProjectFolder" v-html="folderSvg"></button>
-      <button class="project-settings-btn" data-tooltip="Project settings" @click.stop="$emit('settings', project.projectPath)" v-html="gearSvg"></button>
-      <button class="project-archive-btn" data-tooltip="Archive all sessions" @click.stop="archiveAll" v-html="archiveSvg"></button>
+      <button class="project-menu-btn" data-tooltip="More actions" @click.stop="openMenu" v-html="dotsSvg"></button>
       <button class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
     </div>
+
+    <!-- Every header action but New session lives here: the row keeps one gesture, the menu holds the rest. -->
+    <Teleport to="body">
+      <div v-if="menuOpen" class="project-menu" :style="menuStyle" @click.stop>
+        <button class="project-menu-item project-run-btn" :title="runTooltip" @click="runFromMenu">
+          <span class="project-menu-icon" v-html="playSvg"></span>
+          <span class="project-menu-label">Run Project</span>
+        </button>
+        <button class="project-menu-item project-ide-btn" :title="ideTooltip" @click="ideFromMenu">
+          <span class="project-menu-icon" v-html="codeSvg"></span>
+          <span class="project-menu-label">Open in External IDE</span>
+        </button>
+        <button class="project-menu-item project-folder-btn" @click="folderFromMenu">
+          <span class="project-menu-icon" v-html="folderSvg"></span>
+          <span class="project-menu-label">Open Project Folder</span>
+        </button>
+        <template v-if="!isWorktree">
+          <button class="project-menu-item project-settings-btn" @click="settingsFromMenu">
+            <span class="project-menu-icon" v-html="gearSvg"></span>
+            <span class="project-menu-label">Project settings</span>
+          </button>
+          <button class="project-menu-item project-archive-btn" @click="archiveAllFromMenu">
+            <span class="project-menu-icon" v-html="archiveSvg"></span>
+            <span class="project-menu-label">Archive all sessions</span>
+          </button>
+        </template>
+        <button v-else class="project-menu-item project-menu-item-danger worktree-hide-btn" @click="hideWorktreeFromMenu">
+          <span class="project-menu-icon" v-html="closeSvg"></span>
+          <span class="project-menu-label">Hide worktree</span>
+        </button>
+      </div>
+    </Teleport>
 
     <!-- Sessions list -->
     <div :class="isWorktree ? 'worktree-sessions' : 'project-sessions'" :id="'sessions-' + folderId">
@@ -204,7 +229,7 @@
 </template>
 
 <script setup>
-import { computed, ref, watchEffect } from 'vue';
+import { computed, ref, watchEffect, onUnmounted } from 'vue';
 import SessionItem from './SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
@@ -347,6 +372,46 @@ async function refreshCommands() {
   } catch {}
 }
 
+// The header keeps one gesture (New session); everything else opens from here. Fixed
+// coordinates rather than an absolute child: the sidebar scrolls and would clip it.
+const menuOpen = ref(false);
+const menuPos = ref({ top: 0, left: 0 });
+const menuStyle = computed(() => ({ top: menuPos.value.top + 'px', left: menuPos.value.left + 'px' }));
+
+function openMenu(ev) {
+  if (menuOpen.value) return closeMenu();
+  const rect = ev.currentTarget.getBoundingClientRect();
+  menuPos.value = { top: rect.bottom + 4, left: Math.max(8, rect.right - 200) };
+  menuOpen.value = true;
+  refreshCommands();
+  document.addEventListener('click', closeMenu);
+  document.addEventListener('keydown', onMenuKeydown);
+  window.addEventListener('scroll', closeMenu, true);
+  window.addEventListener('resize', closeMenu);
+}
+
+function closeMenu() {
+  if (!menuOpen.value) return;
+  menuOpen.value = false;
+  document.removeEventListener('click', closeMenu);
+  document.removeEventListener('keydown', onMenuKeydown);
+  window.removeEventListener('scroll', closeMenu, true);
+  window.removeEventListener('resize', closeMenu);
+}
+
+function onMenuKeydown(ev) {
+  if (ev.key === 'Escape') closeMenu();
+}
+
+onUnmounted(closeMenu);
+
+function runFromMenu() { closeMenu(); runProject(); }
+function ideFromMenu() { closeMenu(); openInExternalIde(); }
+function folderFromMenu() { closeMenu(); openProjectFolder(); }
+function settingsFromMenu() { closeMenu(); emit('settings', props.project.projectPath); }
+function archiveAllFromMenu() { closeMenu(); archiveAll(); }
+function hideWorktreeFromMenu() { closeMenu(); emit('remove-project', props.project.projectPath); }
+
 function openInExternalIde() {
   emit('open-external-ide', props.project.projectPath);
 }
@@ -373,6 +438,7 @@ const playSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" str
 const folderSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>';
 const plusSvg = '<svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
 const plusSmSvg = '<svg width="10" height="10" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.5"><line x1="6" y1="2" x2="6" y2="10"/><line x1="2" y1="6" x2="10" y2="6"/></svg>';
+const dotsSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg>';
 const closeSvg = '<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 const branchSvg = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 8c0-2.76-2.46-5-5.5-5S2 5.24 2 8h2l1-1 1 1h4"/><path d="M13 7.14A5.82 5.82 0 0 1 16.5 6c3.04 0 5.5 2.24 5.5 5h-3l-1-1-1 1h-3"/><path d="M5.89 9.71c-2.15 2.15-2.3 5.47-.35 7.43l4.24-4.25.7-.7.71-.71 2.12-2.12c-1.95-1.96-5.27-1.8-7.42.35"/><path d="M11 15.5c.5 2.5-.17 4.5-1 6.5h4c2-5.5-.5-12-1-14"/></svg>';
 </script>

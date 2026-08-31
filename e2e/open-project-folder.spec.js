@@ -17,7 +17,9 @@ const openedPaths = (app) => app.evaluate(() => globalThis.__openedPaths);
 async function clickFolderButton(page, projectPath) {
   const header = page.locator(headerId(projectPath));
   await header.waitFor();
-  await header.locator('.project-folder-btn').click();
+  await header.hover();
+  await header.locator('.project-menu-btn').click();
+  await page.locator('.project-menu .project-folder-btn').click();
 }
 
 test.describe('Open Project Folder', () => {
@@ -58,7 +60,7 @@ test.describe('Open Project Folder', () => {
     await header.waitFor();
     const before = await header.evaluate((el) => el.classList.contains('collapsed'));
 
-    await header.locator('.project-folder-btn').click();
+    await clickFolderButton(page, projectPath);
 
     await expect.poll(() => openedPaths(app)).toHaveLength(1);
     expect(await header.evaluate((el) => el.classList.contains('collapsed'))).toBe(before);

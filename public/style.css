@@ -6846,3 +6846,103 @@ body.hide-avatars .grid-card-avatar {
   width: 20px;
   height: 20px;
 }
+
+/* ---- Project header overflow menu ---- */
+/* One "..." button holds every header action but New session. */
+.project-menu-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-tertiary);
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  line-height: 0;
+  transition: background var(--duration-fast) var(--ease-standard), color var(--duration-fast) var(--ease-standard);
+  opacity: 0;
+}
+
+.project-menu-btn svg { display: block; }
+
+.worktree-menu-btn { width: 20px; height: 20px; }
+
+.project-header:hover .project-menu-btn,
+.worktree-header:hover .project-menu-btn {
+  opacity: 0.7;
+}
+
+.project-menu-btn:hover {
+  background: var(--surface-card);
+  color: var(--text-secondary);
+  opacity: 1 !important;
+}
+
+/* Teleported to body: the sidebar scrolls and would clip an absolute child. */
+.project-menu {
+  position: fixed;
+  z-index: 1000;
+  min-width: 200px;
+  max-width: 280px;
+  padding: 4px;
+  background: var(--surface-panel-raised, var(--surface-card));
+  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border-radius: var(--radius-md);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.project-menu .project-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: auto;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: var(--text-2xs, 11px);
+  font-family: inherit;
+  line-height: 1.4;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  opacity: 1;
+}
+
+.project-menu .project-menu-item:hover {
+  background: var(--surface-card);
+  color: var(--gray-100, #fff);
+  opacity: 1;
+}
+
+.project-menu .project-menu-item-danger:hover {
+  background: color-mix(in srgb, var(--red-500) 10%, transparent);
+  color: var(--red-500);
+}
+
+.project-menu .project-menu-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  flex: 0 0 16px;
+  line-height: 0;
+}
+
+.project-menu .project-menu-icon svg { display: block; }
+
+.project-menu .project-menu-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

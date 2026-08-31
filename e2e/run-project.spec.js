@@ -16,7 +16,8 @@ async function clickRun(page, projectPath) {
   const header = page.locator(headerId(projectPath));
   await header.waitFor();
   await header.hover();
-  await header.locator('.project-run-btn').click();
+  await header.locator('.project-menu-btn').click();
+  await page.locator('.project-menu .project-run-btn').click();
 }
 
 // xterm renders to a canvas, so the assertion reads its buffer, not the DOM.
