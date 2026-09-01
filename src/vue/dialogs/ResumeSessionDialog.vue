@@ -1,5 +1,5 @@
 <template>
-  <SbDialog :open="!!entry" overlay-class="new-session-overlay" dialog-class="new-session-dialog" @close="close">
+  <SbDialog :open="!!request" overlay-class="new-session-overlay" dialog-class="new-session-dialog" @close="close">
     <h3>Resume Session — {{ sessionName }}</h3>
     <PermissionModeGrid v-model:mode="mode" v-model:danger="danger" />
     <div class="settings-field">
@@ -39,33 +39,24 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue';
+import { computed, watch } from 'vue';
 import SbDialog from '../shared/ui/SbDialog.vue';
 import SbSwitch from '../components/SbSwitch.vue';
 import PermissionModeGrid from '../shared/ui/PermissionModeGrid.vue';
 import { dialogStore, closeResumeSession } from './dialog-store.js';
 import { useDialogKeys } from './use-dialog-keys.js';
+import { useSessionOptions } from './use-session-options.js';
 
-const entry = computed(() => dialogStore.resumeSession);
-const mode = ref(null);
-const danger = ref(false);
-const chrome = ref(false);
-const preLaunch = ref('');
-const addDirs = ref('');
+const request = computed(() => dialogStore.resumeSession);
+const { mode, danger, chrome, preLaunch, addDirs, seed, toOptions } = useSessionOptions();
 
 const sessionName = computed(() => {
-  const s = entry.value?.session;
+  const s = request.value?.session;
   return s ? (s.name || s.aiTitle || s.summary || s.sessionId?.slice(0, 8) || '') : '';
 });
 
-watch(entry, (v) => {
-  if (!v) return;
-  const e = v.effective;
-  mode.value = e.permissionMode || null;
-  danger.value = !!e.dangerouslySkipPermissions;
-  chrome.value = !!e.chrome;
-  preLaunch.value = e.preLaunchCmd || '';
-  addDirs.value = e.addDirs || '';
+watch(request, (r) => {
+  if (r) seed(r.effective);
 });
 
 useDialogKeys('resumeSession', { onEscape: close, onEnter: resume });
@@ -73,19 +64,10 @@ useDialogKeys('resumeSession', { onEscape: close, onEnter: resume });
 function close() { closeResumeSession(); }
 
 function resume() {
-  const v = dialogStore.resumeSession;
-  if (!v) return;
-  const options = {};
-  if (danger.value) {
-    options.dangerouslySkipPermissions = true;
-  } else if (mode.value) {
-    options.permissionMode = mode.value;
-  }
-  if (chrome.value) options.chrome = true;
-  if (preLaunch.value.trim()) options.preLaunchCmd = preLaunch.value.trim();
-  options.addDirs = addDirs.value.trim();
-  if (v.effective?.mcpEmulation === false) options.mcpEmulation = false;
-  const cb = v.onResume;
+  const r = dialogStore.resumeSession;
+  if (!r) return;
+  const options = toOptions(r.effective);
+  const cb = r.onResume;
   close();
   cb?.(options);
 }

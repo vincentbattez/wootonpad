@@ -1,6 +1,6 @@
 <template>
-  <SbDialog :open="!!session" overlay-class="new-session-overlay" dialog-class="new-session-dialog" @close="close">
-    <h3>New Session — {{ shortPath(session?.project?.projectPath) }}</h3>
+  <SbDialog :open="!!request" overlay-class="new-session-overlay" dialog-class="new-session-dialog" @close="close">
+    <h3>New Session — {{ shortPath(request?.project?.projectPath) }}</h3>
     <PermissionModeGrid v-model:mode="mode" v-model:danger="danger" />
     <div class="settings-field">
       <div class="settings-field-info">
@@ -56,27 +56,19 @@ import SbSwitch from '../components/SbSwitch.vue';
 import PermissionModeGrid from '../shared/ui/PermissionModeGrid.vue';
 import { dialogStore, closeNewSession } from './dialog-store.js';
 import { useDialogKeys } from './use-dialog-keys.js';
+import { useSessionOptions } from './use-session-options.js';
 
-const session = computed(() => dialogStore.newSession);
-const mode = ref(null);
-const danger = ref(false);
+const request = computed(() => dialogStore.newSession);
+const { mode, danger, chrome, preLaunch, addDirs, seed, toOptions } = useSessionOptions();
 const worktree = ref(false);
 const worktreeName = ref('');
-const chrome = ref(false);
-const preLaunch = ref('');
-const addDirs = ref('');
 
 // Seed the form from the effective options the moment the dialog opens.
-watch(session, (s) => {
-  if (!s) return;
-  const e = s.effective;
-  mode.value = e.permissionMode || null;
-  danger.value = !!e.dangerouslySkipPermissions;
-  worktree.value = !!e.worktree;
-  worktreeName.value = e.worktreeName || '';
-  chrome.value = !!e.chrome;
-  preLaunch.value = e.preLaunchCmd || '';
-  addDirs.value = e.addDirs || '';
+watch(request, (r) => {
+  if (!r) return;
+  seed(r.effective);
+  worktree.value = !!r.effective.worktree;
+  worktreeName.value = r.effective.worktreeName || '';
 });
 
 useDialogKeys('newSession', { onEscape: close, onEnter: start });
@@ -86,20 +78,11 @@ function close() { closeNewSession(); }
 function onWorktreeInput() { if (worktreeName.value.trim()) worktree.value = true; }
 
 function start() {
-  const s = dialogStore.newSession;
-  if (!s) return;
-  const options = {};
-  if (danger.value) {
-    options.dangerouslySkipPermissions = true;
-  } else if (mode.value) {
-    options.permissionMode = mode.value;
-  }
+  const r = dialogStore.newSession;
+  if (!r) return;
+  const options = toOptions(r.effective);
   if (worktree.value) { options.worktree = true; options.worktreeName = worktreeName.value.trim(); }
-  if (chrome.value) options.chrome = true;
-  if (preLaunch.value.trim()) options.preLaunchCmd = preLaunch.value.trim();
-  options.addDirs = addDirs.value.trim();
-  if (s.effective?.mcpEmulation === false) options.mcpEmulation = false;
-  const cb = s.onStart;
+  const cb = r.onStart;
   close();
   cb?.(options);
 }
