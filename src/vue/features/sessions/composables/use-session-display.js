@@ -3,9 +3,14 @@
 // `formatDate` are installed by public/app.js; each helper degrades to a plain value when the
 // global is absent (node has no window), matching the old inline `window.foo ? … : …` guards.
 
-export function sessionDisplayName(session) {
-  const name = session.name || session.summary;
+// Run a name through the frozen renderer's cleanDisplayName, or pass it through untouched when
+// the global is absent (node has no window). The one guard every display string shares.
+export function cleanName(name) {
   return typeof window !== 'undefined' && window.cleanDisplayName ? window.cleanDisplayName(name) : name;
+}
+
+export function sessionDisplayName(session) {
+  return cleanName(session.name || session.summary);
 }
 
 export function sessionTimeStr(session) {
