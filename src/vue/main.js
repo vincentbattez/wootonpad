@@ -17,7 +17,7 @@ import { memoryStore } from './stores/memory.js';
 import { accountsStore } from './stores/accounts.js';
 import { accountDropdownStore } from './stores/account-dropdown.js';
 import { statusBarStore } from './stores/status-bar.js';
-import { gridStore } from './stores/grid.js';
+import { gridStore } from './features/grid/store.js';
 import { projectsStore } from './stores/projects.js';
 import { jsonlStore } from './stores/jsonl.js';
 import App from './components/App.vue';

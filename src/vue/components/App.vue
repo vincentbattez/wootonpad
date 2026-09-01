@@ -197,7 +197,7 @@
     <StatusBarApp />
   </Teleport>
   <Teleport to="#vue-grid-cards">
-    <GridCardsApp />
+    <GridCardsContainer />
   </Teleport>
 
   <!-- Dialogs (overlays + popover, rendered via Teleport to body inside the component) -->
@@ -219,7 +219,7 @@ import AccountsApp from './AccountsApp.vue';
 import AccountDropdownApp from './AccountDropdownApp.vue';
 import ProjectsApp from './ProjectsApp.vue';
 import StatusBarApp from './StatusBarApp.vue';
-import GridCardsApp from './GridCardsApp.vue';
+import GridCardsContainer from '../features/grid/containers/GridCardsContainer.vue';
 import SettingsPanelApp from './SettingsPanelApp.vue';
 import ProjectViewerApp from './ProjectViewerApp.vue';
 import StatsApp from './StatsApp.vue';

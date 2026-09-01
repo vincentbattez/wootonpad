@@ -3,6 +3,10 @@ import { api } from './shared/services/api.js';
 import { sb } from './shared/services/sb.js';
 import { createSessionsBridge } from './features/sessions/bridge.js';
 
+// window.vueGrid: the Session-overview cards, owned by the grid Feature's Bridge. Re-exported
+// so main.js and the bridge-contract spec keep one import site.
+export { createGridBridge } from './features/grid/bridge.js';
+
 // The renderer-to-Vue surface `public/app.js` calls. Every method writes a feature
 // store rather than a component ref; app.js is frozen, so these names and signatures
 // are the contract. The project viewer, stats and the plan/memory viewers still keep
@@ -76,25 +80,6 @@ export function createAccountDropdownBridge(store) {
     setActiveAccount(id) { store.activeAccountId = id; },
     setUsage(usage) { store.usage = { ...usage }; },
     close() { store.open = false; },
-  };
-}
-
-// window.vueGrid: the Session-overview cards. GridCardsApp teleports each card into
-// the header/footer element the vanilla grid renderer built.
-export function createGridBridge(store) {
-  return {
-    addCard(sessionId, headerEl, footerEl, { name, project, initials, color, running, busy, time }) {
-      store.cards.set(sessionId, { headerEl, footerEl, name, project, initials, color, running: !!running, busy: !!busy, time: time || '' });
-    },
-    updateCard(sessionId, running, busy, time) {
-      const card = store.cards.get(sessionId);
-      if (!card) return;
-      card.running = !!running;
-      card.busy = !!busy;
-      if (time !== undefined) card.time = time;
-    },
-    removeCard(sessionId) { store.cards.delete(sessionId); },
-    clearAll() { store.cards.clear(); },
   };
 }
 
