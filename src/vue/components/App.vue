@@ -136,7 +136,7 @@
       <StatsApp ref="statsRef" />
     </div>
     <div id="memory-viewer" v-show="store.memoryViewerOpen">
-      <ViewerContentApp
+      <ViewerContainer
         ref="memoryViewerRef"
         language="markdown"
         storage-key="markdownPreviewMode"
@@ -146,7 +146,7 @@
       />
     </div>
     <div id="plan-viewer" v-show="store.planViewerOpen">
-      <ViewerContentApp
+      <ViewerContainer
         ref="planViewerRef"
         language="markdown"
         storage-key="markdownPreviewMode"
@@ -221,7 +221,7 @@ import SettingsPanelApp from './SettingsPanelApp.vue';
 import ProjectViewerApp from './ProjectViewerApp.vue';
 import StatsApp from './StatsApp.vue';
 import JsonlViewerApp from './JsonlViewerApp.vue';
-import ViewerContentApp from './ViewerContentApp.vue';
+import ViewerContainer from '../features/viewer/containers/ViewerContainer.vue';
 import DialogsApp from './DialogsApp.vue';
 
 // ── Template refs ────────────────────────────────────────────────
