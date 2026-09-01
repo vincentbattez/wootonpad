@@ -170,3 +170,17 @@ export async function discoverRootIds(): Promise<string[]> {
 export async function setState(id: string, state: string): Promise<void> {
   await exec("linear", ["issue", "update", id, "--state", state]);
 }
+
+/**
+ * Progress reporting, not control flow — a workspace whose states are named
+ * differently must not take a run down with it.
+ */
+export async function trySetState(id: string, state: string): Promise<void> {
+  try {
+    await setState(id, state);
+  } catch (cause) {
+    console.error(
+      `[${id}] could not move to "${state}": ${(cause as Error).message}`,
+    );
+  }
+}

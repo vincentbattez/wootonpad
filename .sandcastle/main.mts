@@ -23,6 +23,7 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
 import { config, checkedPromptArgs } from "./lib/config.mts";
+import { markPhase, phaseDone, tipOf } from "./lib/progress.mts";
 import {
   branchHasCommits,
   createPullRequest,
@@ -37,6 +38,7 @@ import {
   isEligible,
   leavesOf,
   setState,
+  trySetState,
   type Issue,
 } from "./lib/linear.mts";
 
@@ -141,7 +143,26 @@ async function resolveRoot(id: string): Promise<Root> {
 const signalledDone = (result: { completionSignal?: string }) =>
   result.completionSignal !== undefined;
 
+/**
+ * Each phase runs only if its marker is stale, so a re-run picks up where the
+ * last one stopped: implement what was never implemented, review what the
+ * implementer changed since the last review, skip a leaf that is settled.
+ */
 async function runLeaf(leaf: Issue, branch: string): Promise<boolean> {
+  const existing = await tipOf(branch);
+  const needsImplement =
+    existing === null || !(await phaseDone("implemented", leaf.id, existing));
+  const needsReview =
+    needsImplement ||
+    (existing !== null && !(await phaseDone("reviewed", leaf.id, existing)));
+
+  if (!needsImplement && !needsReview) {
+    console.log(`[${leaf.id}] implemented and reviewed already — skipping`);
+    return true;
+  }
+
+  await trySetState(leaf.id, config.linear.inProgressState);
+
   const sandbox = await sandcastle.createSandbox({
     branch,
     baseBranch: BASE_BRANCH,
@@ -151,20 +172,34 @@ async function runLeaf(leaf: Issue, branch: string): Promise<boolean> {
   });
 
   try {
-    const implement = await sandbox.run({
-      name: "implementer",
-      maxIterations: config.agent.implementIterations,
-      agent: sandcastle.claudeCode(MODEL),
-      promptFile: PROMPTS.implement,
-      promptArgs: checkedPromptArgs(PROMPTS.implement, {
-        ...projectPromptArgs,
-        TASK_ID: leaf.id,
-        ISSUE_TITLE: leaf.title,
-        BRANCH: branch,
-      }),
-    });
+    let done = !needsImplement;
 
-    if (implement.commits.length > 0) {
+    if (needsImplement) {
+      const implement = await sandbox.run({
+        name: "implementer",
+        maxIterations: config.agent.implementIterations,
+        agent: sandcastle.claudeCode(MODEL),
+        promptFile: PROMPTS.implement,
+        promptArgs: checkedPromptArgs(PROMPTS.implement, {
+          ...projectPromptArgs,
+          TASK_ID: leaf.id,
+          ISSUE_TITLE: leaf.title,
+          BRANCH: branch,
+        }),
+      });
+
+      done = signalledDone(implement);
+      const tip = await tipOf(branch);
+      if (done && tip) await markPhase("implemented", leaf.id, tip);
+    } else {
+      console.log(`[${leaf.id}] already implemented — reviewing only`);
+    }
+
+    // An agent that signalled done without committing decided there was nothing
+    // to do; there is no diff to review and nothing to ship.
+    const hasWork = await branchHasCommits(branch);
+
+    if (done && hasWork) {
       await sandbox.run({
         name: "reviewer",
         maxIterations: 1,
@@ -176,9 +211,22 @@ async function runLeaf(leaf: Issue, branch: string): Promise<boolean> {
           BASE_BRANCH,
         }),
       });
+
+      const tip = await tipOf(branch);
+      if (tip) await markPhase("reviewed", leaf.id, tip);
     }
 
-    return signalledDone(implement);
+    await trySetState(
+      leaf.id,
+      done && hasWork
+        ? config.linear.reviewState
+        : config.linear.unstartedState,
+    );
+
+    return done;
+  } catch (cause) {
+    await trySetState(leaf.id, config.linear.unstartedState);
+    throw cause;
   } finally {
     await sandbox.close();
   }
@@ -358,6 +406,8 @@ async function runRoot(root: Root): Promise<string | null> {
     );
     return null;
   }
+
+  await trySetState(id, config.linear.inProgressState);
 
   const landed = new Set<string>();
 

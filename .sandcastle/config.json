@@ -2,7 +2,9 @@
   "linear": {
     "project": "Wooton",
     "label": "ready-for-agent",
-    "reviewState": "In Review"
+    "inProgressState": "In Progress",
+    "reviewState": "In Review",
+    "unstartedState": "Todo"
   },
   "git": {
     "remote": "origin",

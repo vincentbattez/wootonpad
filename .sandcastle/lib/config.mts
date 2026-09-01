@@ -22,8 +22,12 @@ const configSchema = z.object({
     project: z.string().nullable().default(null),
     /** Only issues carrying this label are eligible for agent work. */
     label: z.string().default("ready-for-agent"),
-    /** Workflow state applied once a feature's PR is open. */
+    /** Workflow state applied when an agent picks an issue up. */
+    inProgressState: z.string().default("In Progress"),
+    /** Workflow state applied once an issue's work is done and awaits review. */
     reviewState: z.string().default("In Review"),
+    /** Workflow state an issue falls back to when its agent gives up. */
+    unstartedState: z.string().default("Todo"),
   }),
   git: z.object({
     /** Remote to push integration branches to, and to resolve the GitHub repo from. */
