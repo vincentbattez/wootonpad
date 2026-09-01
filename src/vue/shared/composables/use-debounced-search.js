@@ -33,5 +33,5 @@ export function useDebouncedSearch({ onSearch, onClear, delay = 200 }) {
     if (query) onSearch(query);
   }
 
-  return { onInput, clear, flush, cancel };
+  return { onInput, clear, flush };
 }
