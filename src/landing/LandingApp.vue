@@ -121,7 +121,7 @@
 
               <div v-else class="lp-terminal-area">
                 <div id="vue-session-header">
-                  <SessionHeaderApp />
+                  <SessionHeaderContainer />
                 </div>
                 <div class="lp-terminal-body">
                   <template v-for="(line, i) in terminalLines" :key="i">
@@ -367,7 +367,7 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue';
 
 const iconUrl = 'icon.png';
 import { store } from '../vue/store.js';
-import SessionHeaderApp from '../vue/components/SessionHeaderApp.vue';
+import SessionHeaderContainer from '../vue/features/sessions/containers/SessionHeaderContainer.vue';
 import SidebarApp from '../vue/components/SidebarApp.vue';
 import AccountsApp from '../vue/components/AccountsApp.vue';
 import AccountDropdownApp from '../vue/components/AccountDropdownApp.vue';
@@ -885,7 +885,7 @@ html, body {
   background: var(--surface-app);
 }
 
-/* SessionHeaderApp handles header styles via public/style.css */
+/* SessionHeaderContainer handles header styles via public/style.css */
 #vue-session-header {
   flex-shrink: 0;
 }
