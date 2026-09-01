@@ -212,8 +212,14 @@ async function runLeaf(leaf: Issue, branch: string): Promise<boolean> {
         }),
       });
 
+      // The reviewer commits too, which moves the tip. Both markers advance
+      // together, or the next run would see a stale `implemented` and put an
+      // agent back on work the reviewer just signed off.
       const tip = await tipOf(branch);
-      if (tip) await markPhase("reviewed", leaf.id, tip);
+      if (tip) {
+        await markPhase("implemented", leaf.id, tip);
+        await markPhase("reviewed", leaf.id, tip);
+      }
     }
 
     await trySetState(
