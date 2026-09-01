@@ -12,6 +12,8 @@ import {
   createJsonlViewerBridge,
   createAppBridge,
 } from './bridge.js';
+import { statsStore } from './features/stats/stats-store.js';
+import { createStatsBridge } from './features/stats/stats-bridge.js';
 import { plansStore } from './stores/plans.js';
 import { memoryStore } from './stores/memory.js';
 import { accountsStore } from './stores/accounts.js';
@@ -38,6 +40,7 @@ window.vueStatusBar = createStatusBarBridge(statusBarStore);
 window.vueGrid = createGridBridge(gridStore);
 window.vueProjects = createProjectsBridge(projectsStore);
 window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
+window.vueStats = createStatsBridge(statsStore);
 window.vueApp = createAppBridge(store);
 
 // Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
