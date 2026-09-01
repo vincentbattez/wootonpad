@@ -177,16 +177,15 @@ function formatSummaryTokens(tokens) {
 // The four fixed cards (sessions, messages, current and longest streak) plus one
 // per model, its tokens summed and abbreviated.
 export function buildSummaryCards(stats, today) {
-  const s = stats;
-  const dailyMap = buildDailyMap(s);
+  const dailyMap = buildDailyMap(stats);
   const { current: currentStreak, longest: longestStreak } = calculateStreak(dailyMap, today);
 
   let totalMessages = 0;
   for (const count of Object.values(dailyMap)) totalMessages += count;
-  if (s.totalMessages && s.totalMessages > totalMessages) totalMessages = s.totalMessages;
+  if (stats.totalMessages && stats.totalMessages > totalMessages) totalMessages = stats.totalMessages;
 
-  const totalSessions = s.totalSessions || Object.keys(dailyMap).length;
-  const models = s.modelUsage || {};
+  const totalSessions = stats.totalSessions || Object.keys(dailyMap).length;
+  const models = stats.modelUsage || {};
 
   const cards = [
     { value: totalSessions.toLocaleString(), label: 'Total Sessions' },
@@ -212,22 +211,20 @@ export const USAGE_ITEMS = [
 ];
 
 export function buildUsageCards(usage) {
-  const u = usage;
-  if (!u || u._rateLimited || u._error) return [];
+  if (!usage || usage._rateLimited || usage._error) return [];
   return USAGE_ITEMS
-    .filter(item => u[item.key] !== undefined)
+    .filter(item => usage[item.key] !== undefined)
     .map(item => ({
       key: item.key,
       label: item.label,
-      pct: u[item.key],
-      reset: u[item.resetKey] || null,
+      pct: usage[item.key],
+      reset: usage[item.resetKey] || null,
     }));
 }
 
 export function buildRateLimitedText(usage) {
-  const u = usage;
-  if (!u?._rateLimited) return '';
-  const secs = u.retryAfterSeconds || 0;
+  if (!usage?._rateLimited) return '';
+  const secs = usage.retryAfterSeconds || 0;
   const mins = Math.ceil(secs / 60);
   return secs > 0
     ? `Usage API rate limited. Try again in ~${mins} min${mins !== 1 ? 's' : ''}.`
