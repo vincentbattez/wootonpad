@@ -1,19 +1,12 @@
 import { markRaw } from 'vue';
 
-// The single bridge module: it declares the renderer-to-Vue surface that
-// `public/app.js` calls, and every method writes into the feature stores
-// rather than into a component through a template ref. `public/app.js` is
-// frozen, so these names and signatures are the contract.
-//
-// The sidebar and header setters already worked this way before the split —
-// they wrote to the flat store — so gathering them here generalises an existing
-// pattern rather than inventing one. The panels that still hold their own local
-// state (the project viewer, stats, the plan/memory viewers and dialogs) keep
-// their template-ref setters in App.vue's onMounted.
+// The renderer-to-Vue surface `public/app.js` calls. Every method writes a feature
+// store rather than a component ref; app.js is frozen, so these names and signatures
+// are the contract. The project viewer, stats and the plan/memory viewers still keep
+// their template-ref setters in App.vue.
 
 // window.vueSidebar: the Session/Project tree, the live PTY sets, the filters,
-// the search matches and the terminal-header context. Every method mutates the
-// store the sidebar and header components render from.
+// the search matches and the terminal-header context.
 export function createSidebarBridge(store) {
   return {
     store,
@@ -59,8 +52,7 @@ export function createSidebarBridge(store) {
   };
 }
 
-// window.vuePlans: the Plans list and which plan is open. PlansApp reads the
-// store these write; the old defineExpose setters are gone.
+// window.vuePlans: the Plans list and which plan is open.
 export function createPlansBridge(store) {
   return {
     setPlans(list) { store.plans = list; },
@@ -69,8 +61,7 @@ export function createPlansBridge(store) {
   };
 }
 
-// window.vueMemory: the Agent Files tree, the active-file highlight and the
-// search filter. MemoryApp reads the store reactively.
+// window.vueMemory: the Agent Files tree, the active-file highlight and the search filter.
 export function createMemoryBridge(store) {
   return {
     setMemories(data, ids = null) {
@@ -84,8 +75,6 @@ export function createMemoryBridge(store) {
 }
 
 // window.vueAccounts: the Accounts panel list, its active account and usage.
-// The WSL-home discovery that setAccounts used to trigger is now a watcher in
-// AccountsApp, so this stays a pure store write.
 export function createAccountsBridge(store) {
   return {
     setAccounts(list, activeId) {
@@ -97,8 +86,7 @@ export function createAccountsBridge(store) {
   };
 }
 
-// window.vueAccountDropdown: the sidebar account switcher. `close()` writes the
-// store's open flag, which the component renders from.
+// window.vueAccountDropdown: the sidebar account switcher.
 export function createAccountDropdownBridge(store) {
   return {
     setAccounts(list, activeId, usage) {
@@ -112,9 +100,8 @@ export function createAccountDropdownBridge(store) {
   };
 }
 
-// window.vueGrid: the Session-overview cards. Each method mutates the store's
-// card Map; GridCardsApp teleports each card into the header/footer element the
-// vanilla grid renderer built. The old defineExpose setters are gone.
+// window.vueGrid: the Session-overview cards. GridCardsApp teleports each card into
+// the header/footer element the vanilla grid renderer built.
 export function createGridBridge(store) {
   return {
     addCard(sessionId, headerEl, footerEl, { name, project, initials, color, running, busy, time }) {
@@ -132,11 +119,8 @@ export function createGridBridge(store) {
   };
 }
 
-// window.vueProjects: the Projects panel. The per-project info queue — a lazy
-// fetch of git/container info that setProjects used to kick inside the component
-// — lives here now, so ProjectsApp is a pure reader of the store. The queue and
-// its rAF batching are guarded so the bridge is inert when window.api or
-// requestAnimationFrame are absent (as under node:test).
+// window.vueProjects: the Projects panel, plus the lazy per-project git/container
+// info queue. Guarded so the bridge stays inert without window.api or rAF.
 export function createProjectsBridge(store) {
   let queueGen = 0;
   let pendingInfoUpdates = {};
@@ -153,8 +137,7 @@ export function createProjectsBridge(store) {
     pendingInfoUpdates = {};
   }
 
-  // Batch reactive info writes into one rAF flush to avoid per-project churn;
-  // fall back to a synchronous flush where rAF is unavailable (node:test).
+  // Batch reactive info writes into one rAF flush to avoid per-project churn.
   function scheduleInfoFlush() {
     if (flushScheduled) return;
     flushScheduled = true;
@@ -211,25 +194,16 @@ export function createProjectsBridge(store) {
   };
 }
 
-// window.vueJsonlViewer: the Message History viewer. `open(session)` used to be
-// a defineExpose method reached through a template ref; it now writes an open
-// request the component watches and renders. The seq bump makes re-opening the
-// same session re-trigger the watcher.
+// window.vueJsonlViewer: the Message History viewer. The seq bump makes re-opening
+// the same session re-trigger the component's watcher.
 export function createJsonlViewerBridge(store) {
   let seq = 0;
   return {
-    // markRaw the session: the component reads it once to render, so there is no
-    // gain in deep-proxying it, and it keeps the stored reference identical to the
-    // one handed in.
+    // markRaw: read once to render, so deep-proxying buys nothing.
     open(session) { store.openRequest = { session: markRaw(session), seq: ++seq }; },
   };
 }
 
-// window.vueApp: the sidebar tab switch. It used to be a closure over App.vue's
-// onMounted; it now lives here and writes the aggregate store's tab and search
-// fields directly — the same fields the sidebar/header render from — and pings
-// the vanilla search host. App.vue's tab buttons delegate to this so there is
-// one code path.
 // Switching tab clears the search. Exported so App.vue's tab buttons and
 // window.vueApp share one code path.
 export function switchTab(store, tabId) {
@@ -241,15 +215,14 @@ export function switchTab(store, tabId) {
   if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
 }
 
+// window.vueApp: the sidebar tab switch.
 export function createAppBridge(store) {
   return {
     setTab(tabId) { switchTab(store, tabId); },
   };
 }
 
-// window.vueStatusBar: the three status-bar slots. The auto-clear timers that
-// lived in the component's setters live here now, so the component is a pure
-// reader of the store.
+// window.vueStatusBar: the three status-bar slots and their auto-clear timers.
 export function createStatusBarBridge(store) {
   let activityTimer = null;
   let updaterTimer = null;

@@ -23,19 +23,13 @@ import { jsonlStore } from './stores/jsonl.js';
 import App from './components/App.vue';
 import ViewerContentApp from './components/ViewerContentApp.vue';
 
-// Expose the aggregate store facade for direct mutation from app.js. It reads
-// and writes through to the feature slices, so every field app.js addresses by
-// name still resolves.
+// The aggregate store facade app.js mutates by field name.
 window.vueStore = store;
 
-// The store-writing bridge (sidebar tree, PTY sets, filters, header) is declared
-// in the single bridge module and mutates the store rather than a component ref.
-// It runs synchronously during app.mount(), before any other script executes.
+
 window.vueSidebar = createSidebarBridge(store);
 
-// The panel bridges write into their own feature stores, which the panels read
-// reactively — no template-ref setter. Declared here so they exist before any
-// app.js call, rather than being filled in App.vue's onMounted.
+// Installed before mount so they exist ahead of any app.js call.
 window.vuePlans = createPlansBridge(plansStore);
 window.vueMemory = createMemoryBridge(memoryStore);
 window.vueAccounts = createAccountsBridge(accountsStore);
@@ -44,8 +38,6 @@ window.vueStatusBar = createStatusBarBridge(statusBarStore);
 window.vueGrid = createGridBridge(gridStore);
 window.vueProjects = createProjectsBridge(projectsStore);
 window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
-// The tab switch is store-only, so it lives in the bridge too; App.vue's tab
-// buttons delegate to it.
 window.vueApp = createAppBridge(store);
 
 // Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
@@ -66,8 +58,7 @@ window.createViewerPanel = function(container, opts = {}) {
   };
 };
 
-// Stubs for the component bridge APIs still installed from App.vue onMounted via
-// template refs (their panels are not yet store-backed).
+// Stubs for the panels still installed from App.vue via template refs.
 window.vuePlanViewer = {};
 window.vueMemoryViewer = {};
 window.vueDialogs = {};

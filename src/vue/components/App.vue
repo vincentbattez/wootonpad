@@ -225,10 +225,6 @@ import ViewerContentApp from './ViewerContentApp.vue';
 import DialogsApp from './DialogsApp.vue';
 
 // ── Template refs ────────────────────────────────────────────────
-// Plans, Memory, Accounts, the account dropdown, the status bar, Projects, the
-// overview grid and the JSONL viewer read their feature stores directly, so they
-// no longer need a ref here; the tab switch (window.vueApp) is a pure store
-// write and lives in the bridge too.
 const projectViewerRef = ref(null);
 const statsRef = ref(null);
 const planViewerRef = ref(null);
@@ -414,11 +410,7 @@ const projectViewerCallbacks = {
 
 // ── Mount lifecycle ───────────────────────────────────────────────
 onMounted(async () => {
-  // Plans, Memory, Accounts, the account dropdown, the status bar, Projects, the
-  // overview grid and the JSONL viewer are now store-backed, and the tab switch
-  // (window.vueApp) is a store write: their bridges are installed in main.js and
-  // write feature stores the panels read reactively. The remaining panels below
-  // still expose their setters through template refs.
+  // The panels below are not store-backed yet: their setters go through template refs.
   const worktreePattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
   window.vueProjectViewer = {
     open: (proj) => {
