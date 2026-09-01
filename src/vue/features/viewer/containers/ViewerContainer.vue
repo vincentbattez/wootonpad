@@ -117,16 +117,8 @@ function open(newTitle, filePath, content) {
   if (!editorView) {
     createEditor(content, filePath, isMd);
   } else {
-    editorView.dispatch({
-      changes: { from: 0, to: editorView.state.doc.length, insert: content },
-    });
-    if (editorView._wrapCompartment) {
-      editorView.dispatch({
-        effects: editorView._wrapCompartment.reconfigure(
-          wrapMode.value ? window.CMEditorView.lineWrapping : []
-        ),
-      });
-    }
+    setDocContent(content);
+    applyWrap(wrapMode.value);
   }
 
   if (wantPreview) showPreview();
@@ -138,19 +130,26 @@ function createEditor(content, filePath, isMd) {
     editorView = window.createEditableViewer(host(), content, filePath, { wrap: isMd });
   } else {
     editorView = window.createPlanEditor(host());
-    if (content) {
-      editorView.dispatch({
-        changes: { from: 0, to: editorView.state.doc.length, insert: content },
-      });
-    }
-    if (editorView._wrapCompartment) {
-      editorView.dispatch({
-        effects: editorView._wrapCompartment.reconfigure(
-          isMd ? window.CMEditorView.lineWrapping : []
-        ),
-      });
-    }
+    if (content) setDocContent(content);
+    applyWrap(isMd);
   }
+}
+
+// Replace the editor's whole document. Callers guarantee editorView exists.
+function setDocContent(text) {
+  editorView.dispatch({
+    changes: { from: 0, to: editorView.state.doc.length, insert: text },
+  });
+}
+
+// Turn line wrapping on or off, if the active editor exposes a wrap compartment.
+function applyWrap(wrap) {
+  if (!editorView?._wrapCompartment) return;
+  editorView.dispatch({
+    effects: editorView._wrapCompartment.reconfigure(
+      wrap ? window.CMEditorView.lineWrapping : []
+    ),
+  });
 }
 
 function destroy() {
@@ -194,11 +193,7 @@ function hidePreview() {
 function toggleWrap() {
   if (!editorView?._wrapCompartment) return;
   wrapMode.value = !wrapMode.value;
-  editorView.dispatch({
-    effects: editorView._wrapCompartment.reconfigure(
-      wrapMode.value ? window.CMEditorView.lineWrapping : []
-    ),
-  });
+  applyWrap(wrapMode.value);
 }
 
 function doGotoLine() {
@@ -254,11 +249,7 @@ async function reloadFromDisk() {
   if (!result?.ok) return;
   const newContent = result.content;
   if (newContent === getContent()) return;
-  if (editorView) {
-    editorView.dispatch({
-      changes: { from: 0, to: editorView.state.doc.length, insert: newContent },
-    });
-  }
+  if (editorView) setDocContent(newContent);
   if (previewMode.value) {
     previewHtml.value = window.marked?.parse(newContent) || newContent;
   }
