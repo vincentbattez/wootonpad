@@ -387,6 +387,8 @@
 
 <script setup>
 import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
+import { api } from '../shared/services/api.js';
+import { sb } from '../shared/services/sb.js';
 import { store } from '../store.js';
 import FileTreeNode from './FileTreeNode.vue';
 import SbButton from './SbButton.vue';
@@ -549,7 +551,7 @@ watch([viewedPath, _openCount], async ([p]) => {
   if (activeTab.value === 'readme') activeTab.value = 'overview';
   loadAvatar();
   // Show stale cache immediately — no blank flash
-  const cached = await window.api.getProjectGitCache(p).catch(() => null);
+  const cached = await api.getProjectGitCache(p).catch(() => null);
   if (cached) {
     overview.value = cached;
     loading.value = false;
@@ -560,11 +562,11 @@ watch([viewedPath, _openCount], async ([p]) => {
   // Load branches + sessions in parallel with fresh overview
   const rootPath = project.value?.projectPath;
   const [fresh, br, sess, terminals, userInfo] = await Promise.all([
-    window.api.getProjectOverview(p).catch(() => null),
-    window.api.gitBranches(p).catch(() => null),
-    window.api.getProjectSessions(rootPath || p).catch(() => null),
-    window.api.getActiveTerminals().catch(() => null),
-    window.api.getGitUserInfo(p).catch(() => null),
+    api.getProjectOverview(p).catch(() => null),
+    api.gitBranches(p).catch(() => null),
+    api.getProjectSessions(rootPath || p).catch(() => null),
+    api.getActiveTerminals().catch(() => null),
+    api.getGitUserInfo(p).catch(() => null),
   ]);
   overview.value = fresh || overview.value;
   if (fresh) _pushProjectInfo(p, fresh);
@@ -606,12 +608,12 @@ watch([viewedPath, _openCount], async ([p]) => {
 watch(activeTab, async (tab) => {
   if (tab === 'files' && !fileTree.value.length && viewedPath.value) {
     treeLoading.value = true;
-    const res = await window.api.getFileTree(viewedPath.value).catch(() => null);
+    const res = await api.getFileTree(viewedPath.value).catch(() => null);
     if (res?.ok) fileTree.value = res.tree;
     treeLoading.value = false;
   }
   if (tab === 'readme' && !readmeHtml.value && overview.value?.readmePath) {
-    const res = await window.api.readFileForPanel(overview.value.readmePath).catch(() => null);
+    const res = await api.readFileForPanel(overview.value.readmePath).catch(() => null);
     const content = res?.ok ? res.content : '';
     readmeHtml.value = content && window.marked ? window.marked.parse(content) : content;
   }
@@ -642,7 +644,7 @@ async function openDiff(filePath) {
   if (loadingFile.value) return;
   loadingFile.value = filePath;
   try {
-    const result = await window.api.getFileDiff(viewedPath.value, filePath);
+    const result = await api.getFileDiff(viewedPath.value, filePath);
     if (!result?.ok) return;
     activeFile.value = null;
     activeDiff.value = { filePath, oldContent: result.oldContent, newContent: result.newContent };
@@ -651,7 +653,7 @@ async function openDiff(filePath) {
 
 async function openFileFromTree(path) {
   const fullPath = `${viewedPath.value}/${path}`;
-  const res = await window.api.readFileForPanel(fullPath).catch(() => null);
+  const res = await api.readFileForPanel(fullPath).catch(() => null);
   if (!res?.ok) return;
   fileContent.value = res.content;
   fileModified.value = false;
@@ -663,7 +665,7 @@ async function saveFile() {
   if (!activeFile.value || !editorView) return;
   fileSaving.value = true;
   const content = editorView.state?.doc?.toString?.() ?? fileContent.value;
-  await window.api.saveFileForPanel(activeFile.value, content).catch(() => {});
+  await api.saveFileForPanel(activeFile.value, content).catch(() => {});
   fileModified.value = false;
   fileSaving.value = false;
 }
@@ -690,7 +692,7 @@ function showGitMsg(msg, isError = false, ms = 4000) {
 async function switchBranch(branch) {
   if (branch === overview.value?.branch) return;
   gitBusy.value = true;
-  const res = await window.api.gitCheckout(viewedPath.value, branch);
+  const res = await api.gitCheckout(viewedPath.value, branch);
   gitBusy.value = false;
   if (res.ok) { showGitMsg(`Switched to ${branch}`); await reload(); }
   else showGitMsg(res.stderr || 'Checkout failed', true);
@@ -699,16 +701,16 @@ async function switchBranch(branch) {
 async function doFetch() {
   gitBusy.value = true;
   showGitMsg('Fetching…');
-  const res = await window.api.gitFetch(viewedPath.value);
+  const res = await api.gitFetch(viewedPath.value);
   gitBusy.value = false;
-  if (res.ok) { showGitMsg('Fetched'); const br = await window.api.gitBranches(viewedPath.value); if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; } }
+  if (res.ok) { showGitMsg('Fetched'); const br = await api.gitBranches(viewedPath.value); if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; } }
   else showGitMsg(res.stderr || 'Fetch failed', true);
 }
 
 async function doPull() {
   gitBusy.value = true;
   showGitMsg('Pulling…');
-  const res = await window.api.gitPull(viewedPath.value);
+  const res = await api.gitPull(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Pulled'); await reload(); }
   else showGitMsg(res.stderr || 'Pull failed', true);
@@ -716,7 +718,7 @@ async function doPull() {
 
 async function generateCommitMsg(style = 'short') {
   generating.value = true; gitBusy.value = true;
-  const res = await window.api.gitGenerateCommitMsg(viewedPath.value, style);
+  const res = await api.gitGenerateCommitMsg(viewedPath.value, style);
   generating.value = false; gitBusy.value = false;
   if (res.ok) commitMessage.value = res.message;
   else showGitMsg(res.stderr || 'Generation failed', true);
@@ -725,7 +727,7 @@ async function generateCommitMsg(style = 'short') {
 async function doCommit() {
   if (!commitMessage.value.trim()) return;
   gitBusy.value = true;
-  const res = await window.api.gitCommit(viewedPath.value, commitMessage.value.trim());
+  const res = await api.gitCommit(viewedPath.value, commitMessage.value.trim());
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Committed'); commitMessage.value = ''; await reload(); }
   else showGitMsg(res.stderr || 'Commit failed', true);
@@ -735,7 +737,7 @@ async function doPush() {
   confirmPush.value = false;
   gitBusy.value = true;
   showGitMsg('Pushing…');
-  const res = await window.api.gitPush(viewedPath.value);
+  const res = await api.gitPush(viewedPath.value);
   gitBusy.value = false;
   if (res.ok) { showGitMsg('Pushed successfully'); await reload(); }
   else showGitMsg(res.stderr || 'Push failed', true);
@@ -746,13 +748,13 @@ async function doCreateBranch() {
   if (!name) return;
   showCreateBranch.value = false;
   gitBusy.value = true;
-  const res = await window.api.gitCreateBranch(viewedPath.value, name, checkoutBranch.value);
+  const res = await api.gitCreateBranch(viewedPath.value, name, checkoutBranch.value);
   gitBusy.value = false;
   if (res.ok) {
     showGitMsg(checkoutBranch.value ? `Switched to new branch "${name}"` : `Created branch "${name}"`);
     newBranchName.value = '';
     checkoutBranch.value = true;
-    const br = await window.api.gitBranches(viewedPath.value).catch(() => null);
+    const br = await api.gitBranches(viewedPath.value).catch(() => null);
     if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
     await reload();
   } else {
@@ -763,7 +765,7 @@ async function doCreateBranch() {
 async function reload() {
   const p = viewedPath.value;
   if (!p) return;
-  const fresh = await window.api.getProjectOverview(p).catch(() => null);
+  const fresh = await api.getProjectOverview(p).catch(() => null);
   overview.value = fresh;
   _pushProjectInfo(p, fresh);
 }
@@ -776,8 +778,8 @@ async function refreshStats() {
   statsRefreshing.value = true;
   try {
     const [fresh, br] = await Promise.all([
-      window.api.getProjectOverview(p).catch(() => null),
-      window.api.gitBranches(p).catch(() => null),
+      api.getProjectOverview(p).catch(() => null),
+      api.gitBranches(p).catch(() => null),
     ]);
     if (fresh) overview.value = fresh;
     if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
@@ -806,7 +808,7 @@ function setViewedPath(path) {
 
 async function deleteWorktree(wt) {
   if (!confirm(`Delete worktree "${wt.name}" and its branch?\n\nThis cannot be undone.`)) return;
-  const res = await window.api.deleteWorktree(project.value.projectPath, wt.projectPath);
+  const res = await api.deleteWorktree(project.value.projectPath, wt.projectPath);
   if (!res.ok) { showGitMsg(res.stderr || 'Failed to delete worktree', true); return; }
   if (viewedPath.value === wt.projectPath) setViewedPath(project.value.projectPath);
   worktrees.value = worktrees.value.filter(w => w.projectPath !== wt.projectPath);
@@ -814,12 +816,12 @@ async function deleteWorktree(wt) {
   props.callbacks.worktreeDeleted?.(wt.projectPath);
 }
 
-function openSession(s) { window.__sb?.openSessionById?.(s.id); }
-function openExternal(url) { window.api?.openExternal?.(url); }
+function openSession(s) { sb.openSessionById?.(s.id); }
+function openExternal(url) { api.openExternal?.(url); }
 
 async function loadAvatar() {
   if (!project.value) return;
-  const url = await window.api.getProjectAvatar(project.value.projectPath).catch(() => null);
+  const url = await api.getProjectAvatar(project.value.projectPath).catch(() => null);
   avatarDataUrl.value = url;
   if (url) store.avatarDataUrls[project.value.projectPath] = url;
 }
@@ -828,7 +830,7 @@ async function updateAvatar() {
   if (!project.value || !overview.value?.remoteUrl) return;
   avatarLoading.value = true;
   try {
-    const url = await window.api.fetchGitlabAvatar(project.value.projectPath, overview.value.remoteUrl);
+    const url = await api.fetchGitlabAvatar(project.value.projectPath, overview.value.remoteUrl);
     avatarDataUrl.value = url;
     if (url) store.avatarDataUrls[project.value.projectPath] = url;
     else delete store.avatarDataUrls[project.value.projectPath];
@@ -847,7 +849,7 @@ onMounted(() => {
   _gitRefreshTimer = setInterval(async () => {
     const p = viewedPath.value;
     if (!p || !activeSessions.value.length) return;
-    const fresh = await window.api.getProjectOverview(p).catch(() => null);
+    const fresh = await api.getProjectOverview(p).catch(() => null);
     if (fresh) overview.value = fresh;
   }, 30000);
 });

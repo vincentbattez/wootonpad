@@ -5,6 +5,7 @@
 
 <script setup>
 import { computed, onMounted } from 'vue';
+import { api } from '../shared/services/api.js';
 import { store } from '../store.js';
 import { avatarFromPath } from '../avatar.mjs';
 
@@ -19,8 +20,8 @@ const dataUrl = computed(() => store.avatarDataUrls[props.projectPath] || null);
 const fallback = computed(() => avatarFromPath(props.projectPath));
 
 onMounted(async () => {
-  if (dataUrl.value || !props.projectPath || !window.api?.getProjectAvatar) return;
-  const url = await window.api.getProjectAvatar(props.projectPath).catch(() => null);
+  if (dataUrl.value || !props.projectPath || !api.getProjectAvatar) return;
+  const url = await api.getProjectAvatar(props.projectPath).catch(() => null);
   if (url) store.avatarDataUrls[props.projectPath] = url;
 });
 </script>

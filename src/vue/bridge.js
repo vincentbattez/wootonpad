@@ -1,31 +1,20 @@
 import { markRaw } from 'vue';
+import { api } from './shared/services/api.js';
+import { sb } from './shared/services/sb.js';
+import { createSessionsBridge } from './features/sessions/bridge.js';
 
 // The renderer-to-Vue surface `public/app.js` calls. Every method writes a feature
 // store rather than a component ref; app.js is frozen, so these names and signatures
 // are the contract. The project viewer, stats and the plan/memory viewers still keep
 // their template-ref setters in App.vue.
 
-// window.vueSidebar: the Session/Project tree, the live PTY sets, the filters,
-// the search matches and the terminal-header context.
+// window.vueSidebar: the Session/Project tree, the live PTY sets and the terminal-header
+// context (all owned by the sessions Feature's Bridge) plus the navigation filters and
+// search. Composed here so the legacy global stays one object with one method set.
 export function createSidebarBridge(store) {
   return {
     store,
-    setProjects(projects) { store.projects = projects.map(p => ({ ...p })); },
-    setActivePtyIds(ids) { store.activePtyIds = new Set(ids); },
-    setActiveSession(id) { store.activeSessionId = id; },
-    setBusy(sessionId, busy) {
-      if (busy) store.sessionBusyState.set(sessionId, true);
-      else store.sessionBusyState.delete(sessionId);
-    },
-    addAttention(sessionId) { store.attentionSessions.add(sessionId); },
-    setResponseReady(sessionId) {
-      store.responseReadySessions.add(sessionId);
-      store.sessionBusyState.delete(sessionId);
-    },
-    clearNotifications(sessionId) {
-      store.attentionSessions.delete(sessionId);
-      store.responseReadySessions.delete(sessionId);
-    },
+    ...createSessionsBridge(store),
     setFilters({ showStarredOnly, showRunningOnly, showTodayOnly }) {
       if (showStarredOnly !== undefined) store.showStarredOnly = showStarredOnly;
       if (showRunningOnly !== undefined) store.showRunningOnly = showRunningOnly;
@@ -38,16 +27,6 @@ export function createSidebarBridge(store) {
     setVisibility(count, ageDays) {
       store.visibleSessionCount = count;
       store.sessionMaxAgeDays = ageDays;
-    },
-    setHeaderSession(session) { store.headerSession = session; },
-    setHeaderPtyTitle(title) { store.headerPtyTitle = title || null; },
-    setHeaderShellProfile(profile) { store.headerShellProfile = profile || null; },
-    setHeaderAccount(name) { store.headerAccount = name || null; },
-    clearHeader() {
-      store.headerSession = null;
-      store.headerPtyTitle = null;
-      store.headerShellProfile = null;
-      store.headerAccount = null;
     },
   };
 }
@@ -125,8 +104,6 @@ export function createProjectsBridge(store) {
   let queueGen = 0;
   let pendingInfoUpdates = {};
   let flushScheduled = false;
-
-  const api = typeof window !== 'undefined' ? window.api : undefined;
 
   function flush() {
     flushScheduled = false;
@@ -212,7 +189,7 @@ export function switchTab(store, tabId) {
   store.searchQuery = '';
   store.searchMatchIds = null;
   store.searchMatchProjectPaths = null;
-  if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
+  if (typeof window !== 'undefined') sb.onTabChange?.(tabId);
 }
 
 // window.vueApp: the sidebar tab switch.
