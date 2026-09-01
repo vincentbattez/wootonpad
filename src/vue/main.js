@@ -2,8 +2,6 @@ import { createApp } from 'vue';
 import { store } from './store.js';
 import {
   createSidebarBridge,
-  createPlansBridge,
-  createMemoryBridge,
   createAccountsBridge,
   createAccountDropdownBridge,
   createStatusBarBridge,
@@ -12,8 +10,8 @@ import {
   createJsonlViewerBridge,
   createAppBridge,
 } from './bridge.js';
-import { plansStore } from './stores/plans.js';
-import { memoryStore } from './stores/memory.js';
+import { createAgentFilesBridge } from './features/agent-files/bridge.js';
+import { agentFilesStore } from './features/agent-files/store.js';
 import { accountsStore } from './stores/accounts.js';
 import { accountDropdownStore } from './stores/account-dropdown.js';
 import { statusBarStore } from './stores/status-bar.js';
@@ -32,8 +30,11 @@ window.vueStore = store;
 window.vueSidebar = createSidebarBridge(store);
 
 // Installed before mount so they exist ahead of any app.js call.
-window.vuePlans = createPlansBridge(plansStore);
-window.vueMemory = createMemoryBridge(memoryStore);
+// The agent-files Feature owns both plan and memory panels; its Bridge composes the two
+// legacy globals app.js still calls by name.
+const agentFiles = createAgentFilesBridge(agentFilesStore);
+window.vuePlans = agentFiles.plans;
+window.vueMemory = agentFiles.memory;
 window.vueAccounts = createAccountsBridge(accountsStore);
 window.vueAccountDropdown = createAccountDropdownBridge(accountDropdownStore);
 window.vueStatusBar = createStatusBarBridge(statusBarStore);
