@@ -3,9 +3,8 @@
   <div id="sidebar" :class="{ collapsed: store.sidebarCollapsed }">
     <button id="sidebar-expand-btn" data-tooltip="Show sidebar" @click="store.sidebarCollapsed = false" v-html="EXPAND_SVG"></button>
 
-    <div id="account-selector">
-      <AccountDropdownApp :callbacks="accountDropdownCallbacks" />
-    </div>
+    <!-- The account switcher is Teleported here from the accounts Feature's Container. -->
+    <div id="account-selector"></div>
 
     <div id="sidebar-header">
       <div id="sidebar-tabs">
@@ -106,7 +105,7 @@
       <MemoryApp :callbacks="memoryCallbacks" />
     </div>
     <div id="accounts-content" v-show="store.activeTab === 'accounts'">
-      <AccountsApp :callbacks="accountsCallbacks" />
+      <AccountsContainer />
     </div>
     <div id="projects-content" v-show="store.activeTab === 'projects'">
       <ProjectsApp :callbacks="projectsCallbacks" />
@@ -215,8 +214,7 @@ import SidebarApp from './SidebarApp.vue';
 import SessionHeaderContainer from '../features/sessions/containers/SessionHeaderContainer.vue';
 import PlansApp from './PlansApp.vue';
 import MemoryApp from './MemoryApp.vue';
-import AccountsApp from './AccountsApp.vue';
-import AccountDropdownApp from './AccountDropdownApp.vue';
+import AccountsContainer from '../features/accounts/containers/AccountsContainer.vue';
 import ProjectsApp from './ProjectsApp.vue';
 import StatusBarApp from './StatusBarApp.vue';
 import GridCardsApp from './GridCardsApp.vue';
@@ -367,20 +365,6 @@ const planCallbacks = {
 
 const memoryCallbacks = {
   openMemory: (file) => sb.openMemory?.(file),
-};
-
-const accountsCallbacks = {
-  switchAccount: (id) => sb.switchAccount?.(id),
-  openAccountHomeSession: (acc) => sb.openAccountHomeSession?.(acc),
-  renameAccount: (id, name) => sb.renameAccount?.(id, name),
-  deleteAccount: (id) => sb.deleteAccount?.(id),
-  createAccount: (name) => sb.createAccount?.(name),
-  discoverWslClaudeHomes: () => sb.discoverWslClaudeHomes?.(),
-  createWslAccount: (distro, name) => sb.createWslAccount?.(distro, name),
-};
-
-const accountDropdownCallbacks = {
-  switchAccount: (id) => sb.switchAccount?.(id),
 };
 
 const projectsCallbacks = {

@@ -4,8 +4,6 @@ import { effect, markRaw } from 'vue';
 import {
   createPlansBridge,
   createMemoryBridge,
-  createAccountsBridge,
-  createAccountDropdownBridge,
   createStatusBarBridge,
   createGridBridge,
   createProjectsBridge,
@@ -14,8 +12,6 @@ import {
 } from '../src/vue/bridge.js';
 import { plansStore } from '../src/vue/stores/plans.js';
 import { memoryStore } from '../src/vue/stores/memory.js';
-import { accountsStore } from '../src/vue/stores/accounts.js';
-import { accountDropdownStore } from '../src/vue/stores/account-dropdown.js';
 import { statusBarStore } from '../src/vue/stores/status-bar.js';
 import { gridStore } from '../src/vue/stores/grid.js';
 import { projectsStore } from '../src/vue/stores/projects.js';
@@ -72,54 +68,8 @@ test('memory setMemories defaults the filter ids to null', () => {
   assert.equal(memoryStore.filterIds, null);
 });
 
-test('accounts bridge sets the list, active id and usage', () => {
-  const bridge = createAccountsBridge(accountsStore);
-  const list = [{ id: 'default' }, { id: 'work' }];
-  bridge.setAccounts(list, 'work');
-  assert.deepEqual(accountsStore.accounts, list);
-  assert.equal(accountsStore.activeAccountId, 'work');
-  bridge.setActiveAccount('default');
-  assert.equal(accountsStore.activeAccountId, 'default');
-  bridge.setUsage({ work: { session: 20 } });
-  assert.equal(accountsStore.usage.work.session, 20);
-});
-
-test('accounts setAccounts leaves the active id untouched when omitted', () => {
-  const bridge = createAccountsBridge(accountsStore);
-  bridge.setActiveAccount('work');
-  bridge.setAccounts([{ id: 'work' }]);
-  assert.equal(accountsStore.activeAccountId, 'work', 'an omitted active id is left as-is');
-  bridge.setActiveAccount('default');
-});
-
-test('accounts setUsage copies the object rather than aliasing it', () => {
-  const bridge = createAccountsBridge(accountsStore);
-  const input = { a: 1 };
-  bridge.setUsage(input);
-  assert.notEqual(accountsStore.usage, input);
-  assert.deepEqual(accountsStore.usage, input);
-});
-
-test('account-dropdown bridge sets list, active id, usage and closes', () => {
-  const bridge = createAccountDropdownBridge(accountDropdownStore);
-  bridge.setAccounts([{ id: 'work' }], 'work', { work: { session: 5 } });
-  assert.deepEqual(accountDropdownStore.accounts, [{ id: 'work' }]);
-  assert.equal(accountDropdownStore.activeAccountId, 'work');
-  assert.equal(accountDropdownStore.usage.work.session, 5);
-  accountDropdownStore.open = true;
-  bridge.close();
-  assert.equal(accountDropdownStore.open, false);
-});
-
-test('account-dropdown setAccounts leaves active id and usage untouched when omitted', () => {
-  const bridge = createAccountDropdownBridge(accountDropdownStore);
-  bridge.setActiveAccount('work');
-  bridge.setUsage({ work: 1 });
-  bridge.setAccounts([{ id: 'work' }]);
-  assert.equal(accountDropdownStore.activeAccountId, 'work');
-  assert.deepEqual(accountDropdownStore.usage, { work: 1 });
-  bridge.setActiveAccount('default');
-});
+// The accounts panel and dropdown bridges moved to the accounts Feature; they are covered by
+// features/accounts/bridge.test.mjs colocated with the Feature.
 
 test('status-bar bridge writes info immediately', () => {
   const bridge = createStatusBarBridge(statusBarStore);

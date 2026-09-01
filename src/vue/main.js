@@ -4,8 +4,6 @@ import {
   createSidebarBridge,
   createPlansBridge,
   createMemoryBridge,
-  createAccountsBridge,
-  createAccountDropdownBridge,
   createStatusBarBridge,
   createGridBridge,
   createProjectsBridge,
@@ -14,8 +12,8 @@ import {
 } from './bridge.js';
 import { plansStore } from './stores/plans.js';
 import { memoryStore } from './stores/memory.js';
-import { accountsStore } from './stores/accounts.js';
-import { accountDropdownStore } from './stores/account-dropdown.js';
+import { createAccountsBridge, createAccountDropdownBridge } from './features/accounts/bridge.js';
+import { accountsStore, accountDropdownStore } from './features/accounts/store.js';
 import { statusBarStore } from './stores/status-bar.js';
 import { gridStore } from './stores/grid.js';
 import { projectsStore } from './stores/projects.js';
