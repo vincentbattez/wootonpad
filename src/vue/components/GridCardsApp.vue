@@ -27,33 +27,12 @@
 </template>
 
 <script setup>
-import { reactive } from 'vue';
+import { gridStore } from '../stores/grid.js';
 
-const activeCards = reactive(new Map());
+// Read the feature store the grid bridge writes; no local map, no setters.
+const activeCards = gridStore.cards;
 
 function stop(sessionId) {
   window.confirmAndStopSession?.(sessionId);
 }
-
-defineExpose({
-  addCard(sessionId, headerEl, footerEl, { name, project, initials, color, running, busy, time }) {
-    activeCards.set(sessionId, { headerEl, footerEl, name, project, initials, color, running: !!running, busy: !!busy, time: time || '' });
-  },
-
-  updateCard(sessionId, running, busy, time) {
-    const card = activeCards.get(sessionId);
-    if (!card) return;
-    card.running = !!running;
-    card.busy = !!busy;
-    if (time !== undefined) card.time = time;
-  },
-
-  removeCard(sessionId) {
-    activeCards.delete(sessionId);
-  },
-
-  clearAll() {
-    activeCards.clear();
-  },
-});
 </script>

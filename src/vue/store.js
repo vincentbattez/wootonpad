@@ -1,69 +1,25 @@
-import { reactive } from 'vue';
+import { sessionsStore } from './stores/sessions.js';
+import { sidebarStore } from './stores/sidebar.js';
+import { areasStore } from './stores/areas.js';
+import { layoutStore } from './stores/layout.js';
+import { headerStore } from './stores/header.js';
+import { avatarsStore } from './stores/avatars.js';
 
-export const store = reactive({
-  // Project/session data
-  projects: [],
+// `store` is a facade over the feature slices: every field delegates to its owning
+// slice by getter/setter, so `public/app.js` — frozen — keeps addressing
+// `window.vueStore.<field>` by name and reactivity is preserved in both directions.
+export const slices = { sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore };
 
-  // Session runtime state
-  activePtyIds: new Set(),
-  activeSessionId: null,
-  sessionBusyState: new Map(),
-  attentionSessions: new Set(),
-  responseReadySessions: new Set(),
-  lastActivityTime: new Map(),
-  pendingSessions: new Set(),
+export const store = {};
+for (const slice of Object.values(slices)) {
+  for (const key of Object.keys(slice)) {
+    Object.defineProperty(store, key, {
+      enumerable: true,
+      configurable: true,
+      get: () => slice[key],
+      set: (value) => { slice[key] = value; },
+    });
+  }
+}
 
-  // Filter state
-  showStarredOnly: false,
-  showRunningOnly: false,
-  showTodayOnly: false,
-  searchMatchIds: null,
-  searchMatchProjectPaths: null,
-
-  // Project collapse overrides: projectPath → bool. Absent = fall back to staleness.
-  collapsedProjects: {},
-
-  // Areas: the user-authored tree above Projects in the sidebar.
-  areas: [],
-  areaAssignments: [],
-  renamingAreaId: null,
-  // Path of the Project whose sidebar label is being edited inline.
-  renamingProjectPath: null,
-
-  // Visibility settings
-  visibleSessionCount: 10,
-  sessionMaxAgeDays: 3,
-
-  // Header state (active session context)
-  headerSession: null,
-  headerPtyTitle: null,
-  headerShellProfile: null,
-  headerAccount: null,
-  headerAccounts: [],
-
-  // App layout state
-  activeTab: 'sessions',
-  sidebarCollapsed: false,
-  loadingStatus: '',
-  accountSwitching: false,
-  searchQuery: '',
-  searchTitlesOnly: false,
-
-  // Settings panel
-  settingsOpen: false,
-  settingsScope: 'global',       // 'global' | 'project'
-  settingsProjectPath: null,
-
-  // Main area panel visibility (Vue-owned — do not touch via innerHTML/style directly)
-  showStats: false,
-  showJsonl: false,
-  planViewerOpen: false,
-  memoryViewerOpen: false,
-  gridViewActive: false,
-  gridViewerCount: '',
-
-  // Project avatars: projectPath → data: URL string
-  avatarDataUrls: {},
-  // Area avatars: areaId → data: URL string (null/absent = fall back to initials and colour)
-  areaAvatarDataUrls: {},
-});
+export { sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore };

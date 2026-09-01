@@ -29,31 +29,26 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { computed } from 'vue';
 import ListItem from './ListItem.vue';
+import { plansStore } from '../stores/plans.js';
 
 const props = defineProps({
   callbacks: { type: Object, required: true },
 });
 
-const plans = ref([]);
-const activePlan = ref(null);
+// Read the feature store the plans bridge writes; no local copy, no setter.
+const plans = computed(() => plansStore.plans);
+const activePlan = computed(() => plansStore.activePlan);
 
 function fmtDate(d) {
   return window.formatDate ? window.formatDate(new Date(d)) : d;
 }
 
 function openPlan(plan) {
-  activePlan.value = plan.filename;
+  plansStore.activePlan = plan.filename;
   props.callbacks.openPlan?.(plan);
 }
-
-// Bridge API
-defineExpose({
-  setPlans(list) { plans.value = list; },
-  setActive(filename) { activePlan.value = filename; },
-  clearActive() { activePlan.value = null; },
-});
 
 const planSvg = '<svg width="15" height="15" viewBox="0 0 17 17" fill="currentColor" stroke="currentColor" stroke-width="0"><path d="M14 2v-2h-13v17h13v-2h2v-13h-2zM2 16v-15h2v15h-2zM13 16h-8v-15h8v15zM15 14h-1v-3h1v3zM15 10h-1v-3h1v3zM14 6v-3h1v3h-1zM6 4h5v1h-5v-1zM6 6h4v1h-4v-1z"/></svg>';
 </script>

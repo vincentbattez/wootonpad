@@ -113,39 +113,24 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue';
+import { ref, computed } from 'vue';
 import ProjectAvatar from './ProjectAvatar.vue';
+import { projectsStore } from '../stores/projects.js';
 
 const props = defineProps({
   callbacks: { type: Object, required: true },
 });
 
-const projects = ref([]);
-const searchQuery = ref('');
+// Read the feature store the projects bridge writes; the info queue and its
+// rAF batching live in the bridge now, so this component is a pure reader.
+const projects = computed(() => projectsStore.projects);
+const searchQuery = computed(() => projectsStore.searchQuery);
+const projectInfo = projectsStore.projectInfo;
+const loadingPaths = projectsStore.loadingPaths;
+const activeProjectPath = computed(() => projectsStore.activeProjectPath);
 const sortOrder = ref('name');
 const showContainers = ref(true);
-const projectInfo = reactive({});
-const loadingPaths = reactive(new Set());
-const activeProjectPath = ref(null);
 const sortOptions = [['name', 'Name'], ['changes', 'Changes']];
-
-let queueGen = 0;
-
-// Batch reactive updates into one rAF flush to avoid per-project re-renders
-let pendingInfoUpdates = {};
-let flushScheduled = false;
-function scheduleInfoFlush() {
-  if (flushScheduled) return;
-  flushScheduled = true;
-  requestAnimationFrame(() => {
-    flushScheduled = false;
-    for (const [path, info] of Object.entries(pendingInfoUpdates)) {
-      projectInfo[path] = projectInfo[path] ? { ...projectInfo[path], ...info } : info;
-      loadingPaths.delete(path);
-    }
-    pendingInfoUpdates = {};
-  });
-}
 
 const WORKTREE_RE = /\/\.claude\/worktrees\/[^/]+\/?$/;
 
@@ -198,7 +183,7 @@ function parseUptime(status) {
 }
 
 function openProject(project) {
-  activeProjectPath.value = project.projectPath;
+  projectsStore.activeProjectPath = project.projectPath;
   props.callbacks.openProject?.(project);
 }
 
@@ -208,56 +193,6 @@ async function removeProject(project) {
   await window.api.removeProject(project.projectPath);
   props.callbacks.projectRemoved?.();
 }
-
-async function runInfoQueue(gen, list) {
-  for (const project of list) {
-    if (queueGen !== gen) break;
-    if (projectInfo[project.projectPath]) continue; // already loaded, skip
-    loadingPaths.add(project.projectPath);
-    try {
-      const info = await window.api.getProjectInfo(project.projectPath);
-      if (queueGen !== gen) break;
-      if (info) {
-        pendingInfoUpdates[project.projectPath] = info;
-        scheduleInfoFlush();
-      } else {
-        loadingPaths.delete(project.projectPath);
-      }
-    } catch {
-      loadingPaths.delete(project.projectPath);
-    }
-  }
-}
-
-onMounted(() => {
-  window.api.onProjectInfoLoading?.((path) => {
-    loadingPaths.add(path);
-  });
-  window.api.onProjectInfoUpdated?.((path, info) => {
-    if (info) {
-      pendingInfoUpdates[path] = info;
-      scheduleInfoFlush();
-    } else {
-      loadingPaths.delete(path);
-    }
-  });
-});
-
-defineExpose({
-  setProjects(list) {
-    projects.value = list;
-    queueGen++;
-    runInfoQueue(queueGen, list);
-  },
-  setSearch(q) { searchQuery.value = q || ''; },
-  clearActive() { activeProjectPath.value = null; },
-  updateProjectInfo(path, info) {
-    if (info) {
-      pendingInfoUpdates[path] = info;
-      scheduleInfoFlush();
-    }
-  },
-});
 
 const trashSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
 </script>
