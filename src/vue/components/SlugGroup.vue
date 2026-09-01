@@ -18,18 +18,20 @@
     </div>
 
     <div class="slug-group-sessions">
-      <SessionItem
-        v-for="s in promoted"
-        :key="s.sessionId"
-        :session="s"
-        v-bind="sessionProps(s)"
-        @open="$emit('open', s)"
-        @stop="$emit('stop', s.sessionId)"
-        @star="$emit('star', s.sessionId)"
-        @archive="$emit('archive', s.sessionId)"
-        @fork="$emit('fork', s.sessionId)"
-        @jsonl="$emit('jsonl', s.sessionId)"
-        @launch-config="$emit('launch-config', s.sessionId)"
+      <SessionList
+        :sessions="promoted"
+        :active-pty-ids="activePtyIds"
+        :active-session-id="activeSessionId"
+        :session-busy-state="sessionBusyState"
+        :attention-sessions="attentionSessions"
+        :response-ready-sessions="responseReadySessions"
+        @open="(s) => $emit('open', s)"
+        @stop="(id) => $emit('stop', id)"
+        @star="(id) => $emit('star', id)"
+        @archive="(id) => $emit('archive', id)"
+        @fork="(id) => $emit('fork', id)"
+        @jsonl="(id) => $emit('jsonl', id)"
+        @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
       />
 
@@ -37,40 +39,42 @@
         <div class="slug-group-more" :class="{ expanded: showRest }" @click="showRest = !showRest">
           <template v-if="!showRest">+ {{ rest.length }} more</template>
         </div>
-        <template v-if="showRest">
-          <SessionItem
-            v-for="s in rest"
-            :key="s.sessionId"
-            :session="s"
-            v-bind="sessionProps(s)"
-            @open="$emit('open', s)"
-            @stop="$emit('stop', s.sessionId)"
-            @star="$emit('star', s.sessionId)"
-            @archive="$emit('archive', s.sessionId)"
-            @fork="$emit('fork', s.sessionId)"
-            @jsonl="$emit('jsonl', s.sessionId)"
-            @launch-config="$emit('launch-config', s.sessionId)"
-            @rename="(id, name) => $emit('rename', id, name)"
-          />
-        </template>
-      </template>
-
-      <template v-else>
-        <SessionItem
-          v-for="s in rest"
-          :key="s.sessionId"
-          :session="s"
-          v-bind="sessionProps(s)"
-          @open="$emit('open', s)"
-          @stop="$emit('stop', s.sessionId)"
-          @star="$emit('star', s.sessionId)"
-          @archive="$emit('archive', s.sessionId)"
-          @fork="$emit('fork', s.sessionId)"
-          @jsonl="$emit('jsonl', s.sessionId)"
-          @launch-config="$emit('launch-config', s.sessionId)"
+        <SessionList
+          v-if="showRest"
+          :sessions="rest"
+          :active-pty-ids="activePtyIds"
+          :active-session-id="activeSessionId"
+          :session-busy-state="sessionBusyState"
+          :attention-sessions="attentionSessions"
+          :response-ready-sessions="responseReadySessions"
+          @open="(s) => $emit('open', s)"
+          @stop="(id) => $emit('stop', id)"
+          @star="(id) => $emit('star', id)"
+          @archive="(id) => $emit('archive', id)"
+          @fork="(id) => $emit('fork', id)"
+          @jsonl="(id) => $emit('jsonl', id)"
+          @launch-config="(id) => $emit('launch-config', id)"
           @rename="(id, name) => $emit('rename', id, name)"
         />
       </template>
+
+      <SessionList
+        v-else
+        :sessions="rest"
+        :active-pty-ids="activePtyIds"
+        :active-session-id="activeSessionId"
+        :session-busy-state="sessionBusyState"
+        :attention-sessions="attentionSessions"
+        :response-ready-sessions="responseReadySessions"
+        @open="(s) => $emit('open', s)"
+        @stop="(id) => $emit('stop', id)"
+        @star="(id) => $emit('star', id)"
+        @archive="(id) => $emit('archive', id)"
+        @fork="(id) => $emit('fork', id)"
+        @jsonl="(id) => $emit('jsonl', id)"
+        @launch-config="(id) => $emit('launch-config', id)"
+        @rename="(id, name) => $emit('rename', id, name)"
+      />
     </div>
   </div>
 </template>
@@ -78,7 +82,7 @@
 <script setup>
 import { computed, ref } from 'vue';
 import { slugGroupIcons } from '../shared/lib/icons.js';
-import SessionItem from './SessionItem.vue';
+import SessionList from '../features/sessions/components/SessionList.vue';
 const { archiveSvg } = slugGroupIcons;
 
 const props = defineProps({
@@ -137,16 +141,6 @@ const hasRunning = computed(() => props.sessions.some(s => props.activePtyIds.ha
 
 const promoted = computed(() => props.sessions.filter(s => props.activePtyIds.has(s.sessionId)));
 const rest = computed(() => props.sessions.filter(s => !props.activePtyIds.has(s.sessionId)));
-
-function sessionProps(s) {
-  return {
-    isActive: props.activeSessionId === s.sessionId,
-    isRunning: props.activePtyIds.has(s.sessionId),
-    isBusy: props.sessionBusyState.get(s.sessionId) || false,
-    isAttention: props.attentionSessions.has(s.sessionId),
-    isResponseReady: props.responseReadySessions.has(s.sessionId),
-  };
-}
 
 async function archiveAll() {
   emit('archive-all', props.sessions);

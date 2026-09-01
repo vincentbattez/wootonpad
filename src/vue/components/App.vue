@@ -164,7 +164,7 @@
     </div>
     <div id="terminal-area">
       <div id="vue-session-header">
-        <SessionHeaderApp />
+        <SessionHeaderContainer />
       </div>
       <!-- Legacy terminal header kept for JS references (hidden) -->
       <div id="terminal-header" style="display:none;">
@@ -212,7 +212,7 @@ import { sb } from '../shared/services/sb.js';
 import { store } from '../store.js';
 import { switchTab } from '../bridge.js';
 import SidebarApp from './SidebarApp.vue';
-import SessionHeaderApp from './SessionHeaderApp.vue';
+import SessionHeaderContainer from '../features/sessions/containers/SessionHeaderContainer.vue';
 import PlansApp from './PlansApp.vue';
 import MemoryApp from './MemoryApp.vue';
 import AccountsApp from './AccountsApp.vue';

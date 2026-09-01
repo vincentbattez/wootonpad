@@ -251,7 +251,7 @@
 import { computed, nextTick, ref, watch, watchEffect, onUnmounted } from 'vue';
 import { projectGroupIcons } from '../shared/lib/icons.js';
 import { api } from '../shared/services/api.js';
-import SessionItem from './SessionItem.vue';
+import SessionItem from '../features/sessions/components/SessionItem.vue';
 import SlugGroup from './SlugGroup.vue';
 import ProjectAvatar from './ProjectAvatar.vue';
 import { isStaleProject } from '../project-collapse.mjs';
