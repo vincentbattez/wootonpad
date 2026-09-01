@@ -4,7 +4,7 @@
     <button id="sidebar-expand-btn" data-tooltip="Show sidebar" @click="store.sidebarCollapsed = false" v-html="EXPAND_SVG"></button>
 
     <div id="account-selector">
-      <AccountDropdownApp ref="accountDropdownRef" :callbacks="accountDropdownCallbacks" />
+      <AccountDropdownApp :callbacks="accountDropdownCallbacks" />
     </div>
 
     <div id="sidebar-header">
@@ -97,19 +97,19 @@
       <div class="acct-spinner"></div><span>Switching account…</span>
     </div>
     <div id="plans-content" v-show="store.activeTab === 'plans'">
-      <PlansApp ref="plansRef" :callbacks="planCallbacks" />
+      <PlansApp :callbacks="planCallbacks" />
     </div>
     <div id="stats-content" v-show="store.activeTab === 'stats'">
       <div class="plans-empty">Click the Stats tab to view activity heatmap.</div>
     </div>
     <div id="memory-content" v-show="store.activeTab === 'memory'">
-      <MemoryApp ref="memoryRef" :callbacks="memoryCallbacks" />
+      <MemoryApp :callbacks="memoryCallbacks" />
     </div>
     <div id="accounts-content" v-show="store.activeTab === 'accounts'">
-      <AccountsApp ref="accountsRef" :callbacks="accountsCallbacks" />
+      <AccountsApp :callbacks="accountsCallbacks" />
     </div>
     <div id="projects-content" v-show="store.activeTab === 'projects'">
-      <ProjectsApp ref="projectsRef" :callbacks="projectsCallbacks" />
+      <ProjectsApp :callbacks="projectsCallbacks" />
     </div>
   </div>
 
@@ -160,7 +160,7 @@
       <ProjectViewerApp ref="projectViewerRef" :callbacks="projectViewerCallbacks" />
     </div>
     <div id="jsonl-viewer" v-show="store.showJsonl">
-      <JsonlViewerApp ref="jsonlRef" />
+      <JsonlViewerApp />
     </div>
     <div id="terminal-area">
       <div id="vue-session-header">
@@ -194,10 +194,10 @@
 
   <!-- Status bar and grid cards rendered via Teleport into their existing container elements -->
   <Teleport to="#status-bar">
-    <StatusBarApp ref="statusBarRef" />
+    <StatusBarApp />
   </Teleport>
   <Teleport to="#vue-grid-cards">
-    <GridCardsApp ref="gridCardsRef" />
+    <GridCardsApp />
   </Teleport>
 
   <!-- Dialogs (overlays + popover, rendered via Teleport to body inside the component) -->
@@ -224,16 +224,12 @@ import ViewerContentApp from './ViewerContentApp.vue';
 import DialogsApp from './DialogsApp.vue';
 
 // ── Template refs ────────────────────────────────────────────────
-const plansRef = ref(null);
-const memoryRef = ref(null);
-const accountsRef = ref(null);
-const accountDropdownRef = ref(null);
-const projectsRef = ref(null);
-const statusBarRef = ref(null);
-const gridCardsRef = ref(null);
+// Plans, Memory, Accounts, the account dropdown, the status bar, Projects, the
+// overview grid and the JSONL viewer read their feature stores directly, so they
+// no longer need a ref here; the tab switch (window.vueApp) is a pure store
+// write and lives in the bridge too.
 const projectViewerRef = ref(null);
 const statsRef = ref(null);
-const jsonlRef = ref(null);
 const planViewerRef = ref(null);
 const memoryViewerRef = ref(null);
 const dialogsRef = ref(null);
@@ -303,15 +299,9 @@ async function toggleTitlesOnly() {
 }
 
 // ── Tab switching ────────────────────────────────────────────────
-function setTab(tabId) {
-  if (tabId === store.activeTab) return;
-  store.activeTab = tabId;
-  // Clear search on tab switch
-  store.searchQuery = '';
-  store.searchMatchIds = null;
-  store.searchMatchProjectPaths = null;
-  window.__sb?.onTabChange?.(tabId);
-}
+// The switch itself lives in the app bridge (window.vueApp, installed in
+// main.js); the tab buttons delegate to it so there is a single code path.
+function setTab(tabId) { window.vueApp?.setTab(tabId); }
 
 // ── Filter toggles ───────────────────────────────────────────────
 const filterMenuOpen = ref(false);
@@ -425,43 +415,11 @@ const projectViewerCallbacks = {
 
 // ── Mount lifecycle ───────────────────────────────────────────────
 onMounted(async () => {
-  // Re-export component bridge APIs so app.js can call them
-  Object.assign(window.vuePlans, {
-    setPlans: (list) => plansRef.value?.setPlans(list),
-    setActive: (f) => plansRef.value?.setActive(f),
-    clearActive: () => plansRef.value?.clearActive(),
-  });
-  Object.assign(window.vueMemory, {
-    setMemories: (data, ids) => memoryRef.value?.setMemories(data, ids),
-    setFilter: (ids) => memoryRef.value?.setFilter(ids),
-    setActive: (f) => memoryRef.value?.setActive(f),
-    clearActive: () => memoryRef.value?.clearActive(),
-  });
-  Object.assign(window.vueAccounts, {
-    setAccounts: (list, id) => accountsRef.value?.setAccounts(list, id),
-    setActiveAccount: (id) => accountsRef.value?.setActiveAccount(id),
-    setUsage: (usage) => accountsRef.value?.setUsage(usage),
-  });
-  Object.assign(window.vueAccountDropdown, {
-    setAccounts: (list, id, usage) => accountDropdownRef.value?.setAccounts(list, id, usage),
-    setActiveAccount: (id) => accountDropdownRef.value?.setActiveAccount(id),
-    setUsage: (usage) => accountDropdownRef.value?.setUsage(usage),
-    close: () => accountDropdownRef.value?.close(),
-  });
-  Object.assign(window.vueProjects, {
-    setProjects: (list) => projectsRef.value?.setProjects(list),
-    setSearch: (q) => projectsRef.value?.setSearch(q),
-    clearActive: () => projectsRef.value?.clearActive(),
-    updateProjectInfo: (path, info) => projectsRef.value?.updateProjectInfo(path, info),
-  });
-  Object.assign(window.vueStatusBar, {
-    setInfo: (text) => statusBarRef.value?.setInfo(text),
-    setActivity: (text, type) => statusBarRef.value?.setActivity(text, type),
-    setUpdater: (text, duration) => statusBarRef.value?.setUpdater(text, duration),
-  });
-  // GridCardsApp exposes addCard/updateCard/removeCard/clearAll directly
-  window.vueGrid = gridCardsRef.value;
-
+  // Plans, Memory, Accounts, the account dropdown, the status bar, Projects, the
+  // overview grid and the JSONL viewer are now store-backed, and the tab switch
+  // (window.vueApp) is a store write: their bridges are installed in main.js and
+  // write feature stores the panels read reactively. The remaining panels below
+  // still expose their setters through template refs.
   const worktreePattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
   window.vueProjectViewer = {
     open: (proj) => {
@@ -473,12 +431,10 @@ onMounted(async () => {
     close: () => projectViewerRef.value?.close(),
     setTab: (tab) => projectViewerRef.value?.setTab(tab),
   };
-  window.vueApp = { setTab };
   window.vueStats = {
     load: () => statsRef.value?.load(),
     invalidate: () => statsRef.value?.invalidate(),
   };
-  window.vueJsonlViewer = { open: (s) => jsonlRef.value?.open(s) };
   Object.assign(window.vueDialogs, {
     openNewSession: (...args) => dialogsRef.value?.openNewSession(...args),
     openResumeSession: (...args) => dialogsRef.value?.openResumeSession(...args),

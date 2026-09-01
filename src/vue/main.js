@@ -1,55 +1,52 @@
 import { createApp } from 'vue';
 import { store } from './store.js';
+import {
+  createSidebarBridge,
+  createPlansBridge,
+  createMemoryBridge,
+  createAccountsBridge,
+  createAccountDropdownBridge,
+  createStatusBarBridge,
+  createGridBridge,
+  createProjectsBridge,
+  createJsonlViewerBridge,
+  createAppBridge,
+} from './bridge.js';
+import { plansStore } from './stores/plans.js';
+import { memoryStore } from './stores/memory.js';
+import { accountsStore } from './stores/accounts.js';
+import { accountDropdownStore } from './stores/account-dropdown.js';
+import { statusBarStore } from './stores/status-bar.js';
+import { gridStore } from './stores/grid.js';
+import { projectsStore } from './stores/projects.js';
+import { jsonlStore } from './stores/jsonl.js';
 import App from './components/App.vue';
 import ViewerContentApp from './components/ViewerContentApp.vue';
 
-// Expose store for direct mutation from app.js
+// Expose the aggregate store facade for direct mutation from app.js. It reads
+// and writes through to the feature slices, so every field app.js addresses by
+// name still resolves.
 window.vueStore = store;
 
-// Stub bridge objects — populated by App.vue onMounted (via template refs).
-// These run synchronously during app.mount(), before any other script executes.
-window.vueSidebar = {
-  store,
-  setProjects(projects) { store.projects = projects.map(p => ({ ...p })); },
-  setActivePtyIds(ids) { store.activePtyIds = new Set(ids); },
-  setActiveSession(id) { store.activeSessionId = id; },
-  setBusy(sessionId, busy) {
-    if (busy) store.sessionBusyState.set(sessionId, true);
-    else store.sessionBusyState.delete(sessionId);
-  },
-  addAttention(sessionId) { store.attentionSessions.add(sessionId); },
-  setResponseReady(sessionId) {
-    store.responseReadySessions.add(sessionId);
-    store.sessionBusyState.delete(sessionId);
-  },
-  clearNotifications(sessionId) {
-    store.attentionSessions.delete(sessionId);
-    store.responseReadySessions.delete(sessionId);
-  },
-  setFilters({ showStarredOnly, showRunningOnly, showTodayOnly }) {
-    if (showStarredOnly !== undefined) store.showStarredOnly = showStarredOnly;
-    if (showRunningOnly !== undefined) store.showRunningOnly = showRunningOnly;
-    if (showTodayOnly !== undefined) store.showTodayOnly = showTodayOnly;
-  },
-  setSearch(matchIds, matchProjectPaths) {
-    store.searchMatchIds = matchIds;
-    store.searchMatchProjectPaths = matchProjectPaths;
-  },
-  setVisibility(count, ageDays) {
-    store.visibleSessionCount = count;
-    store.sessionMaxAgeDays = ageDays;
-  },
-  setHeaderSession(session) { store.headerSession = session; },
-  setHeaderPtyTitle(title) { store.headerPtyTitle = title || null; },
-  setHeaderShellProfile(profile) { store.headerShellProfile = profile || null; },
-  setHeaderAccount(name) { store.headerAccount = name || null; },
-  clearHeader() {
-    store.headerSession = null;
-    store.headerPtyTitle = null;
-    store.headerShellProfile = null;
-    store.headerAccount = null;
-  },
-};
+// The store-writing bridge (sidebar tree, PTY sets, filters, header) is declared
+// in the single bridge module and mutates the store rather than a component ref.
+// It runs synchronously during app.mount(), before any other script executes.
+window.vueSidebar = createSidebarBridge(store);
+
+// The panel bridges write into their own feature stores, which the panels read
+// reactively — no template-ref setter. Declared here so they exist before any
+// app.js call, rather than being filled in App.vue's onMounted.
+window.vuePlans = createPlansBridge(plansStore);
+window.vueMemory = createMemoryBridge(memoryStore);
+window.vueAccounts = createAccountsBridge(accountsStore);
+window.vueAccountDropdown = createAccountDropdownBridge(accountDropdownStore);
+window.vueStatusBar = createStatusBarBridge(statusBarStore);
+window.vueGrid = createGridBridge(gridStore);
+window.vueProjects = createProjectsBridge(projectsStore);
+window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
+// The tab switch is store-only, so it lives in the bridge too; App.vue's tab
+// buttons delegate to it.
+window.vueApp = createAppBridge(store);
 
 // Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
 window.createViewerPanel = function(container, opts = {}) {
@@ -69,16 +66,10 @@ window.createViewerPanel = function(container, opts = {}) {
   };
 };
 
-// Stubs for component bridge APIs — App.vue onMounted fills these in
-window.vuePlans = {};
-window.vueMemory = {};
-window.vueAccounts = {};
-window.vueProjects = {};
+// Stubs for the component bridge APIs still installed from App.vue onMounted via
+// template refs (their panels are not yet store-backed).
 window.vuePlanViewer = {};
 window.vueMemoryViewer = {};
-window.vueStatusBar = {};
-window.vueAccountDropdown = {};
-window.vueGrid = {};
 window.vueDialogs = {};
 
 // Mount the single root app (synchronous — all onMounted hooks run before returning)

@@ -7,7 +7,8 @@
 </template>
 
 <script setup>
-import { ref } from 'vue';
+import { ref, watch } from 'vue';
+import { jsonlStore } from '../stores/jsonl.js';
 
 const title = ref('Message History');
 const sessionId = ref('');
@@ -568,5 +569,7 @@ async function open(session) {
   body.scrollTop = body.scrollHeight;
 }
 
-defineExpose({ open });
+// The bridge (window.vueJsonlViewer) writes an open request rather than calling
+// open() through a template ref; the component reacts to it here.
+watch(() => jsonlStore.openRequest, (req) => { if (req) open(req.session); });
 </script>

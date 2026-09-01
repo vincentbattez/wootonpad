@@ -28,16 +28,19 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
+import { accountDropdownStore } from '../stores/account-dropdown.js';
 
 const props = defineProps({
   callbacks: { type: Object, required: true },
 });
 
-const accounts = ref([]);
-const activeAccountId = ref('default');
-const usage = ref({});
-const open = ref(false);
+// The list, active account, usage and open flag live in the feature store the
+// account-dropdown bridge writes; close() is one of its methods.
+const accounts = computed(() => accountDropdownStore.accounts);
+const activeAccountId = computed(() => accountDropdownStore.activeAccountId);
+const usage = computed(() => accountDropdownStore.usage);
+const open = computed(() => accountDropdownStore.open);
 
 const activeName = computed(() => {
   const acc = accounts.value.find(a => a.id === activeAccountId.value);
@@ -55,11 +58,11 @@ function chips(id) {
 }
 
 function toggle() {
-  open.value = !open.value;
+  accountDropdownStore.open = !accountDropdownStore.open;
 }
 
 function close() {
-  open.value = false;
+  accountDropdownStore.open = false;
 }
 
 async function onSwitch(id) {
@@ -79,16 +82,5 @@ onMounted(() => {
 
 onUnmounted(() => {
   document.removeEventListener('click', onDocumentClick);
-});
-
-defineExpose({
-  setAccounts(list, activeId, usageObj) {
-    accounts.value = list;
-    if (activeId !== undefined) activeAccountId.value = activeId;
-    if (usageObj !== undefined) usage.value = usageObj;
-  },
-  setActiveAccount(id) { activeAccountId.value = id; },
-  setUsage(usageObj) { usage.value = { ...usageObj }; },
-  close,
 });
 </script>
