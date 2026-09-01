@@ -7,6 +7,7 @@ import {
   openAddProject, closeAddProject,
   openAreaDialog, closeAreaDialog,
   openPopover, closePopover,
+  topDialogFor,
 } from '../src/vue/dialogs/dialog-store.js';
 
 // The store carries the open state and the data handed to each dialog. Null means closed.
@@ -75,4 +76,33 @@ test('the popover carries its project, anchor and callbacks, defaulting callback
   assert.deepEqual(dialogStore.popover.cbs, {});
   closePopover();
   assertAllClosed();
+});
+
+// Only the topmost dialog answers a keystroke, in the order the single document
+// listener used to walk. Enter skips the popover, which has no primary action.
+test('Escape goes to the topmost open dialog', () => {
+  openAreaDialog({ id: 'a', name: 'A' });
+  assert.equal(topDialogFor('Escape'), 'area');
+  openResumeSession({}, {}, () => {});
+  assert.equal(topDialogFor('Escape'), 'resumeSession');
+  openPopover({}, null, {});
+  assert.equal(topDialogFor('Escape'), 'popover');
+  closePopover();
+  closeResumeSession();
+  closeAreaDialog();
+});
+
+test('Enter skips the popover and reaches the dialog underneath', () => {
+  openNewSession({}, {}, () => {});
+  openPopover({}, null, {});
+  assert.equal(topDialogFor('Escape'), 'popover');
+  assert.equal(topDialogFor('Enter'), 'newSession');
+  closePopover();
+  closeNewSession();
+});
+
+test('no open dialog answers either key', () => {
+  assertAllClosed();
+  assert.equal(topDialogFor('Escape'), null);
+  assert.equal(topDialogFor('Enter'), null);
 });

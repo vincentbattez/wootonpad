@@ -55,7 +55,7 @@ import SbDialog from '../shared/ui/SbDialog.vue';
 import SbSwitch from '../components/SbSwitch.vue';
 import PermissionModeGrid from '../shared/ui/PermissionModeGrid.vue';
 import { dialogStore, closeNewSession } from './dialog-store.js';
-import { useDialogKeys } from '../shared/composables/use-dialog-keys.js';
+import { useDialogKeys } from './use-dialog-keys.js';
 
 const session = computed(() => dialogStore.newSession);
 const mode = ref(null);
@@ -79,7 +79,7 @@ watch(session, (s) => {
   addDirs.value = e.addDirs || '';
 });
 
-useDialogKeys(() => !!dialogStore.newSession, { onEscape: close, onEnter: start });
+useDialogKeys('newSession', { onEscape: close, onEnter: start });
 
 function close() { closeNewSession(); }
 

@@ -19,7 +19,7 @@
 import { ref, computed, watch, nextTick } from 'vue';
 import SbDialog from '../shared/ui/SbDialog.vue';
 import { dialogStore, closeAddProject } from './dialog-store.js';
-import { useDialogKeys } from '../shared/composables/use-dialog-keys.js';
+import { useDialogKeys } from './use-dialog-keys.js';
 
 const open = computed(() => !!dialogStore.addProject);
 const path = ref('');
@@ -34,7 +34,7 @@ watch(open, async (isOpen) => {
   pathInputRef.value?.focus();
 });
 
-useDialogKeys(() => !!dialogStore.addProject, { onEscape: close, onEnter: add });
+useDialogKeys('addProject', { onEscape: close, onEnter: add });
 
 function close() { closeAddProject(); }
 

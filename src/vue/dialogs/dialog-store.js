@@ -1,8 +1,6 @@
 import { reactive } from 'vue';
 
-// The shared dialog store: it holds which dialogs are open and the data each one was handed.
-// A null slice means the dialog is closed. Every dialog reads its own slice reactively and owns
-// its form state; opening and closing go through the functions below rather than a component ref.
+// Which dialogs are open and the data each was handed; a null slice means closed.
 export const dialogStore = reactive({
   popover: null,        // { project, anchorEl, cbs }
   newSession: null,     // { project, effective, onStart }
@@ -10,6 +8,16 @@ export const dialogStore = reactive({
   addProject: null,     // { onAdd }
   area: null,           // { id, name, cbs }
 });
+
+// Only the topmost open dialog answers a keystroke. Enter skips the popover,
+// which has no primary action, so it reaches the dialog underneath.
+const ESCAPE_ORDER = ['popover', 'newSession', 'resumeSession', 'addProject', 'area'];
+const ENTER_ORDER = ['newSession', 'resumeSession', 'addProject', 'area'];
+
+export function topDialogFor(key) {
+  const order = key === 'Enter' ? ENTER_ORDER : ESCAPE_ORDER;
+  return order.find(name => dialogStore[name]) || null;
+}
 
 export function openPopover(project, anchorEl, cbs) {
   dialogStore.popover = { project, anchorEl, cbs: cbs || {} };

@@ -37,7 +37,7 @@ import { store } from '../store.js';
 import { avatarFromName } from '../avatar.mjs';
 import { setAreaImageFromFile, clearAreaImage } from '../area-image.js';
 import { dialogStore, closeAreaDialog } from './dialog-store.js';
-import { useDialogKeys } from '../shared/composables/use-dialog-keys.js';
+import { useDialogKeys } from './use-dialog-keys.js';
 
 const area = computed(() => dialogStore.area);
 const name = ref('');
@@ -63,7 +63,7 @@ watch(area, async (a) => {
   nameInputRef.value?.select();
 });
 
-useDialogKeys(() => !!dialogStore.area, { onEscape: close, onEnter: save });
+useDialogKeys('area', { onEscape: close, onEnter: save });
 
 async function onImageDrop(ev) {
   imageHover.value = false;
