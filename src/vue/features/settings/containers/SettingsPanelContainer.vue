@@ -57,6 +57,14 @@ const terminalFonts = computed(() => window.TERMINAL_FONTS || {});
 
 const COMMIT_MSG_PROMPT_DEFAULT = `Write a concise git commit message (max 72 chars for first line) for these changes. Use conventional commit format (feat/fix/refactor/docs/chore). Output ONLY the commit message, no explanation:`;
 
+// The fields a Project can either inherit from global or override, with their global-scope
+// defaults. Both loading and saving walk this list, and `useGlobal` tracks one flag per field.
+const OVERRIDE_DEFAULTS = {
+  permissionMode: '', worktree: false, worktreeName: '', chrome: false,
+  preLaunchCmd: '', externalIdeCommand: '', runCommand: '', addDirs: '',
+};
+const OVERRIDE_FIELDS = Object.keys(OVERRIDE_DEFAULTS);
+
 // Prefill only — an External IDE is identified by its command, never by an id.
 const externalIdePresets = [
   { name: 'VS Code', command: 'code {path}' },
@@ -125,12 +133,11 @@ async function loadSettings() {
   const current = (await api.getSetting(settingsKey.value)) || {};
   const global = isProject.value ? ((await api.getSetting('global')) || {}) : {};
 
-  const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'runCommand', 'addDirs'];
-  for (const field of overrideFields) {
+  for (const field of OVERRIDE_FIELDS) {
     if (isProject.value) {
       useGlobal[field] = isUsingGlobal(current, field);
     }
-    form[field] = effectiveValue(current, global, field, getDefault(field));
+    form[field] = effectiveValue(current, global, field, OVERRIDE_DEFAULTS[field]);
   }
 
   if (!isProject.value) {
@@ -155,18 +162,12 @@ async function loadSettings() {
   loading.value = false;
 }
 
-function getDefault(field) {
-  const defaults = { permissionMode: '', worktree: false, worktreeName: '', chrome: false, preLaunchCmd: '', externalIdeCommand: '', runCommand: '', addDirs: '' };
-  return defaults[field];
-}
-
 // ── Save ──────────────────────────────────────────────────────────
 async function save() {
   let settings = {};
 
   if (isProject.value) {
-    const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'runCommand', 'addDirs'];
-    for (const field of overrideFields) {
+    for (const field of OVERRIDE_FIELDS) {
       if (!useGlobal[field]) {
         settings[field] = form[field];
       }

@@ -20,7 +20,7 @@ import { computed } from 'vue';
 import { sb } from '../../../shared/services/sb.js';
 import { sessionsStore, headerStore } from '../store.js';
 import { useProjectAvatar } from '../../../shared/composables/use-avatar.js';
-import { sessionTimeStr } from '../composables/use-session-display.js';
+import { cleanDisplayName, sessionTimeStr } from '../composables/use-session-display.js';
 import SessionHeader from '../components/SessionHeader.vue';
 
 // The sessions Feature's edge Container for the terminal header: it reads the feature store and
@@ -31,18 +31,16 @@ import SessionHeader from '../components/SessionHeader.vue';
 const session = computed(() => headerStore.headerSession);
 const sessionId = computed(() => session.value?.sessionId);
 
-const cleanName = (name) => (typeof window !== 'undefined' && window.cleanDisplayName ? window.cleanDisplayName(name) : name);
-
 const sessionName = computed(() => {
   const s = session.value;
   if (!s) return '';
-  return cleanName(s.name || s.summary || 'Session');
+  return cleanDisplayName(s.name || s.summary || 'Session');
 });
 
 const aiTitle = computed(() => {
   const s = session.value;
   if (!s?.aiTitle) return null;
-  const cleaned = cleanName(s.aiTitle);
+  const cleaned = cleanDisplayName(s.aiTitle);
   return cleaned !== sessionName.value ? cleaned : null;
 });
 
