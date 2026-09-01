@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { effect } from 'vue';
-import { store, slices, sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore } from '../src/vue/store.js';
+import { store, slices, sessionsStore, settingsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore } from '../src/vue/store.js';
 
 // The flat store the bridge used to write is cut into feature slices, but the
 // aggregate exposed as window.vueStore must keep every field name so the frozen
@@ -14,6 +14,7 @@ const OWNERSHIP = {
     'projects', 'activePtyIds', 'activeSessionId', 'sessionBusyState',
     'attentionSessions', 'responseReadySessions', 'lastActivityTime', 'pendingSessions',
   ],
+  settingsStore: ['settingsOpen', 'settingsScope', 'settingsProjectPath'],
   sidebarStore: [
     'showStarredOnly', 'showRunningOnly', 'showTodayOnly', 'searchMatchIds',
     'searchMatchProjectPaths', 'collapsedProjects', 'visibleSessionCount',
@@ -21,8 +22,7 @@ const OWNERSHIP = {
   ],
   areasStore: ['areas', 'areaAssignments', 'renamingAreaId', 'renamingProjectPath'],
   layoutStore: [
-    'activeTab', 'sidebarCollapsed', 'loadingStatus', 'accountSwitching',
-    'settingsOpen', 'settingsScope', 'settingsProjectPath', 'showStats',
+    'activeTab', 'sidebarCollapsed', 'loadingStatus', 'accountSwitching', 'showStats',
     'showJsonl', 'planViewerOpen', 'memoryViewerOpen', 'gridViewActive', 'gridViewerCount',
   ],
   headerStore: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts'],
@@ -110,6 +110,7 @@ test('Map fields mutate in place through the facade and stay reactive', () => {
 
 test('the named slice exports are the same objects the facade delegates to', () => {
   assert.equal(slices.sessionsStore, sessionsStore);
+  assert.equal(slices.settingsStore, settingsStore);
   assert.equal(slices.sidebarStore, sidebarStore);
   assert.equal(slices.areasStore, areasStore);
   assert.equal(slices.layoutStore, layoutStore);

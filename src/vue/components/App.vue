@@ -155,7 +155,7 @@
         :on-save="planOnSave"
       />
     </div>
-    <SettingsPanelApp v-if="store.settingsOpen" />
+    <SettingsPanelContainer v-if="store.settingsOpen" />
     <div id="project-viewer" style="display:none;">
       <ProjectViewerApp ref="projectViewerRef" :callbacks="projectViewerCallbacks" />
     </div>
@@ -220,7 +220,7 @@ import AccountDropdownApp from './AccountDropdownApp.vue';
 import ProjectsApp from './ProjectsApp.vue';
 import StatusBarApp from './StatusBarApp.vue';
 import GridCardsApp from './GridCardsApp.vue';
-import SettingsPanelApp from './SettingsPanelApp.vue';
+import SettingsPanelContainer from '../features/settings/containers/SettingsPanelContainer.vue';
 import ProjectViewerApp from './ProjectViewerApp.vue';
 import StatsApp from './StatsApp.vue';
 import JsonlViewerApp from './JsonlViewerApp.vue';
@@ -444,9 +444,7 @@ onMounted(async () => {
     }
     store.showStats = false;
     store.showJsonl = false;
-    store.settingsScope = scope || 'global';
-    store.settingsProjectPath = projectPath || null;
-    store.settingsOpen = true;
+    window.vueSettings.open(scope, projectPath);
   };
 
   // Prevent browser "Save Page" shortcut from interfering with in-app Cmd+S save
@@ -455,7 +453,7 @@ onMounted(async () => {
     if (e.key === 's' && mod && !e.shiftKey && !e.altKey) e.preventDefault();
   });
   window.closeSettingsViewer = () => {
-    store.settingsOpen = false;
+    window.vueSettings.close();
     window._restoreAfterSettings?.();
   };
 
