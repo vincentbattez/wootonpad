@@ -189,6 +189,18 @@ function getEntryText(entry) {
   return null;
 }
 
+// Pulls the { cmd, output } out of a blob of <bash-input>/<bash-stdout>/<bash-stderr>
+// tags, or null when there is no <bash-input> to anchor on.
+function parseLocalCommand(combined) {
+  const inputMatch = combined.match(/<bash-input>([\s\S]*?)<\/bash-input>/);
+  if (!inputMatch) return null;
+  const cmd = inputMatch[1].trim();
+  const stdout = combined.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/)?.[1].trim() || '';
+  const stderr = combined.match(/<bash-stderr>([\s\S]*?)<\/bash-stderr>/)?.[1].trim() || '';
+  const output = [stdout, stderr].filter(Boolean).join('\n');
+  return { cmd, output };
+}
+
 // A run of `/`-command entries — the caveat, the <bash-input>, its stdout/stderr —
 // collapses into one synthetic local-command entry rendered as a Bash block.
 export function mergeLocalCommandEntries(entries) {
@@ -210,15 +222,9 @@ export function mergeLocalCommandEntries(entries) {
         if (/<\/bash-stdout>|<\/bash-stderr>/.test(t)) break;
       }
 
-      const inputMatch = combined.match(/<bash-input>([\s\S]*?)<\/bash-input>/);
-      if (inputMatch) {
-        const cmd = inputMatch[1].trim();
-        const stdoutMatch = combined.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/);
-        const stderrMatch = combined.match(/<bash-stderr>([\s\S]*?)<\/bash-stderr>/);
-        const stdout = stdoutMatch ? stdoutMatch[1].trim() : '';
-        const stderr = stderrMatch ? stderrMatch[1].trim() : '';
-        const output = [stdout, stderr].filter(Boolean).join('\n');
-        result.push({ _localCmd: { cmd, output }, type: 'local-command' });
+      const localCmd = parseLocalCommand(combined);
+      if (localCmd) {
+        result.push({ _localCmd: localCmd, type: 'local-command' });
       } else {
         for (let j = start; j < i; j++) result.push(entries[j]);
       }
@@ -239,17 +245,10 @@ function mergeLocalCommandBlocks(blocks) {
     if (b.type === 'text' && b.text) combined += b.text + '\n';
   }
 
-  const inputMatch = combined.match(/<bash-input>([\s\S]*?)<\/bash-input>/);
-  if (!inputMatch) return blocks;
+  const localCmd = parseLocalCommand(combined);
+  if (!localCmd) return blocks;
 
-  const cmd = inputMatch[1].trim();
-  const stdoutMatch = combined.match(/<bash-stdout>([\s\S]*?)<\/bash-stdout>/);
-  const stderrMatch = combined.match(/<bash-stderr>([\s\S]*?)<\/bash-stderr>/);
-  const stdout = stdoutMatch ? stdoutMatch[1].trim() : '';
-  const stderr = stderrMatch ? stderrMatch[1].trim() : '';
-  const output = [stdout, stderr].filter(Boolean).join('\n');
-
-  const merged = { type: 'text', text: combined, _localCmd: { cmd, output } };
+  const merged = { type: 'text', text: combined, _localCmd: localCmd };
   const result = [];
   let replacedText = false;
   for (const b of blocks) {
@@ -355,18 +354,15 @@ export function renderJsonlEntry(entry, toolResultMap, opts = {}) {
   }
 
   let role = null;
-  let contentBlocks = null;
-
   if (entry.type === 'user' || (entry.type === 'message' && entry.role === 'user')) {
     role = 'user';
-    contentBlocks = entry.message?.content || entry.content;
   } else if (entry.type === 'assistant' || (entry.type === 'message' && entry.role === 'assistant')) {
     role = 'assistant';
-    contentBlocks = entry.message?.content || entry.content;
   } else {
     return null;
   }
 
+  let contentBlocks = entry.message?.content || entry.content;
   if (!contentBlocks) return null;
   if (typeof contentBlocks === 'string') {
     contentBlocks = [{ type: 'text', text: contentBlocks }];
