@@ -194,7 +194,7 @@
 
   <!-- Status bar and grid cards rendered via Teleport into their existing container elements -->
   <Teleport to="#status-bar">
-    <StatusBarApp />
+    <StatusBarContainer />
   </Teleport>
   <Teleport to="#vue-grid-cards">
     <GridCardsApp />
@@ -215,7 +215,7 @@ import MemoryApp from './MemoryApp.vue';
 import AccountsApp from './AccountsApp.vue';
 import AccountDropdownApp from './AccountDropdownApp.vue';
 import ProjectsApp from './ProjectsApp.vue';
-import StatusBarApp from './StatusBarApp.vue';
+import StatusBarContainer from '../features/status-bar/containers/StatusBarContainer.vue';
 import GridCardsApp from './GridCardsApp.vue';
 import SettingsPanelApp from './SettingsPanelApp.vue';
 import ProjectViewerApp from './ProjectViewerApp.vue';

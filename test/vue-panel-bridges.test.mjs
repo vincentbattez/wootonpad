@@ -6,7 +6,6 @@ import {
   createMemoryBridge,
   createAccountsBridge,
   createAccountDropdownBridge,
-  createStatusBarBridge,
   createGridBridge,
   createProjectsBridge,
   createJsonlViewerBridge,
@@ -16,7 +15,6 @@ import { plansStore } from '../src/vue/stores/plans.js';
 import { memoryStore } from '../src/vue/stores/memory.js';
 import { accountsStore } from '../src/vue/stores/accounts.js';
 import { accountDropdownStore } from '../src/vue/stores/account-dropdown.js';
-import { statusBarStore } from '../src/vue/stores/status-bar.js';
 import { gridStore } from '../src/vue/stores/grid.js';
 import { projectsStore } from '../src/vue/stores/projects.js';
 import { jsonlStore } from '../src/vue/stores/jsonl.js';
@@ -121,27 +119,8 @@ test('account-dropdown setAccounts leaves active id and usage untouched when omi
   bridge.setActiveAccount('default');
 });
 
-test('status-bar bridge writes info immediately', () => {
-  const bridge = createStatusBarBridge(statusBarStore);
-  bridge.setInfo('3 sessions');
-  assert.equal(statusBarStore.info, '3 sessions');
-});
-
-test('status-bar setActivity writes text and marks the done class', () => {
-  const bridge = createStatusBarBridge(statusBarStore);
-  bridge.setActivity('working', 'progress');
-  assert.equal(statusBarStore.activity, 'working');
-  assert.equal(statusBarStore.activityClass, '');
-  bridge.setActivity('finished', 'done');
-  assert.equal(statusBarStore.activity, 'finished');
-  assert.equal(statusBarStore.activityClass, 'status-done');
-});
-
-test('status-bar setUpdater writes the updater text', () => {
-  const bridge = createStatusBarBridge(statusBarStore);
-  bridge.setUpdater('Downloading update…');
-  assert.equal(statusBarStore.updater, 'Downloading update…');
-});
+// The status-bar bridge lives in its own Feature now; its contract is asserted
+// in src/vue/features/status-bar/bridge.test.mjs.
 
 // The grid bridge inverts GridCardsApp's addCard/updateCard/removeCard/clearAll
 // setters: each mutates the store's card Map, which the component teleports from.
