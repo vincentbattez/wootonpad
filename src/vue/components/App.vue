@@ -207,6 +207,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { store } from '../store.js';
+import { switchTab } from '../bridge.js';
 import SidebarApp from './SidebarApp.vue';
 import SessionHeaderApp from './SessionHeaderApp.vue';
 import PlansApp from './PlansApp.vue';
@@ -299,9 +300,7 @@ async function toggleTitlesOnly() {
 }
 
 // ── Tab switching ────────────────────────────────────────────────
-// The switch itself lives in the app bridge (window.vueApp, installed in
-// main.js); the tab buttons delegate to it so there is a single code path.
-function setTab(tabId) { window.vueApp?.setTab(tabId); }
+function setTab(tabId) { switchTab(store, tabId); }
 
 // ── Filter toggles ───────────────────────────────────────────────
 const filterMenuOpen = ref(false);

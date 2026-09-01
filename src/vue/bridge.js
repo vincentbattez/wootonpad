@@ -230,17 +230,20 @@ export function createJsonlViewerBridge(store) {
 // fields directly — the same fields the sidebar/header render from — and pings
 // the vanilla search host. App.vue's tab buttons delegate to this so there is
 // one code path.
+// Switching tab clears the search. Exported so App.vue's tab buttons and
+// window.vueApp share one code path.
+export function switchTab(store, tabId) {
+  if (tabId === store.activeTab) return;
+  store.activeTab = tabId;
+  store.searchQuery = '';
+  store.searchMatchIds = null;
+  store.searchMatchProjectPaths = null;
+  if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
+}
+
 export function createAppBridge(store) {
   return {
-    setTab(tabId) {
-      if (tabId === store.activeTab) return;
-      store.activeTab = tabId;
-      // Clear search on tab switch
-      store.searchQuery = '';
-      store.searchMatchIds = null;
-      store.searchMatchProjectPaths = null;
-      if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
-    },
+    setTab(tabId) { switchTab(store, tabId); },
   };
 }
 
