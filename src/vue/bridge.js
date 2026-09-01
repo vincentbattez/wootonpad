@@ -7,9 +7,9 @@ import { markRaw } from 'vue';
 //
 // The sidebar and header setters already worked this way before the split —
 // they wrote to the flat store — so gathering them here generalises an existing
-// pattern rather than inventing one. The remaining panel bridges (Plans,
-// Accounts, Projects, …) are still installed from App.vue via template refs and
-// move here as each panel learns to read its slice reactively.
+// pattern rather than inventing one. The panels that still hold their own local
+// state (the project viewer, stats, the plan/memory viewers and dialogs) keep
+// their template-ref setters in App.vue's onMounted.
 
 // window.vueSidebar: the Session/Project tree, the live PTY sets, the filters,
 // the search matches and the terminal-header context. Every method mutates the
