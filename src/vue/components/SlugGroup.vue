@@ -35,31 +35,19 @@
         @rename="(id, name) => $emit('rename', id, name)"
       />
 
-      <template v-if="promoted.length > 0 && rest.length > 0">
-        <div class="slug-group-more" :class="{ expanded: showRest }" @click="showRest = !showRest">
-          <template v-if="!showRest">+ {{ rest.length }} more</template>
-        </div>
-        <SessionList
-          v-if="showRest"
-          :sessions="rest"
-          :active-pty-ids="activePtyIds"
-          :active-session-id="activeSessionId"
-          :session-busy-state="sessionBusyState"
-          :attention-sessions="attentionSessions"
-          :response-ready-sessions="responseReadySessions"
-          @open="(s) => $emit('open', s)"
-          @stop="(id) => $emit('stop', id)"
-          @star="(id) => $emit('star', id)"
-          @archive="(id) => $emit('archive', id)"
-          @fork="(id) => $emit('fork', id)"
-          @jsonl="(id) => $emit('jsonl', id)"
-          @launch-config="(id) => $emit('launch-config', id)"
-          @rename="(id, name) => $emit('rename', id, name)"
-        />
-      </template>
+      <!-- When both a promoted run and a rest exist, the rest hides behind a "+N more" toggle;
+           otherwise (either side empty) it renders inline. -->
+      <div
+        v-if="hasMore"
+        class="slug-group-more"
+        :class="{ expanded: showRest }"
+        @click="showRest = !showRest"
+      >
+        <template v-if="!showRest">+ {{ rest.length }} more</template>
+      </div>
 
       <SessionList
-        v-else
+        v-if="!hasMore || showRest"
         :sessions="rest"
         :active-pty-ids="activePtyIds"
         :active-session-id="activeSessionId"
@@ -141,6 +129,9 @@ const hasRunning = computed(() => props.sessions.some(s => props.activePtyIds.ha
 
 const promoted = computed(() => props.sessions.filter(s => props.activePtyIds.has(s.sessionId)));
 const rest = computed(() => props.sessions.filter(s => !props.activePtyIds.has(s.sessionId)));
+
+// A "+N more" toggle appears only when a promoted run and a rest coexist.
+const hasMore = computed(() => promoted.value.length > 0 && rest.value.length > 0);
 
 async function archiveAll() {
   emit('archive-all', props.sessions);

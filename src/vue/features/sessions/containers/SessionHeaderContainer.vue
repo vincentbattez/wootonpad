@@ -20,6 +20,7 @@ import { computed } from 'vue';
 import { sb } from '../../../shared/services/sb.js';
 import { sessionsStore, headerStore } from '../store.js';
 import { useProjectAvatar } from '../../../shared/composables/use-avatar.js';
+import { sessionTimeStr } from '../composables/use-session-display.js';
 import SessionHeader from '../components/SessionHeader.vue';
 
 // The sessions Feature's edge Container for the terminal header: it reads the feature store and
@@ -45,13 +46,7 @@ const aiTitle = computed(() => {
   return cleaned !== sessionName.value ? cleaned : null;
 });
 
-const timeStr = computed(() => {
-  const s = session.value;
-  if (!s) return '';
-  const activity = typeof window !== 'undefined' ? window.lastActivityTime : null;
-  const t = activity?.get(s.sessionId) || new Date(s.modified);
-  return typeof window !== 'undefined' && window.formatDate ? window.formatDate(t) : '';
-});
+const timeStr = computed(() => (session.value ? sessionTimeStr(session.value) : ''));
 
 const isRunning = computed(() => sessionsStore.activePtyIds?.has(sessionId.value));
 const isBusy = computed(() => sessionsStore.sessionBusyState?.get(sessionId.value) || false);
