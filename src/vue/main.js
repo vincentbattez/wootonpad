@@ -21,7 +21,9 @@ import { gridStore } from './stores/grid.js';
 import { projectsStore } from './stores/projects.js';
 import { jsonlStore } from './stores/jsonl.js';
 import App from './components/App.vue';
-import ViewerContentApp from './components/ViewerContentApp.vue';
+import ViewerContainer from './features/viewer/containers/ViewerContainer.vue';
+import { viewerStore } from './features/viewer/store.js';
+import { createViewerBridge } from './features/viewer/bridge.js';
 
 // The aggregate store facade app.js mutates by field name.
 window.vueStore = store;
@@ -40,20 +42,25 @@ window.vueProjects = createProjectsBridge(projectsStore);
 window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
 window.vueApp = createAppBridge(store);
 
-// Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
+// The file panel (public/file-panel.js) mounts its viewer here. The Container is bridged: it
+// reacts to the viewer store the Feature's Bridge writes, so file-panel.js drives open/destroy
+// through the Bridge rather than through a template ref. getContent stays on the instance —
+// the Bridge carries only what the frozen file panel calls.
 window.createViewerPanel = function(container, opts = {}) {
-  const app = createApp(ViewerContentApp, {
+  const app = createApp(ViewerContainer, {
     language: opts.language || 'markdown',
     storageKey: opts.storageKey,
     showCopyPath: !!opts.copyPath,
     showCopyContent: !!opts.copyContent,
     onSave: opts.onSave || null,
     onClose: opts.onClose || null,
+    bridged: true,
   });
   const instance = app.mount(container);
+  const bridge = createViewerBridge(viewerStore);
   return {
-    open: (...args) => instance.open(...args),
-    destroy: () => instance.destroy(),
+    open: (...args) => bridge.open(...args),
+    destroy: () => bridge.destroy(),
     getContent: () => instance.getContent(),
   };
 };
