@@ -160,7 +160,7 @@
       <ProjectViewerApp ref="projectViewerRef" :callbacks="projectViewerCallbacks" />
     </div>
     <div id="jsonl-viewer" v-show="store.showJsonl">
-      <JsonlViewerApp />
+      <JsonlViewerContainer />
     </div>
     <div id="terminal-area">
       <div id="vue-session-header">
@@ -220,7 +220,7 @@ import GridCardsApp from './GridCardsApp.vue';
 import SettingsPanelApp from './SettingsPanelApp.vue';
 import ProjectViewerApp from './ProjectViewerApp.vue';
 import StatsApp from './StatsApp.vue';
-import JsonlViewerApp from './JsonlViewerApp.vue';
+import JsonlViewerContainer from '../features/jsonl/containers/JsonlViewerContainer.vue';
 import ViewerContentApp from './ViewerContentApp.vue';
 import DialogsApp from './DialogsApp.vue';
 
