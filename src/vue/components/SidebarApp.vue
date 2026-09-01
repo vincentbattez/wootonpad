@@ -6,35 +6,24 @@
     @dragleave="rootHover = false"
     @drop.prevent="onRootDrop"
   >
-    <template v-for="node in tree" :key="node.type === 'area' ? 'area-' + node.id : node.projectPath">
-      <AreaGroup
-        v-if="node.type === 'area'"
-        :node="node"
-        :worktree-map="worktreeMap"
-        :filter-active="filterActive"
-        v-bind="shared"
-      />
-      <ProjectGroup
-        v-else
-        :project="node.project"
-        :worktrees="worktreeMap.get(node.projectPath) || []"
-        v-bind="shared"
-      />
-    </template>
+    <AreaContainer
+      :nodes="tree"
+      :worktree-map="worktreeMap"
+      :filter-active="filterActive"
+      v-bind="shared"
+    />
     <!-- Empty space below the list: an obvious target for taking a row back out to the root. -->
     <div class="sidebar-root-drop-zone"></div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue';
-import { api } from '../shared/services/api.js';
+import { computed } from 'vue';
 import { store } from '../store.js';
 import { buildSidebarTree, subtreeAreaIds } from '../area-tree.mjs';
 import { filterSessions } from '../session-list.mjs';
-import { dropOnTarget, isDragging } from '../area-drag.js';
-import ProjectGroup from './ProjectGroup.vue';
-import AreaGroup from './AreaGroup.vue';
+import { useDropTarget } from '../shared/composables/use-drop-target.js';
+import AreaContainer from '../features/areas/containers/AreaContainer.vue';
 
 const props = defineProps({
   callbacks: { type: Object, required: true },
@@ -168,21 +157,7 @@ const listeners = {
 };
 
 // The root drop zone: a drop that reaches this outer element (not caught by an Area or Project
-// header) unfiles the dragged row. Header handlers stopPropagation, so only gaps land here.
-const rootHover = ref(false);
-function onRootDragOver() { if (isDragging()) rootHover.value = true; }
-async function onRootDrop() {
-  rootHover.value = false;
-  await dropOnTarget(null);
-}
-
-onMounted(async () => {
-  const data = await api.getAreas?.().catch(() => null);
-  if (!data) return;
-  // An Area created while this load was in flight must survive the response.
-  const fetched = data.areas || [];
-  const fetchedIds = new Set(fetched.map(a => a.id));
-  store.areas = [...fetched, ...store.areas.filter(a => !fetchedIds.has(a.id))];
-  store.areaAssignments = data.assignments || [];
-});
+// header) unfiles the dragged row. Header handlers stopPropagation, so only gaps land here. The
+// same drop-target composable the rows use, with no draggable identity, files onto the root (null).
+const { dropHover: rootHover, onDragOver: onRootDragOver, onDrop: onRootDrop } = useDropTarget();
 </script>

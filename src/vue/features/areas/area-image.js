@@ -3,8 +3,8 @@
 // glue that resolves the dropped File to its OS path (as the terminal drop does) and mirrors the
 // resulting data URL into the store so every AreaAvatar for that Area updates at once.
 
-import { store } from './store.js';
-import { api } from './shared/services/api.js';
+import { store } from '../../store.js';
+import { api } from '../../shared/services/api.js';
 
 // Set from an OS File (dropped or picked). Returns the new data URL, or null on failure.
 export async function setAreaImageFromFile(areaId, file) {

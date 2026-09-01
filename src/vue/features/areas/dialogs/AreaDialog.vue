@@ -32,33 +32,29 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
-import { api } from '../shared/services/api.js';
-import SbDialog from '../shared/ui/SbDialog.vue';
-import { store } from '../store.js';
-import { avatarFromName } from '../avatar.mjs';
+import SbDialog from '../../../shared/ui/SbDialog.vue';
+import { useAreaAvatar } from '../../../shared/composables/use-avatar.js';
 import { setAreaImageFromFile, clearAreaImage } from '../area-image.js';
-import { dialogStore, closeAreaDialog } from './dialog-store.js';
-import { useDialogKeys } from './use-dialog-keys.js';
+import { dialogStore, closeAreaDialog } from '../../../dialogs/dialog-store.js';
+import { useDialogKeys } from '../../../dialogs/use-dialog-keys.js';
 
 const area = computed(() => dialogStore.area);
 const name = ref('');
 const nameInputRef = ref(null);
 const imageHover = ref(false);
 
-// The preview follows the store cache, so it updates the instant a drop or clear resolves; the
-// fallback initials/colour track the name being edited so clearing the image shows what returns.
-const imageUrl = computed(() => (area.value && store.areaAvatarDataUrls[area.value.id]) || null);
-const fallback = computed(() => avatarFromName(name.value || area.value?.name || ''));
+// The preview follows the shared avatar composable: it reads the same store cache every AreaAvatar
+// does — so a drop or clear updates it at once — and fetches the stored image once when it is not
+// cached yet. The fallback initials/colour track the name being edited, so clearing the image
+// shows what returns.
+const areaId = computed(() => area.value?.id || '');
+const fallbackName = computed(() => name.value || area.value?.name || '');
+const { dataUrl: imageUrl, fallback } = useAreaAvatar(areaId, fallbackName);
 
 watch(area, async (a) => {
   if (!a) return;
   name.value = a.name || '';
   imageHover.value = false;
-  // Fetch the stored image once so the preview reflects it even if no AreaAvatar loaded it yet.
-  if (!store.areaAvatarDataUrls[a.id] && api.getAreaAvatar) {
-    const url = await api.getAreaAvatar(a.id).catch(() => null);
-    if (url && dialogStore.area?.id === a.id) store.areaAvatarDataUrls[a.id] = url;
-  }
   await nextTick();
   nameInputRef.value?.focus();
   nameInputRef.value?.select();
