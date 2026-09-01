@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { api } from '../src/vue/shared/services/api.js';
 import { sb } from '../src/vue/shared/services/sb.js';
+import { globalProxy } from '../src/vue/shared/services/global-proxy.js';
 
 // The two services front window.api and window.__sb — the preload IPC bridge and the
 // legacy renderer's callbacks. They read the live global on every access, so a call made
@@ -53,4 +54,21 @@ test('sb delegates to window.__sb and no-ops when it is absent', () => {
   } finally {
     delete globalThis.window;
   }
+});
+
+test('globalProxy reads its source fresh and binds methods to it', () => {
+  let source;
+  const svc = globalProxy(() => source);
+
+  assert.equal(svc.whatever, undefined, 'no source yet: any access is undefined');
+  assert.ok(!('whatever' in svc));
+
+  const seen = [];
+  source = { greet(name) { seen.push([name, this]); return `hi ${name}`; } };
+  assert.equal(svc.greet('a'), 'hi a');
+  assert.equal(seen[0][1], source, 'method is bound to the source');
+  assert.ok('greet' in svc);
+
+  source = undefined;
+  assert.equal(svc.greet?.(), undefined, 'source gone: optional call is a no-op');
 });

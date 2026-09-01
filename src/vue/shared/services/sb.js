@@ -3,24 +3,10 @@
 // Components import `sb` instead of threading `callbacks` prop objects down the tree, or
 // reaching for the global directly.
 //
-// A Proxy over the live global rather than a captured reference: the legacy renderer
-// installs window.__sb after this module evaluates, and node:test has no window. Each
-// access reads it fresh. `sb` is always defined, so a call guards the method —
-// `sb.foo?.()` — matching the old `window.__sb?.foo?.()`: a missing callback is a no-op.
+// `sb` is a live Proxy over the global (see globalProxy): each access reads window.__sb
+// fresh, so a call before the legacy renderer installs it — or with it gone — stays a
+// no-op through `?.`, matching the old `window.__sb?.foo?.()` call-sites.
 
-function target() {
-  return (typeof window !== 'undefined' && window.__sb) || undefined;
-}
+import { globalProxy } from './global-proxy.js';
 
-export const sb = new Proxy(Object.create(null), {
-  get(_t, prop) {
-    const bridge = target();
-    if (!bridge) return undefined;
-    const value = bridge[prop];
-    return typeof value === 'function' ? value.bind(bridge) : value;
-  },
-  has(_t, prop) {
-    const bridge = target();
-    return !!bridge && prop in bridge;
-  },
-});
+export const sb = globalProxy(() => (typeof window !== 'undefined' && window.__sb) || undefined);
