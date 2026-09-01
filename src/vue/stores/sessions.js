@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 
 // Session runtime state: the Project/Session tree plus the live PTY sets that
 // drive a Session row's running, busy, attention and response-ready states.
-export const sessions = reactive({
+export const sessionsStore = reactive({
   // Project/session data
   projects: [],
 

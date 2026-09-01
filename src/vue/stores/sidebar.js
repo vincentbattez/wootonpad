@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 
 // Sidebar state: the three Session filters, the search query and its matches,
 // the Project collapse overrides and how many Sessions a Project shows.
-export const sidebar = reactive({
+export const sidebarStore = reactive({
   // Filter state
   showStarredOnly: false,
   showRunningOnly: false,

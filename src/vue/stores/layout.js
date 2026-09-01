@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 
 // App layout: the active tab, the sidebar collapse, and which main-area panel
 // is visible. These fields are Vue-owned — do not touch via innerHTML/style.
-export const layout = reactive({
+export const layoutStore = reactive({
   activeTab: 'sessions',
   sidebarCollapsed: false,
   loadingStatus: '',

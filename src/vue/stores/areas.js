@@ -2,7 +2,7 @@ import { reactive } from 'vue';
 
 // Areas: the user-authored tree above Projects in the sidebar, plus the inline
 // rename targets for an Area and for a Project's sidebar label.
-export const areas = reactive({
+export const areasStore = reactive({
   areas: [],
   areaAssignments: [],
   renamingAreaId: null,

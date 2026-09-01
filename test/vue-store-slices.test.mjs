@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { effect } from 'vue';
-import { store, slices, sessions, sidebar, areas, layout, header, avatars } from '../src/vue/store.js';
+import { store, slices, sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore } from '../src/vue/store.js';
 
 // The flat store the bridge used to write is cut into feature slices, but the
 // aggregate exposed as window.vueStore must keep every field name so the frozen
@@ -10,23 +10,23 @@ import { store, slices, sessions, sidebar, areas, layout, header, avatars } from
 // Which slice owns which field. The whole point of the split is that this
 // mapping exists and is legible.
 const OWNERSHIP = {
-  sessions: [
+  sessionsStore: [
     'projects', 'activePtyIds', 'activeSessionId', 'sessionBusyState',
     'attentionSessions', 'responseReadySessions', 'lastActivityTime', 'pendingSessions',
   ],
-  sidebar: [
+  sidebarStore: [
     'showStarredOnly', 'showRunningOnly', 'showTodayOnly', 'searchMatchIds',
     'searchMatchProjectPaths', 'collapsedProjects', 'visibleSessionCount',
     'sessionMaxAgeDays', 'searchQuery', 'searchTitlesOnly',
   ],
-  areas: ['areas', 'areaAssignments', 'renamingAreaId', 'renamingProjectPath'],
-  layout: [
+  areasStore: ['areas', 'areaAssignments', 'renamingAreaId', 'renamingProjectPath'],
+  layoutStore: [
     'activeTab', 'sidebarCollapsed', 'loadingStatus', 'accountSwitching',
     'settingsOpen', 'settingsScope', 'settingsProjectPath', 'showStats',
     'showJsonl', 'planViewerOpen', 'memoryViewerOpen', 'gridViewActive', 'gridViewerCount',
   ],
-  header: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts'],
-  avatars: ['avatarDataUrls', 'areaAvatarDataUrls'],
+  headerStore: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts'],
+  avatarsStore: ['avatarDataUrls', 'areaAvatarDataUrls'],
 };
 
 const ALL_FIELDS = Object.values(OWNERSHIP).flat();
@@ -51,24 +51,24 @@ test('each field is owned by exactly its slice', () => {
 });
 
 test('reading through the facade returns the slice value', () => {
-  layout.activeTab = 'plans';
+  layoutStore.activeTab = 'plans';
   assert.equal(store.activeTab, 'plans');
-  layout.activeTab = 'sessions';
+  layoutStore.activeTab = 'sessions';
 });
 
 test('writing through the facade writes to the owning slice', () => {
   store.activeTab = 'stats';
-  assert.equal(layout.activeTab, 'stats');
+  assert.equal(layoutStore.activeTab, 'stats');
   store.activeTab = 'sessions';
 
   store.projects = [{ projectPath: '/x' }];
-  assert.equal(sessions.projects[0].projectPath, '/x');
+  assert.equal(sessionsStore.projects[0].projectPath, '/x');
   store.projects = [];
 });
 
 test('a facade write triggers effects that read the slice', () => {
   let seen;
-  const stop = effect(() => { seen = layout.showStats; });
+  const stop = effect(() => { seen = layoutStore.showStats; });
   assert.equal(seen, false);
   store.showStats = true;
   assert.equal(seen, true, 'effect reading the slice saw the facade write');
@@ -80,9 +80,9 @@ test('a slice write triggers effects that read the facade', () => {
   let seen;
   const stop = effect(() => { seen = store.loadingStatus; });
   assert.equal(seen, '');
-  layout.loadingStatus = 'Loading…';
+  layoutStore.loadingStatus = 'Loading…';
   assert.equal(seen, 'Loading…', 'effect reading the facade saw the slice write');
-  layout.loadingStatus = '';
+  layoutStore.loadingStatus = '';
   stop.effect.stop();
 });
 
@@ -91,7 +91,7 @@ test('Set fields mutate in place through the facade and stay reactive', () => {
   const stop = effect(() => { size = store.attentionSessions.size; });
   assert.equal(size, 0);
   store.attentionSessions.add('s1');
-  assert.equal(sessions.attentionSessions.has('s1'), true);
+  assert.equal(sessionsStore.attentionSessions.has('s1'), true);
   assert.equal(size, 1, 'mutating the Set through the facade triggered the effect');
   store.attentionSessions.delete('s1');
   stop.effect.stop();
@@ -109,10 +109,10 @@ test('Map fields mutate in place through the facade and stay reactive', () => {
 });
 
 test('the named slice exports are the same objects the facade delegates to', () => {
-  assert.equal(slices.sessions, sessions);
-  assert.equal(slices.sidebar, sidebar);
-  assert.equal(slices.areas, areas);
-  assert.equal(slices.layout, layout);
-  assert.equal(slices.header, header);
-  assert.equal(slices.avatars, avatars);
+  assert.equal(slices.sessionsStore, sessionsStore);
+  assert.equal(slices.sidebarStore, sidebarStore);
+  assert.equal(slices.areasStore, areasStore);
+  assert.equal(slices.layoutStore, layoutStore);
+  assert.equal(slices.headerStore, headerStore);
+  assert.equal(slices.avatarsStore, avatarsStore);
 });
