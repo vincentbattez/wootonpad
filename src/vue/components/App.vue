@@ -9,16 +9,7 @@
 
     <div id="sidebar-header">
       <div id="sidebar-tabs">
-        <button
-          v-for="tab in TABS"
-          :key="tab.id"
-          class="sidebar-tab"
-          :class="{ active: store.activeTab === tab.id }"
-          :data-tab="tab.id"
-          :data-tooltip="tab.label"
-          @click="setTab(tab.id)"
-          v-html="tab.svg"
-        ></button>
+        <NavigationTabs :tabs="TABS" :active-tab="store.activeTab" @select="setTab" />
         <button id="global-settings-btn" data-tooltip="Global settings" @click="onGlobalSettings" v-html="GEAR_SVG"></button>
         <button id="sidebar-collapse-btn" data-tooltip="Hide sidebar" @click="store.sidebarCollapsed = true" v-html="COLLAPSE_SVG"></button>
       </div>
@@ -27,24 +18,14 @@
 
     <!-- One row: the search field, then the only two actions worth a permanent slot. -->
     <div id="sidebar-toolbar">
-      <div id="search-bar" :class="{ 'has-query': store.searchQuery }">
-        <input
-          id="search-input"
-          type="text"
-          :placeholder="searchPlaceholder"
-          :value="store.searchQuery"
-          @input="onSearchInput"
-        />
-        <button id="search-clear" type="button" aria-label="Clear search" @click="doClearSearch">&times;</button>
-        <button
-          id="search-titles-toggle"
-          type="button"
-          :class="{ active: store.searchTitlesOnly }"
-          data-tooltip="Search titles only"
-          aria-label="Search titles only"
-          @click="toggleTitlesOnly"
-        >Tt</button>
-      </div>
+      <SbSearchField
+        :query="store.searchQuery"
+        :placeholder="searchPlaceholder"
+        :titles-only="store.searchTitlesOnly"
+        @update="onSearchInput"
+        @clear="doClearSearch"
+        @toggle-titles="toggleTitlesOnly"
+      />
       <span id="loading-status" v-show="store.loadingStatus">{{ store.loadingStatus }}</span>
       <button
         v-show="store.activeTab === 'sessions'"
@@ -207,7 +188,10 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue';
 import { store } from '../store.js';
-import { switchTab } from '../bridge.js';
+import { switchTab } from '../features/navigation/bridge.js';
+import { useDebouncedSearch } from '../shared/composables/use-debounced-search.js';
+import SbSearchField from '../shared/ui/SbSearchField.vue';
+import NavigationTabs from '../features/navigation/components/NavigationTabs.vue';
 import SidebarApp from './SidebarApp.vue';
 import SessionHeaderApp from './SessionHeaderApp.vue';
 import PlansApp from './PlansApp.vue';
@@ -268,31 +252,25 @@ const searchPlaceholder = computed(() => {
   }
 });
 
-let searchDebounceTimer = null;
+// The debounced search trigger lives in a shared composable; this Container hands it
+// the two service calls and keeps store.searchQuery in step with the field.
+const search = useDebouncedSearch({
+  onSearch: (query) => window.__sb?.search?.(query, store.searchTitlesOnly),
+  onClear: () => { store.searchQuery = ''; window.__sb?.clearSearch?.(); },
+});
 
-function onSearchInput(e) {
-  store.searchQuery = e.target.value;
-  if (searchDebounceTimer) clearTimeout(searchDebounceTimer);
-  searchDebounceTimer = setTimeout(async () => {
-    searchDebounceTimer = null;
-    const query = store.searchQuery.trim();
-    if (!query) { doClearSearch(); return; }
-    window.__sb?.search?.(query, store.searchTitlesOnly);
-  }, 200);
+function onSearchInput(value) {
+  store.searchQuery = value;
+  search.onInput(value);
 }
 
-function doClearSearch() {
-  store.searchQuery = '';
-  if (searchDebounceTimer) { clearTimeout(searchDebounceTimer); searchDebounceTimer = null; }
-  window.__sb?.clearSearch?.();
-}
+function doClearSearch() { search.clear(); }
 
 async function toggleTitlesOnly() {
   store.searchTitlesOnly = !store.searchTitlesOnly;
   await window.api?.setSetting('searchTitlesOnly', store.searchTitlesOnly);
-  if (store.searchQuery.trim()) {
-    window.__sb?.search?.(store.searchQuery.trim(), store.searchTitlesOnly);
-  }
+  // The toggle changes how a live query matches — re-run it now rather than after a debounce.
+  if (store.searchQuery.trim()) search.flush(store.searchQuery);
 }
 
 // ── Tab switching ────────────────────────────────────────────────

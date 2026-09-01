@@ -10,7 +10,6 @@ import {
   createGridBridge,
   createProjectsBridge,
   createJsonlViewerBridge,
-  createAppBridge,
 } from '../src/vue/bridge.js';
 import { plansStore } from '../src/vue/stores/plans.js';
 import { memoryStore } from '../src/vue/stores/memory.js';
@@ -20,7 +19,6 @@ import { statusBarStore } from '../src/vue/stores/status-bar.js';
 import { gridStore } from '../src/vue/stores/grid.js';
 import { projectsStore } from '../src/vue/stores/projects.js';
 import { jsonlStore } from '../src/vue/stores/jsonl.js';
-import { store } from '../src/vue/store.js';
 
 // The panel bridges invert the old template-ref setters: every method writes a
 // feature store the panel reads reactively, instead of calling into a component
@@ -261,33 +259,6 @@ test('a jsonl-store write triggers effects that read the request', () => {
   assert.equal(seen, jsonlStore.openRequest.seq, 'effect reading the request saw the bridge write');
   jsonlStore.openRequest = null;
   stop.effect.stop();
-});
-
-// The app bridge inverts window.vueApp.setTab off App.vue's onMounted closure:
-// it writes the active tab into the aggregate store and clears the search, the
-// same store fields the sidebar and header components render from.
-test('app bridge setTab writes the active tab and clears the search', () => {
-  const bridge = createAppBridge(store);
-  store.activeTab = 'sessions';
-  store.searchQuery = 'foo';
-  store.searchMatchIds = new Set(['a']);
-  store.searchMatchProjectPaths = new Set(['/p']);
-  bridge.setTab('plans');
-  assert.equal(store.activeTab, 'plans');
-  assert.equal(store.searchQuery, '');
-  assert.equal(store.searchMatchIds, null);
-  assert.equal(store.searchMatchProjectPaths, null);
-  store.activeTab = 'sessions';
-});
-
-test('app bridge setTab is a no-op when the tab is already active', () => {
-  const bridge = createAppBridge(store);
-  store.activeTab = 'plans';
-  store.searchQuery = 'keep';
-  bridge.setTab('plans');
-  assert.equal(store.searchQuery, 'keep', 'same-tab setTab does not clear the search');
-  store.activeTab = 'sessions';
-  store.searchQuery = '';
 });
 
 test('projects updateProjectInfo merges info into the store', () => {

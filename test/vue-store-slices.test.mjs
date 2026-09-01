@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { effect } from 'vue';
-import { store, slices, sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore } from '../src/vue/store.js';
+import { store, slices, sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore, navigationStore } from '../src/vue/store.js';
 
 // The flat store the bridge used to write is cut into feature slices, but the
 // aggregate exposed as window.vueStore must keep every field name so the frozen
@@ -15,18 +15,21 @@ const OWNERSHIP = {
     'attentionSessions', 'responseReadySessions', 'lastActivityTime', 'pendingSessions',
   ],
   sidebarStore: [
-    'showStarredOnly', 'showRunningOnly', 'showTodayOnly', 'searchMatchIds',
-    'searchMatchProjectPaths', 'collapsedProjects', 'visibleSessionCount',
-    'sessionMaxAgeDays', 'searchQuery', 'searchTitlesOnly',
+    'collapsedProjects', 'visibleSessionCount', 'sessionMaxAgeDays',
   ],
   areasStore: ['areas', 'areaAssignments', 'renamingAreaId', 'renamingProjectPath'],
   layoutStore: [
-    'activeTab', 'sidebarCollapsed', 'loadingStatus', 'accountSwitching',
+    'loadingStatus', 'accountSwitching',
     'settingsOpen', 'settingsScope', 'settingsProjectPath', 'showStats',
     'showJsonl', 'planViewerOpen', 'memoryViewerOpen', 'gridViewActive', 'gridViewerCount',
   ],
   headerStore: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts'],
   avatarsStore: ['avatarDataUrls', 'areaAvatarDataUrls'],
+  navigationStore: [
+    'activeTab', 'sidebarCollapsed', 'searchQuery', 'searchTitlesOnly',
+    'searchMatchIds', 'searchMatchProjectPaths',
+    'showStarredOnly', 'showRunningOnly', 'showTodayOnly',
+  ],
 };
 
 const ALL_FIELDS = Object.values(OWNERSHIP).flat();
@@ -51,14 +54,14 @@ test('each field is owned by exactly its slice', () => {
 });
 
 test('reading through the facade returns the slice value', () => {
-  layoutStore.activeTab = 'plans';
+  navigationStore.activeTab = 'plans';
   assert.equal(store.activeTab, 'plans');
-  layoutStore.activeTab = 'sessions';
+  navigationStore.activeTab = 'sessions';
 });
 
 test('writing through the facade writes to the owning slice', () => {
   store.activeTab = 'stats';
-  assert.equal(layoutStore.activeTab, 'stats');
+  assert.equal(navigationStore.activeTab, 'stats');
   store.activeTab = 'sessions';
 
   store.projects = [{ projectPath: '/x' }];
@@ -115,4 +118,5 @@ test('the named slice exports are the same objects the facade delegates to', () 
   assert.equal(slices.layoutStore, layoutStore);
   assert.equal(slices.headerStore, headerStore);
   assert.equal(slices.avatarsStore, avatarsStore);
+  assert.equal(slices.navigationStore, navigationStore);
 });

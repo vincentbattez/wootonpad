@@ -5,8 +5,10 @@ import { markRaw } from 'vue';
 // are the contract. The project viewer, stats and the plan/memory viewers still keep
 // their template-ref setters in App.vue.
 
-// window.vueSidebar: the Session/Project tree, the live PTY sets, the filters,
-// the search matches and the terminal-header context.
+// window.vueSidebar: the Session/Project tree, the live PTY sets and the
+// terminal-header context. The filters and search matches it also carries are
+// written by the navigation Feature Bridge (merged onto this object in main.js),
+// since public/app.js addresses them as window.vueSidebar.setFilters/setSearch.
 export function createSidebarBridge(store) {
   return {
     store,
@@ -25,15 +27,6 @@ export function createSidebarBridge(store) {
     clearNotifications(sessionId) {
       store.attentionSessions.delete(sessionId);
       store.responseReadySessions.delete(sessionId);
-    },
-    setFilters({ showStarredOnly, showRunningOnly, showTodayOnly }) {
-      if (showStarredOnly !== undefined) store.showStarredOnly = showStarredOnly;
-      if (showRunningOnly !== undefined) store.showRunningOnly = showRunningOnly;
-      if (showTodayOnly !== undefined) store.showTodayOnly = showTodayOnly;
-    },
-    setSearch(matchIds, matchProjectPaths) {
-      store.searchMatchIds = matchIds;
-      store.searchMatchProjectPaths = matchProjectPaths;
     },
     setVisibility(count, ageDays) {
       store.visibleSessionCount = count;
@@ -201,24 +194,6 @@ export function createJsonlViewerBridge(store) {
   return {
     // markRaw: read once to render, so deep-proxying buys nothing.
     open(session) { store.openRequest = { session: markRaw(session), seq: ++seq }; },
-  };
-}
-
-// Switching tab clears the search. Exported so App.vue's tab buttons and
-// window.vueApp share one code path.
-export function switchTab(store, tabId) {
-  if (tabId === store.activeTab) return;
-  store.activeTab = tabId;
-  store.searchQuery = '';
-  store.searchMatchIds = null;
-  store.searchMatchProjectPaths = null;
-  if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
-}
-
-// window.vueApp: the sidebar tab switch.
-export function createAppBridge(store) {
-  return {
-    setTab(tabId) { switchTab(store, tabId); },
   };
 }
 

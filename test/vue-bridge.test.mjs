@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createSidebarBridge } from '../src/vue/bridge.js';
-import { store, sessionsStore, sidebarStore, headerStore } from '../src/vue/store.js';
+import { store, sessionsStore, headerStore } from '../src/vue/store.js';
 
 // The single bridge module writes into the store slices, not into a component
 // through a template ref. These assert the store-writing surface app.js calls.
@@ -52,24 +52,6 @@ test('clearNotifications clears attention and response-ready', () => {
   bridge.clearNotifications('s4');
   assert.equal(sessionsStore.attentionSessions.has('s4'), false);
   assert.equal(sessionsStore.responseReadySessions.has('s4'), false);
-});
-
-test('setFilters only writes the keys it is given', () => {
-  const bridge = createSidebarBridge(store);
-  sidebarStore.showStarredOnly = true;
-  bridge.setFilters({ showRunningOnly: true });
-  assert.equal(sidebarStore.showRunningOnly, true);
-  assert.equal(sidebarStore.showStarredOnly, true, 'an omitted filter is left untouched');
-  sidebarStore.showStarredOnly = false;
-  sidebarStore.showRunningOnly = false;
-});
-
-test('setSearch writes both match sets', () => {
-  const bridge = createSidebarBridge(store);
-  bridge.setSearch(['a'], ['/p']);
-  assert.deepEqual(sidebarStore.searchMatchIds, ['a']);
-  assert.deepEqual(sidebarStore.searchMatchProjectPaths, ['/p']);
-  bridge.setSearch(null, null);
 });
 
 test('the header setters coerce falsy to null and clearHeader resets them', () => {

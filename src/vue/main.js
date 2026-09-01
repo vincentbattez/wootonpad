@@ -10,8 +10,8 @@ import {
   createGridBridge,
   createProjectsBridge,
   createJsonlViewerBridge,
-  createAppBridge,
 } from './bridge.js';
+import { createNavigationBridge } from './features/navigation/bridge.js';
 import { plansStore } from './stores/plans.js';
 import { memoryStore } from './stores/memory.js';
 import { accountsStore } from './stores/accounts.js';
@@ -29,6 +29,14 @@ window.vueStore = store;
 
 window.vueSidebar = createSidebarBridge(store);
 
+// The navigation Feature owns the search, filters and tab surface. app.js reaches
+// its search/filter writers as window.vueSidebar.setSearch/.setFilters, so they
+// are merged onto the sidebar bridge object; the tab switch is window.vueApp.
+const navigationBridge = createNavigationBridge(store);
+window.vueSidebar.setSearch = navigationBridge.setSearch;
+window.vueSidebar.setFilters = navigationBridge.setFilters;
+window.vueApp = { setTab: navigationBridge.setTab };
+
 // Installed before mount so they exist ahead of any app.js call.
 window.vuePlans = createPlansBridge(plansStore);
 window.vueMemory = createMemoryBridge(memoryStore);
@@ -38,7 +46,6 @@ window.vueStatusBar = createStatusBarBridge(statusBarStore);
 window.vueGrid = createGridBridge(gridStore);
 window.vueProjects = createProjectsBridge(projectsStore);
 window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
-window.vueApp = createAppBridge(store);
 
 // Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
 window.createViewerPanel = function(container, opts = {}) {
