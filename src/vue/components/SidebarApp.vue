@@ -28,6 +28,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue';
+import { api } from '../shared/services/api.js';
 import { store } from '../store.js';
 import { buildSidebarTree, subtreeAreaIds } from '../area-tree.mjs';
 import { filterSessions } from '../session-list.mjs';
@@ -176,7 +177,7 @@ async function onRootDrop() {
 }
 
 onMounted(async () => {
-  const data = await window.api.getAreas?.().catch(() => null);
+  const data = await api.getAreas?.().catch(() => null);
   if (!data) return;
   // An Area created while this load was in flight must survive the response.
   const fetched = data.areas || [];

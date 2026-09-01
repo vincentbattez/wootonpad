@@ -32,6 +32,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
+import { api } from '../shared/services/api.js';
 import SbDialog from '../shared/ui/SbDialog.vue';
 import { store } from '../store.js';
 import { avatarFromName } from '../avatar.mjs';
@@ -54,8 +55,8 @@ watch(area, async (a) => {
   name.value = a.name || '';
   imageHover.value = false;
   // Fetch the stored image once so the preview reflects it even if no AreaAvatar loaded it yet.
-  if (!store.areaAvatarDataUrls[a.id] && window.api?.getAreaAvatar) {
-    const url = await window.api.getAreaAvatar(a.id).catch(() => null);
+  if (!store.areaAvatarDataUrls[a.id] && api.getAreaAvatar) {
+    const url = await api.getAreaAvatar(a.id).catch(() => null);
     if (url && dialogStore.area?.id === a.id) store.areaAvatarDataUrls[a.id] = url;
   }
   await nextTick();

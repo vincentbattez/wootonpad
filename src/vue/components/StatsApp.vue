@@ -111,6 +111,9 @@
 
 <script setup>
 import { ref, computed } from 'vue';
+import { statsIcons } from '../shared/lib/icons.js';
+import { api } from '../shared/services/api.js';
+const { REFRESH_SVG } = statsIcons;
 
 // ── Cache ────────────────────────────────────────────────────────
 let cachedStats = null;
@@ -125,7 +128,6 @@ const usageRefreshing = ref(false);
 const refreshing = ref(false);
 
 // ── SVG constant ─────────────────────────────────────────────────
-const REFRESH_SVG = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>';
 
 // ── Derived helpers ───────────────────────────────────────────────
 const hasUsage = computed(() => usage.value && Object.keys(usage.value).length > 0);
@@ -376,8 +378,8 @@ async function load() {
     return;
   }
   const [freshStats, freshUsage] = await Promise.all([
-    window.api.getStats().catch(() => null),
-    window.api.getCachedUsage().catch(() => ({})),
+    api.getStats().catch(() => null),
+    api.getCachedUsage().catch(() => ({})),
   ]);
   cachedStats = freshStats;
   cachedUsage = freshUsage || {};
@@ -391,7 +393,7 @@ async function refreshAll() {
   if (refreshing.value) return;
   refreshing.value = true;
   try {
-    const result = await window.api.refreshStats();
+    const result = await api.refreshStats();
     if (result?.stats) { cachedStats = result.stats; stats.value = cachedStats; }
     if (result?.usage) { cachedUsage = result.usage; usage.value = cachedUsage; }
     statsLoadedAt = Date.now();
@@ -402,7 +404,7 @@ async function refreshAll() {
 async function refreshUsage() {
   usageRefreshing.value = true;
   try {
-    const freshUsage = await window.api.getUsage();
+    const freshUsage = await api.getUsage();
     if (freshUsage && Object.keys(freshUsage).length) {
       cachedUsage = freshUsage;
       statsLoadedAt = 0;

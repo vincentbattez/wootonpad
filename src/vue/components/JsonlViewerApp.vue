@@ -8,6 +8,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
+import { api } from '../shared/services/api.js';
 import { jsonlStore } from '../stores/jsonl.js';
 
 const title = ref('Message History');
@@ -508,7 +509,7 @@ function renderJsonlEntry(entry, toolResultMap) {
 
 // ── Public API ────────────────────────────────────────────────────
 async function open(session) {
-  const result = await window.api.readSessionJsonl(session.sessionId);
+  const result = await api.readSessionJsonl(session.sessionId);
 
   const displayName = session.name || session.aiTitle || session.summary || session.sessionId;
   title.value = displayName;
