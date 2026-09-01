@@ -3,6 +3,7 @@
 // to the main process, and mirrors the result into the store so the sidebar updates at once.
 
 import { store } from './store.js';
+import { api } from './shared/services/api.js';
 import { buildSidebarTree, resolveDrop } from './area-tree.mjs';
 
 // The row being dragged: { type: 'area' | 'project', id }. id is an Area id or a Project path.
@@ -52,7 +53,7 @@ export async function dropOnTarget(targetId) {
 async function fileProject(projectPath, areaId) {
   const current = store.areaAssignments.find(a => a.projectPath === projectPath)?.areaId ?? null;
   if (current === areaId) return false;
-  const result = await window.api.fileProject?.(projectPath, areaId).catch(() => null);
+  const result = await api.fileProject?.(projectPath, areaId).catch(() => null);
   if (!result?.ok) return false;
   const rest = store.areaAssignments.filter(a => a.projectPath !== projectPath);
   store.areaAssignments = areaId == null ? rest : [...rest, { projectPath, areaId }];
@@ -63,7 +64,7 @@ async function moveArea(id, parentId) {
   const area = store.areas.find(a => a.id === id);
   if (!area) return false;
   if ((area.parentId ?? null) === (parentId ?? null)) return false;
-  const result = await window.api.moveArea?.(id, parentId).catch(() => null);
+  const result = await api.moveArea?.(id, parentId).catch(() => null);
   // The main process re-checks the cycle guard; a rejected move leaves the store untouched.
   if (!result?.ok) return false;
   store.areas = store.areas.map(a =>

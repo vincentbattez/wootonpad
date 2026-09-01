@@ -1,4 +1,6 @@
 import { markRaw } from 'vue';
+import { api } from './shared/services/api.js';
+import { sb } from './shared/services/sb.js';
 
 // The renderer-to-Vue surface `public/app.js` calls. Every method writes a feature
 // store rather than a component ref; app.js is frozen, so these names and signatures
@@ -126,8 +128,6 @@ export function createProjectsBridge(store) {
   let pendingInfoUpdates = {};
   let flushScheduled = false;
 
-  const api = typeof window !== 'undefined' ? window.api : undefined;
-
   function flush() {
     flushScheduled = false;
     for (const [path, info] of Object.entries(pendingInfoUpdates)) {
@@ -212,7 +212,7 @@ export function switchTab(store, tabId) {
   store.searchQuery = '';
   store.searchMatchIds = null;
   store.searchMatchProjectPaths = null;
-  if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
+  if (typeof window !== 'undefined') sb.onTabChange?.(tabId);
 }
 
 // window.vueApp: the sidebar tab switch.

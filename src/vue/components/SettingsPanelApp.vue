@@ -391,6 +391,7 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted } from 'vue';
+import { api } from '../shared/services/api.js';
 import { store } from '../store.js';
 import SbSwitch from './SbSwitch.vue';
 import SbButton from './SbButton.vue';
@@ -485,8 +486,8 @@ function isUsingGlobal(current, field) {
 // ── Load settings ─────────────────────────────────────────────────
 async function loadSettings() {
   loading.value = true;
-  const current = (await window.api.getSetting(settingsKey.value)) || {};
-  const global = isProject.value ? ((await window.api.getSetting('global')) || {}) : {};
+  const current = (await api.getSetting(settingsKey.value)) || {};
+  const global = isProject.value ? ((await api.getSetting('global')) || {}) : {};
 
   const overrideFields = ['permissionMode', 'worktree', 'worktreeName', 'chrome', 'preLaunchCmd', 'externalIdeCommand', 'runCommand', 'addDirs'];
   for (const field of overrideFields) {
@@ -511,8 +512,8 @@ async function loadSettings() {
     form.gitlabToken = current.gitlabToken || '';
     originalMcpEmulation = form.mcpEmulation;
 
-    try { shellProfiles.value = await window.api.getShellProfiles(); } catch { shellProfiles.value = []; }
-    window.api.getAppVersion().then(v => { appVersion.value = v; });
+    try { shellProfiles.value = await api.getShellProfiles(); } catch { shellProfiles.value = []; }
+    api.getAppVersion().then(v => { appVersion.value = v; });
   }
 
   loading.value = false;
@@ -540,7 +541,7 @@ async function save() {
       }
     }
   } else {
-    const existing = (await window.api.getSetting('global')) || {};
+    const existing = (await api.getSetting('global')) || {};
     settings = {
       ...existing,
       permissionMode: form.permissionMode || null,
@@ -566,12 +567,12 @@ async function save() {
     };
   }
 
-  await window.api.setSetting(settingsKey.value, settings);
+  await api.setSetting(settingsKey.value, settings);
 
   if (!isProject.value) {
     window._setVisibleSessionCount?.(settings.visibleSessionCount);
     window._setSessionMaxAge?.(settings.sessionMaxAgeDays);
-    window.api.applyAppearance?.(); // main broadcasts back, the renderer applies it
+    api.applyAppearance?.(); // main broadcasts back, the renderer applies it
     window._setShowAvatars?.(settings.showAvatars);
     if (window.TERMINAL_FONTS?.[settings.monoFont]) {
       window._applyTerminalFont?.(window.TERMINAL_FONTS[settings.monoFont].family);
@@ -599,20 +600,20 @@ function close() {
 async function removeProject() {
   const shortName = projectPath.value?.split('/').filter(Boolean).slice(-2).join('/') || projectPath.value;
   if (!confirm(`Hide project "${shortName}" from WootonPad?\n\nThis hides the project from the sidebar. Your session files are not deleted.`)) return;
-  await window.api.removeProject(projectPath.value);
+  await api.removeProject(projectPath.value);
   store.settingsOpen = false;
   if (typeof loadProjects === 'function') loadProjects();
 }
 
 // ── Updates ───────────────────────────────────────────────────────
-function checkUpdates() { window.api.updaterCheck(); }
-function openReleasesPage() { window.api.openExternal('https://github.com/fortael/wootonpad/releases/latest'); }
+function checkUpdates() { api.updaterCheck(); }
+function openReleasesPage() { api.openExternal('https://github.com/fortael/wootonpad/releases/latest'); }
 
 // ── Lifecycle ─────────────────────────────────────────────────────
 onMounted(async () => {
   await loadSettings();
   if (!isProject.value) {
-    window.api.onUpdaterEvent((type, data) => {
+    api.onUpdaterEvent((type, data) => {
       switch (type) {
         case 'checking': updateStatus.value = 'checking…'; newVersion.value = ''; break;
         case 'update-available': updateStatus.value = `v${data.version} available`; newVersion.value = data.version; break;

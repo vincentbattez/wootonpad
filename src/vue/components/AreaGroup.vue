@@ -65,12 +65,15 @@
 
 <script setup>
 import { computed, nextTick, onUnmounted, ref, watch } from 'vue';
+import { areaGroupIcons } from '../shared/lib/icons.js';
+import { api } from '../shared/services/api.js';
 import { store } from '../store.js';
 import { removeArea } from '../area-tree.mjs';
 import { startDrag, endDrag, dropOnTarget, isDragging } from '../area-drag.js';
 import { setAreaImageFromFile } from '../area-image.js';
 import AreaAvatar from './AreaAvatar.vue';
 import ProjectGroup from './ProjectGroup.vue';
+const { chevronSvg, pencilSvg, trashSvg } = areaGroupIcons;
 
 defineOptions({ inheritAttrs: false });
 
@@ -89,12 +92,12 @@ function toggle() {
   const collapsed = props.node.collapsed ? 0 : 1;
   area.collapsed = collapsed;
   // Persist so a collapsed Area stays collapsed across restarts.
-  window.api.setAreaCollapsed(props.node.id, collapsed).catch(() => {});
+  api.setAreaCollapsed(props.node.id, collapsed).catch(() => {});
 }
 
 // Drag to re-parent this Area; drop another row here to file it into this Area (VIN-78).
 // An image file dropped from the OS onto the header sets the Area's image instead (VIN-82),
-// reusing the terminal's file-drop pattern (window.api.getPathForFile).
+// reusing the terminal's file-drop pattern (api.getPathForFile).
 const dropHover = ref(false);
 function onDragStart(ev) { startDrag('area', props.node.id, ev); }
 function onDragEnd() { endDrag(); dropHover.value = false; }
@@ -171,12 +174,9 @@ onUnmounted(closeMenu);
 function renameFromMenu() { closeMenu(); store.renamingAreaId = props.node.id; }
 function deleteFromMenu() { closeMenu(); applyDelete(); }
 
-const chevronSvg = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>';
-const pencilSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
-const trashSvg = '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
 
 async function applyRename(name) {
-  const result = await window.api.renameArea(props.node.id, name).catch(() => null);
+  const result = await api.renameArea(props.node.id, name).catch(() => null);
   if (result?.ok) {
     const area = store.areas.find(a => a.id === props.node.id);
     if (area) area.name = result.name;
@@ -184,7 +184,7 @@ async function applyRename(name) {
 }
 
 async function applyDelete() {
-  const result = await window.api.deleteArea(props.node.id).catch(() => null);
+  const result = await api.deleteArea(props.node.id).catch(() => null);
   if (!result?.ok) return;
   // Mirror the main-process one-level promotion locally so the sidebar reflects it at once.
   const next = removeArea(store.areas, store.areaAssignments, props.node.id);
