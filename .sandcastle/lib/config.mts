@@ -106,6 +106,9 @@ function load(): Config {
 
 export const config = load();
 
+/** Injected by sandcastle itself — passing them in `promptArgs` is an error. */
+const BUILT_IN_PROMPT_ARGS = ["SOURCE_BRANCH", "TARGET_BRANCH"];
+
 /**
  * Fail loudly on an unsubstituted `{{TOKEN}}`. Sandcastle leaves unknown
  * placeholders in the prompt verbatim, so a missed wiring reaches the agent as
@@ -115,12 +118,21 @@ export function checkedPromptArgs(
   promptFile: string,
   args: Record<string, string>,
 ): Record<string, string> {
+  const reserved = BUILT_IN_PROMPT_ARGS.filter((token) => token in args);
+  if (reserved.length > 0) {
+    throw new Error(
+      `${promptFile}: ${reserved.join(", ")} ${reserved.length > 1 ? "are" : "is"} injected by sandcastle and cannot be passed as a prompt argument.`,
+    );
+  }
+
   const body = readFileSync(promptFile, "utf8");
   const tokens = new Set(
     [...body.matchAll(/\{\{([A-Z0-9_]+)\}\}/g)].map((m) => m[1]!),
   );
 
-  const missing = [...tokens].filter((token) => !(token in args));
+  const missing = [...tokens].filter(
+    (token) => !(token in args) && !BUILT_IN_PROMPT_ARGS.includes(token),
+  );
   if (missing.length > 0) {
     throw new Error(
       `${promptFile}: no value for ${missing.map((t) => `{{${t}}}`).join(", ")}`,

@@ -173,7 +173,7 @@ async function runLeaf(leaf: Issue, branch: string): Promise<boolean> {
         promptArgs: checkedPromptArgs(PROMPTS.review, {
           ...projectPromptArgs,
           BRANCH: branch,
-          TARGET_BRANCH: BASE_BRANCH,
+          BASE_BRANCH,
         }),
       });
     }
