@@ -283,7 +283,15 @@ watch(() => menu.open.value, (open) => {
   }
 });
 
-onUnmounted(() => menu.close());
+// On unmount Vue stops the watch above before this hook runs, so setting the menu shut here would
+// no longer trigger its cleanup branch. Detach the two listeners the watch owns directly — a no-op
+// when the menu was already closed — so a row unmounted with its menu open (a filter can do that)
+// leaves nothing bound to window/document.
+onUnmounted(() => {
+  menu.close();
+  window.removeEventListener('scroll', menu.close, true);
+  document.removeEventListener('keydown', onKeydown);
+});
 
 function runFromMenu() { menu.close(); emit('run-project', props.project.projectPath); }
 function ideFromMenu() { menu.close(); emit('open-external-ide', props.project.projectPath); }
