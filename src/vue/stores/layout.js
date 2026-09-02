@@ -7,11 +7,6 @@ export const layoutStore = reactive({
   loadingStatus: '',
   accountSwitching: false,
 
-  // Settings panel
-  settingsOpen: false,
-  settingsScope: 'global',       // 'global' | 'project'
-  settingsProjectPath: null,
-
   // Main area panel visibility
   showStats: false,
   showJsonl: false,
