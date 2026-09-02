@@ -2,46 +2,84 @@
 //
 // The orchestrator keeps no state between runs, so re-running a feature used to
 // redo work an agent had already finished. Each completed phase is recorded as
-// a git ref pointing at the branch tip it was completed on: the tip moves, the
-// ref goes stale, the phase runs again. A ref matching the tip means there is
-// nothing left to do — no sandbox, no agent, no tokens.
+// a pair of git refs: the branch tip it was completed on, and the tip of the
+// base it was completed against. Either one moving invalidates the marker.
+//
+// The base half is what makes the markers survive wave chaining: the same
+// branch reviewed on top of `main` has not been reviewed on top of
+// `main + wave 1`. Recording only the branch tip would let a re-based leaf skip
+// a review it never had.
 //
 // Refs live under `refs/sandcastle/`, outside `refs/heads` and `refs/tags`, so
 // they never show up in `git branch` and are never pushed.
 
 import { execFile } from "node:child_process";
+import { dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 
 const exec = promisify(execFile);
 
 export type Phase = "implemented" | "reviewed";
 
-const refName = (phase: Phase, id: string) => `refs/sandcastle/${phase}/${id}`;
+const refName = (phase: Phase, id: string, kind: "tip" | "base") =>
+  kind === "tip"
+    ? `refs/sandcastle/${phase}/${id}`
+    : `refs/sandcastle/${phase}-base/${id}`;
 
-async function resolve(rev: string): Promise<string | null> {
-  try {
-    const { stdout } = await exec("git", ["rev-parse", "--verify", rev]);
+export function createProgress(cwd: string) {
+  const git = async (...args: string[]): Promise<string> => {
+    const { stdout } = await exec("git", args, { cwd });
     return stdout.trim();
-  } catch {
-    return null;
-  }
+  };
+
+  const resolve = async (ref: string): Promise<string | null> => {
+    try {
+      return await git("rev-parse", "--verify", ref);
+    } catch {
+      return null;
+    }
+  };
+
+  const phaseDone = async (
+    phase: Phase,
+    id: string,
+    tip: string,
+    baseTip: string | null,
+  ): Promise<boolean> => {
+    const [markedTip, markedBase] = await Promise.all([
+      resolve(refName(phase, id, "tip")),
+      resolve(refName(phase, id, "base")),
+    ]);
+
+    return markedTip === tip && markedBase === baseTip;
+  };
+
+  const markPhase = async (
+    phase: Phase,
+    id: string,
+    tip: string,
+    baseTip: string | null,
+  ): Promise<void> => {
+    await git("update-ref", refName(phase, id, "tip"), tip);
+    if (baseTip) {
+      await git("update-ref", refName(phase, id, "base"), baseTip);
+    } else {
+      await git("update-ref", "-d", refName(phase, id, "base")).catch(() => {});
+    }
+  };
+
+  /** Drops both halves of a marker, sending the phase back to "never done". */
+  const clearPhase = async (phase: Phase, id: string): Promise<void> => {
+    for (const kind of ["tip", "base"] as const) {
+      await git("update-ref", "-d", refName(phase, id, kind)).catch(() => {});
+    }
+  };
+
+  return { phaseDone, markPhase, clearPhase };
 }
 
-/** The branch's current commit, or null when the branch doesn't exist yet. */
-export const tipOf = (branch: string) => resolve(branch);
+const SANDCASTLE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
-export async function phaseDone(
-  phase: Phase,
-  id: string,
-  tip: string,
-): Promise<boolean> {
-  return (await resolve(refName(phase, id))) === tip;
-}
-
-export async function markPhase(
-  phase: Phase,
-  id: string,
-  tip: string,
-): Promise<void> {
-  await exec("git", ["update-ref", refName(phase, id), tip]);
-}
+export const { phaseDone, markPhase, clearPhase } =
+  createProgress(dirname(SANDCASTLE_DIR));

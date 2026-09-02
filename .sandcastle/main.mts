@@ -10,9 +10,11 @@
 //
 // Per root, independently of the others:
 //   1. Plan     — an opus agent groups the remaining leaves into dependency waves.
-//   2. Execute  — one sandbox per leaf, branched from the base branch.
+//   2. Execute  — one sandbox per leaf. Waves run in order, leaves inside a
+//                 wave run concurrently. Wave N is cut from the base branch
+//                 plus everything landed in waves 1..N-1, so a leaf can build
+//                 on the code its wave order says it depends on.
 //                 Implementer, then reviewer if the implementer committed.
-//                 Waves run in order, leaves inside a wave run concurrently.
 //   3. Retry    — up to `agent.retryRounds` rounds, re-planning what is left.
 //   4. Ship     — only when every eligible leaf landed: an agent assembles the
 //                 integration branch, then the host pushes it and opens a PR.
@@ -23,14 +25,32 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
 import { config, checkedPromptArgs } from "./lib/config.mts";
-import { markPhase, phaseDone, tipOf } from "./lib/progress.mts";
+import { clearPhase, markPhase, phaseDone } from "./lib/progress.mts";
 import {
   branchHasCommits,
+  buildWaveBase,
+  fetchRemote,
+  isAncestor,
+  listRefs,
+  rebaseLeafOnto,
+  tipOf,
+} from "./lib/git.mts";
+import { alreadyLanded, pickResumeBase } from "./lib/resume.mts";
+import {
   createPullRequest,
   nextIntegrationBranch,
   pushBranch,
   supersedePreviousPrs,
 } from "./lib/github.mts";
+import {
+  COMPLETION_SIGNALS,
+  classifyOutcome,
+  classifyReview,
+  isSettled,
+  normalizeWaves,
+  runWaves,
+  type Outcome,
+} from "./lib/pipeline.mts";
 import {
   discoverRootIds,
   fetchIssueTree,
@@ -136,100 +156,164 @@ async function resolveRoot(id: string): Promise<Root> {
 // ---------------------------------------------------------------------------
 
 /**
- * An agent that ran out of iterations returns normally — only `completionSignal`
- * distinguishes "finished" from "gave up". Without this check the all-or-nothing
- * gate would pass on unfinished work.
- */
-const signalledDone = (result: { completionSignal?: string }) =>
-  result.completionSignal !== undefined;
-
-/**
  * Each phase runs only if its marker is stale, so a re-run picks up where the
  * last one stopped: implement what was never implemented, review what the
  * implementer changed since the last review, skip a leaf that is settled.
+ *
+ * `baseBranch` is the wave's cumulative base, not the project's base branch —
+ * every judgement below (is there work? is the marker still valid?) is relative
+ * to it.
  */
-async function runLeaf(leaf: Issue, branch: string): Promise<boolean> {
+/**
+ * The reviewer gets a single pass and has to sign off on the branch it is
+ * handed, so it must start from a green suite: a failure it did not cause
+ * either eats that pass or gets signed off with the branch. Running the
+ * project's own feedback loops here keeps that from ever reaching it.
+ */
+async function verifyBranch(
+  sandbox: sandcastle.Sandbox,
+  leafId: string,
+): Promise<boolean> {
+  for (const command of config.project.verifyCommands) {
+    console.log(`[${leafId}] verifying: ${command}`);
+
+    const result = await sandbox.exec(command, {
+      onLine: (line) => console.log(`[${leafId}]   ${line}`),
+    });
+
+    if (result.exitCode !== 0) {
+      console.error(
+        `[${leafId}] ✗ ${command} failed (exit ${result.exitCode})\n${result.stderr}`,
+      );
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function runLeaf(
+  leaf: Issue,
+  branch: string,
+  baseBranch: string,
+): Promise<Outcome> {
+  // Work an earlier attempt already folded into the base needs no agent. A
+  // branch that exists but never produced anything is not that — it is the
+  // work this run is here to finish.
+  const landedEarlier = await alreadyLanded(branch, {
+    hasOwnWork: () => branchHasCommits(branch, BASE_BRANCH),
+    isContainedInResumeBase: () => isAncestor(branch, baseBranch),
+  });
+
+  if (landedEarlier) {
+    console.log(`[${leaf.id}] already in ${baseBranch} — skipping`);
+    return "empty";
+  }
+
+  await rebaseLeafOnto(branch, baseBranch);
+
+  const baseTip = await tipOf(baseBranch);
   const existing = await tipOf(branch);
   const needsImplement =
-    existing === null || !(await phaseDone("implemented", leaf.id, existing));
+    existing === null ||
+    !(await phaseDone("implemented", leaf.id, existing, baseTip));
   const needsReview =
     needsImplement ||
-    (existing !== null && !(await phaseDone("reviewed", leaf.id, existing)));
+    (existing !== null &&
+      !(await phaseDone("reviewed", leaf.id, existing, baseTip)));
 
   if (!needsImplement && !needsReview) {
     console.log(`[${leaf.id}] implemented and reviewed already — skipping`);
-    return true;
+    return (await branchHasCommits(branch, baseBranch)) ? "landed" : "empty";
   }
 
   await trySetState(leaf.id, config.linear.inProgressState);
 
   const sandbox = await sandcastle.createSandbox({
     branch,
-    baseBranch: BASE_BRANCH,
+    baseBranch,
     sandbox: docker(),
     hooks,
     copyToWorktree,
   });
 
   try {
-    let done = !needsImplement;
+    let signal: string | undefined = needsImplement
+      ? undefined
+      : COMPLETION_SIGNALS[0];
 
     if (needsImplement) {
       const implement = await sandbox.run({
         name: "implementer",
         maxIterations: config.agent.implementIterations,
         agent: sandcastle.claudeCode(MODEL),
+        completionSignal: COMPLETION_SIGNALS,
         promptFile: PROMPTS.implement,
         promptArgs: checkedPromptArgs(PROMPTS.implement, {
           ...projectPromptArgs,
           TASK_ID: leaf.id,
           ISSUE_TITLE: leaf.title,
           BRANCH: branch,
+          BASE_BRANCH: baseBranch,
         }),
       });
 
-      done = signalledDone(implement);
+      signal = implement.completionSignal;
       const tip = await tipOf(branch);
-      if (done && tip) await markPhase("implemented", leaf.id, tip);
+      if (signal && tip) await markPhase("implemented", leaf.id, tip, baseTip);
     } else {
       console.log(`[${leaf.id}] already implemented — reviewing only`);
     }
 
-    // An agent that signalled done without committing decided there was nothing
-    // to do; there is no diff to review and nothing to ship.
-    const hasWork = await branchHasCommits(branch);
+    let outcome = classifyOutcome(
+      signal,
+      await branchHasCommits(branch, baseBranch),
+    );
 
-    if (done && hasWork) {
-      await sandbox.run({
+    // A branch whose feedback loops fail is not review material — it goes back
+    // for another implement round, which means dropping the markers a resume
+    // would otherwise read as "implemented, review only".
+    if (outcome === "landed" && !(await verifyBranch(sandbox, leaf.id))) {
+      await clearPhase("implemented", leaf.id);
+      await clearPhase("reviewed", leaf.id);
+      outcome = "blocked";
+    }
+
+    if (outcome === "landed") {
+      const review = await sandbox.run({
         name: "reviewer",
         maxIterations: 1,
         agent: sandcastle.claudeCode(MODEL),
+        completionSignal: COMPLETION_SIGNALS,
         promptFile: PROMPTS.review,
         promptArgs: checkedPromptArgs(PROMPTS.review, {
           ...projectPromptArgs,
           BRANCH: branch,
-          BASE_BRANCH,
+          BASE_BRANCH: baseBranch,
         }),
       });
 
+      outcome = classifyReview(review.completionSignal);
+
       // The reviewer commits too, which moves the tip. Both markers advance
       // together, or the next run would see a stale `implemented` and put an
-      // agent back on work the reviewer just signed off.
+      // agent back on work the reviewer just signed off. Only a reviewer that
+      // signed off gets to advance them.
       const tip = await tipOf(branch);
-      if (tip) {
-        await markPhase("implemented", leaf.id, tip);
-        await markPhase("reviewed", leaf.id, tip);
+      if (outcome === "landed" && tip) {
+        await markPhase("implemented", leaf.id, tip, baseTip);
+        await markPhase("reviewed", leaf.id, tip, baseTip);
       }
     }
 
     await trySetState(
       leaf.id,
-      done && hasWork
+      outcome === "landed"
         ? config.linear.reviewState
         : config.linear.unstartedState,
     );
 
-    return done;
+    return outcome;
   } catch (cause) {
     await trySetState(leaf.id, config.linear.unstartedState);
     throw cause;
@@ -242,6 +326,7 @@ async function planWaves(
   root: Root,
   remaining: Issue[],
   landed: string[],
+  resumeBase: string,
 ): Promise<Issue[][]> {
   const plan = await sandcastle.run({
     hooks,
@@ -252,7 +337,7 @@ async function planWaves(
     promptFile: PROMPTS.plan,
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
     promptArgs: checkedPromptArgs(PROMPTS.plan, {
-      BASE_BRANCH,
+      BASE_BRANCH: resumeBase,
       ROOT_ID: root.issue.id,
       ROOT_TITLE: root.issue.title,
       REMAINING_ISSUES: JSON.stringify(
@@ -271,27 +356,8 @@ async function planWaves(
     }),
   });
 
-  const byId = new Map(remaining.map((leaf) => [leaf.id, leaf]));
   const planned: z.infer<typeof planSchema> = plan.output;
-
-  // The planner occasionally drops or invents an entry; trust our own leaf list.
-  const seen = new Set<string>();
-  const waves = planned.waves
-    .map((wave) =>
-      wave
-        .map((entry) => byId.get(entry.id))
-        .filter((leaf): leaf is Issue => {
-          if (!leaf || seen.has(leaf.id)) return false;
-          seen.add(leaf.id);
-          return true;
-        }),
-    )
-    .filter((wave) => wave.length > 0);
-
-  const forgotten = remaining.filter((leaf) => !seen.has(leaf.id));
-  if (forgotten.length > 0) waves.push(forgotten);
-
-  return waves;
+  return normalizeWaves(planned.waves, remaining);
 }
 
 // ---------------------------------------------------------------------------
@@ -338,13 +404,21 @@ function pullRequestBody(root: Root, worked: Issue[]): string {
   return sections.join("\n\n");
 }
 
-async function ship(root: Root, branches: string[], worked: Issue[]) {
+async function ship(
+  root: Root,
+  branches: string[],
+  worked: Issue[],
+  resumeBase: string,
+) {
   const branch = await nextIntegrationBranch(root.issue.id);
-  console.log(`[${root.issue.id}] assembling ${branch}`);
+  console.log(`[${root.issue.id}] assembling ${branch} from ${resumeBase}`);
 
+  // Cut from the resume base so the attempt keeps what earlier ones landed,
+  // even when this run's leaves were all no-ops. The pull request still targets
+  // the project's base branch — that is what `baseBranch` means for a PR.
   const sandbox = await sandcastle.createSandbox({
     branch,
-    baseBranch: BASE_BRANCH,
+    baseBranch: resumeBase,
     sandbox: docker(),
     hooks,
     copyToWorktree,
@@ -361,12 +435,12 @@ async function ship(root: Root, branches: string[], worked: Issue[]) {
         ROOT_ID: root.issue.id,
         ROOT_TITLE: root.issue.title,
         INTEGRATION_BRANCH: branch,
-        BASE_BRANCH,
+        BASE_BRANCH: resumeBase,
         BRANCHES: branches.map((b) => `- ${b}`).join("\n"),
       }),
     });
 
-    if (!signalledDone(integration)) {
+    if (integration.completionSignal === undefined) {
       throw new Error(
         `integration of ${branch} did not complete — conflicts or failing tests left behind. Nothing pushed.`,
       );
@@ -399,6 +473,33 @@ async function ship(root: Root, branches: string[], worked: Issue[]) {
 // Per-root pipeline
 // ---------------------------------------------------------------------------
 
+/**
+ * Where this root picks up. An unmerged integration branch from a previous
+ * attempt holds everything that already landed; starting from the project's
+ * base branch instead would hide it from every agent — which is how the last
+ * three issues of an epic came back empty, each reporting that the code they
+ * depended on did not exist.
+ */
+async function resumeBaseOf(rootId: string): Promise<string> {
+  const { remote } = config.git;
+  await fetchRemote(remote);
+
+  const base = await pickResumeBase(rootId, {
+    baseBranch: BASE_BRANCH,
+    remote,
+    refs: await listRefs(remote),
+    isMergedIntoBase: (ref) => isAncestor(ref, BASE_BRANCH),
+  });
+
+  console.log(
+    base === BASE_BRANCH
+      ? `[${rootId}] starting from ${BASE_BRANCH}`
+      : `[${rootId}] resuming from ${base} — a previous attempt's work`,
+  );
+
+  return base;
+}
+
 async function runRoot(root: Root): Promise<string | null> {
   const { id } = root.issue;
 
@@ -415,70 +516,72 @@ async function runRoot(root: Root): Promise<string | null> {
 
   await trySetState(id, config.linear.inProgressState);
 
-  const landed = new Set<string>();
+  const resumeBase = await resumeBaseOf(id);
+
+  const deps = {
+    runLeaf,
+    branchOf: leafBranch,
+    baseFor: (branches: string[]) =>
+      buildWaveBase(`${config.git.waveBasePrefix}${id}`, resumeBase, branches),
+    log: (message: string) => console.log(message),
+    logError: (message: string) => console.error(message),
+  };
+
+  const settled = new Map<string, Outcome>();
+  let landedBranches: string[] = [];
 
   for (let iteration = 1; iteration <= config.agent.retryRounds; iteration++) {
-    const remaining = root.eligibleLeaves.filter((leaf) => !landed.has(leaf.id));
+    const remaining = root.eligibleLeaves.filter(
+      (leaf) => !isSettled(settled.get(leaf.id) ?? "exhausted"),
+    );
     if (remaining.length === 0) break;
 
     console.log(
       `\n[${id}] iteration ${iteration}/${config.agent.retryRounds} — ${remaining.length} issue(s) left`,
     );
 
-    const waves = await planWaves(root, remaining, [...landed]);
-    const landedBefore = landed.size;
+    const settledIds = [...settled]
+      .filter(([, outcome]) => isSettled(outcome))
+      .map(([leafId]) => leafId);
 
-    for (const [index, wave] of waves.entries()) {
-      console.log(
-        `[${id}] wave ${index + 1}/${waves.length}: ${wave.map((l) => l.id).join(", ")}`,
-      );
+    const waves = await planWaves(root, remaining, settledIds, resumeBase);
+    const before = settledIds.length;
 
-      const settled = await Promise.allSettled(
-        wave.map((leaf) => runLeaf(leaf, leafBranch(leaf.id))),
-      );
+    const result = await runWaves(deps, {
+      rootId: id,
+      waves,
+      landedBranches,
+    });
 
-      for (const [i, outcome] of settled.entries()) {
-        const leaf = wave[i]!;
-        if (outcome.status === "rejected") {
-          console.error(`[${id}]   ✗ ${leaf.id}: ${outcome.reason}`);
-        } else if (outcome.value) {
-          landed.add(leaf.id);
-        } else {
-          console.error(`[${id}]   ✗ ${leaf.id}: ran out of iterations`);
-        }
-      }
-    }
+    for (const [leafId, outcome] of result.outcomes) settled.set(leafId, outcome);
+    landedBranches = result.landedBranches;
 
-    if (landed.size === landedBefore) {
+    const settledNow = [...settled.values()].filter(isSettled).length;
+    if (settledNow === before) {
       console.log(`[${id}] no progress this iteration — giving up.`);
       break;
     }
   }
 
-  const missing = root.eligibleLeaves.filter((leaf) => !landed.has(leaf.id));
+  const missing = root.eligibleLeaves.filter(
+    (leaf) => !isSettled(settled.get(leaf.id) ?? "exhausted"),
+  );
 
   if (missing.length > 0) {
     console.error(
-      `[${id}] incomplete — blocked on ${missing.map((l) => l.id).join(", ")}. No branch pushed, no PR opened.`,
+      `[${id}] incomplete — ${missing
+        .map((leaf) => `${leaf.id} (${settled.get(leaf.id) ?? "never ran"})`)
+        .join(", ")}. No branch pushed, no PR opened.`,
     );
     return null;
   }
 
-  const worked = root.eligibleLeaves;
-  const mergeable = await Promise.all(
-    worked.map(async (leaf) => ({
-      branch: leafBranch(leaf.id),
-      keep: await branchHasCommits(leafBranch(leaf.id)),
-    })),
-  );
-  const branches = mergeable.filter((b) => b.keep).map((b) => b.branch);
-
-  if (branches.length === 0) {
+  if (landedBranches.length === 0) {
     console.log(`[${id}] every issue completed without producing commits.`);
     return null;
   }
 
-  return ship(root, branches, worked);
+  return ship(root, landedBranches, root.eligibleLeaves, resumeBase);
 }
 
 // ---------------------------------------------------------------------------

@@ -1,23 +1,10 @@
 import { reactive } from 'vue';
 
-// Sidebar state: the three Session filters, the search query and its matches,
-// the Project collapse overrides and how many Sessions a Project shows.
+// Sidebar state: how many Sessions a Project shows. The Project collapse overrides moved to the
+// projects Feature store; the search box and the three Session filters belong to the navigation
+// Feature.
 export const sidebarStore = reactive({
-  // Filter state
-  showStarredOnly: false,
-  showRunningOnly: false,
-  showTodayOnly: false,
-  searchMatchIds: null,
-  searchMatchProjectPaths: null,
-
-  // Project collapse overrides: projectPath → bool. Absent = fall back to staleness.
-  collapsedProjects: {},
-
   // Visibility settings
   visibleSessionCount: 10,
   sessionMaxAgeDays: 3,
-
-  // Search box
-  searchQuery: '',
-  searchTitlesOnly: false,
 });

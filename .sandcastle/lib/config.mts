@@ -37,6 +37,11 @@ const configSchema = z.object({
     /** Prefix for per-issue working branches. Must be deterministic. */
     branchPrefix: z.string().default("sandcastle/issue-"),
     /**
+     * Prefix for the per-root branch a wave is cut from: the base branch plus
+     * everything landed so far. Rebuilt on every wave, never pushed.
+     */
+    waveBasePrefix: z.string().default("sandcastle/wave-base/"),
+    /**
      * GitHub repo as `owner/name`. Derived from the remote URL when omitted —
      * pinning it matters in forks, where `gh` otherwise targets the upstream.
      */

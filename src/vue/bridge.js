@@ -1,123 +1,40 @@
-import { markRaw } from 'vue';
+import { api } from './shared/services/api.js';
+import { createSessionsBridge } from './features/sessions/bridge.js';
+
+// window.vueGrid: the Session-overview cards, owned by the grid Feature's Bridge. Re-exported
+// so main.js and the bridge-contract spec keep one import site.
+export { createGridBridge } from './features/grid/bridge.js';
+
+// The jsonl Feature owns its Bridge; re-exported here so main.js keeps one bridge import.
+export { createJsonlViewerBridge } from './features/jsonl/bridge.js';
 
 // The renderer-to-Vue surface `public/app.js` calls. Every method writes a feature
 // store rather than a component ref; app.js is frozen, so these names and signatures
 // are the contract. The project viewer, stats and the plan/memory viewers still keep
 // their template-ref setters in App.vue.
 
-// window.vueSidebar: the Session/Project tree, the live PTY sets, the filters,
-// the search matches and the terminal-header context.
+// window.vueSidebar: the Session/Project tree, the live PTY sets and the
+// terminal-header context, all owned by the sessions Feature's Bridge and spread
+// in here. The filters and search matches it also carries are written by the
+// navigation Feature Bridge (merged onto this object in main.js), since
+// public/app.js addresses them as window.vueSidebar.setFilters/setSearch.
 export function createSidebarBridge(store) {
   return {
     store,
-    setProjects(projects) { store.projects = projects.map(p => ({ ...p })); },
-    setActivePtyIds(ids) { store.activePtyIds = new Set(ids); },
-    setActiveSession(id) { store.activeSessionId = id; },
-    setBusy(sessionId, busy) {
-      if (busy) store.sessionBusyState.set(sessionId, true);
-      else store.sessionBusyState.delete(sessionId);
-    },
-    addAttention(sessionId) { store.attentionSessions.add(sessionId); },
-    setResponseReady(sessionId) {
-      store.responseReadySessions.add(sessionId);
-      store.sessionBusyState.delete(sessionId);
-    },
-    clearNotifications(sessionId) {
-      store.attentionSessions.delete(sessionId);
-      store.responseReadySessions.delete(sessionId);
-    },
-    setFilters({ showStarredOnly, showRunningOnly, showTodayOnly }) {
-      if (showStarredOnly !== undefined) store.showStarredOnly = showStarredOnly;
-      if (showRunningOnly !== undefined) store.showRunningOnly = showRunningOnly;
-      if (showTodayOnly !== undefined) store.showTodayOnly = showTodayOnly;
-    },
-    setSearch(matchIds, matchProjectPaths) {
-      store.searchMatchIds = matchIds;
-      store.searchMatchProjectPaths = matchProjectPaths;
-    },
+    ...createSessionsBridge(store),
     setVisibility(count, ageDays) {
       store.visibleSessionCount = count;
       store.sessionMaxAgeDays = ageDays;
     },
-    setHeaderSession(session) { store.headerSession = session; },
-    setHeaderPtyTitle(title) { store.headerPtyTitle = title || null; },
-    setHeaderShellProfile(profile) { store.headerShellProfile = profile || null; },
-    setHeaderAccount(name) { store.headerAccount = name || null; },
-    clearHeader() {
-      store.headerSession = null;
-      store.headerPtyTitle = null;
-      store.headerShellProfile = null;
-      store.headerAccount = null;
-    },
   };
 }
 
-// window.vuePlans: the Plans list and which plan is open.
-export function createPlansBridge(store) {
-  return {
-    setPlans(list) { store.plans = list; },
-    setActive(filename) { store.activePlan = filename; },
-    clearActive() { store.activePlan = null; },
-  };
-}
+// The Plans and Memory panels moved to the agent-files Feature; window.vuePlans and
+// window.vueMemory are composed there (see features/agent-files/bridge.js).
 
-// window.vueMemory: the Agent Files tree, the active-file highlight and the search filter.
-export function createMemoryBridge(store) {
-  return {
-    setMemories(data, ids = null) {
-      store.data = data;
-      store.filterIds = ids;
-    },
-    setFilter(ids) { store.filterIds = ids; },
-    setActive(filePath) { store.activeFile = filePath; },
-    clearActive() { store.activeFile = null; },
-  };
-}
-
-// window.vueAccounts: the Accounts panel list, its active account and usage.
-export function createAccountsBridge(store) {
-  return {
-    setAccounts(list, activeId) {
-      store.accounts = list;
-      if (activeId !== undefined) store.activeAccountId = activeId;
-    },
-    setActiveAccount(id) { store.activeAccountId = id; },
-    setUsage(usage) { store.usage = { ...usage }; },
-  };
-}
-
-// window.vueAccountDropdown: the sidebar account switcher.
-export function createAccountDropdownBridge(store) {
-  return {
-    setAccounts(list, activeId, usage) {
-      store.accounts = list;
-      if (activeId !== undefined) store.activeAccountId = activeId;
-      if (usage !== undefined) store.usage = usage;
-    },
-    setActiveAccount(id) { store.activeAccountId = id; },
-    setUsage(usage) { store.usage = { ...usage }; },
-    close() { store.open = false; },
-  };
-}
-
-// window.vueGrid: the Session-overview cards. GridCardsApp teleports each card into
-// the header/footer element the vanilla grid renderer built.
-export function createGridBridge(store) {
-  return {
-    addCard(sessionId, headerEl, footerEl, { name, project, initials, color, running, busy, time }) {
-      store.cards.set(sessionId, { headerEl, footerEl, name, project, initials, color, running: !!running, busy: !!busy, time: time || '' });
-    },
-    updateCard(sessionId, running, busy, time) {
-      const card = store.cards.get(sessionId);
-      if (!card) return;
-      card.running = !!running;
-      card.busy = !!busy;
-      if (time !== undefined) card.time = time;
-    },
-    removeCard(sessionId) { store.cards.delete(sessionId); },
-    clearAll() { store.cards.clear(); },
-  };
-}
+// The accounts panel and the sidebar switcher declare their Bridges in the accounts Feature
+// (features/accounts/bridge.js), composed into window.vueAccounts / window.vueAccountDropdown
+// in main.js, so the folder can move with its whole contract.
 
 // window.vueProjects: the Projects panel, plus the lazy per-project git/container
 // info queue. Guarded so the bridge stays inert without window.api or rAF.
@@ -125,8 +42,6 @@ export function createProjectsBridge(store) {
   let queueGen = 0;
   let pendingInfoUpdates = {};
   let flushScheduled = false;
-
-  const api = typeof window !== 'undefined' ? window.api : undefined;
 
   function flush() {
     flushScheduled = false;
@@ -194,57 +109,3 @@ export function createProjectsBridge(store) {
   };
 }
 
-// window.vueJsonlViewer: the Message History viewer. The seq bump makes re-opening
-// the same session re-trigger the component's watcher.
-export function createJsonlViewerBridge(store) {
-  let seq = 0;
-  return {
-    // markRaw: read once to render, so deep-proxying buys nothing.
-    open(session) { store.openRequest = { session: markRaw(session), seq: ++seq }; },
-  };
-}
-
-// Switching tab clears the search. Exported so App.vue's tab buttons and
-// window.vueApp share one code path.
-export function switchTab(store, tabId) {
-  if (tabId === store.activeTab) return;
-  store.activeTab = tabId;
-  store.searchQuery = '';
-  store.searchMatchIds = null;
-  store.searchMatchProjectPaths = null;
-  if (typeof window !== 'undefined') window.__sb?.onTabChange?.(tabId);
-}
-
-// window.vueApp: the sidebar tab switch.
-export function createAppBridge(store) {
-  return {
-    setTab(tabId) { switchTab(store, tabId); },
-  };
-}
-
-// window.vueStatusBar: the three status-bar slots and their auto-clear timers.
-export function createStatusBarBridge(store) {
-  let activityTimer = null;
-  let updaterTimer = null;
-  return {
-    setInfo(text) { store.info = text; },
-    setActivity(text, type) {
-      if (activityTimer) clearTimeout(activityTimer);
-      store.activity = text;
-      store.activityClass = type === 'done' ? 'status-done' : '';
-      if (!text || type === 'done') {
-        activityTimer = setTimeout(() => {
-          store.activity = '';
-          store.activityClass = '';
-        }, type === 'done' ? 3000 : 0);
-      }
-    },
-    setUpdater(text, duration) {
-      if (updaterTimer) clearTimeout(updaterTimer);
-      store.updater = text;
-      if (duration) {
-        updaterTimer = setTimeout(() => { store.updater = ''; }, duration);
-      }
-    },
-  };
-}

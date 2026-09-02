@@ -7,6 +7,8 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "./config.mts";
+import { git } from "./git.mts";
+import { integrationBranchPattern } from "./resume.mts";
 
 const exec = promisify(execFile);
 
@@ -15,19 +17,9 @@ const exec = promisify(execFile);
 const { remote: REMOTE, baseBranch: BASE_BRANCH } = config.git;
 const REPO = config.git.repo!;
 
-async function git(...args: string[]): Promise<string> {
-  const { stdout } = await exec("git", args, { maxBuffer: 16 * 1024 * 1024 });
-  return stdout.trim();
-}
-
 async function gh(...args: string[]): Promise<string> {
   const { stdout } = await exec("gh", args, { maxBuffer: 16 * 1024 * 1024 });
   return stdout.trim();
-}
-
-/** `ABC-1`, `ABC-1-2`, `ABC-1-3`, … — matches the integration branch family. */
-function integrationBranchPattern(rootId: string): RegExp {
-  return new RegExp(`^${rootId}(-\\d+)?$`);
 }
 
 /**
@@ -52,20 +44,6 @@ export async function nextIntegrationBranch(rootId: string): Promise<string> {
   for (let n = 2; ; n++) {
     const candidate = `${rootId}-${n}`;
     if (!taken.has(candidate)) return candidate;
-  }
-}
-
-/**
- * Whether a branch carries work not already on main. Asked of git rather than
- * tracked in memory: leaf branches outlive a single run, so a branch that
- * committed during an earlier invocation must still count as mergeable.
- */
-export async function branchHasCommits(branch: string): Promise<boolean> {
-  try {
-    const count = await git("rev-list", "--count", `${BASE_BRANCH}..${branch}`);
-    return Number(count) > 0;
-  } catch {
-    return false; // branch doesn't exist
   }
 }
 

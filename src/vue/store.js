@@ -1,14 +1,16 @@
-import { sessionsStore } from './stores/sessions.js';
+import { sessionsStore, headerStore } from './features/sessions/store.js';
+import { settingsStore } from './features/settings/store.js';
 import { sidebarStore } from './stores/sidebar.js';
-import { areasStore } from './stores/areas.js';
+import { areasStore } from './features/areas/store.js';
+import { projectsStore } from './features/projects/store.js';
 import { layoutStore } from './stores/layout.js';
-import { headerStore } from './stores/header.js';
 import { avatarsStore } from './stores/avatars.js';
+import { navigationStore } from './features/navigation/store.js';
 
 // `store` is a facade over the feature slices: every field delegates to its owning
 // slice by getter/setter, so `public/app.js` — frozen — keeps addressing
 // `window.vueStore.<field>` by name and reactivity is preserved in both directions.
-export const slices = { sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore };
+export const slices = { sessionsStore, settingsStore, sidebarStore, areasStore, projectsStore, layoutStore, headerStore, avatarsStore, navigationStore };
 
 export const store = {};
 for (const slice of Object.values(slices)) {
@@ -22,4 +24,4 @@ for (const slice of Object.values(slices)) {
   }
 }
 
-export { sessionsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore };
+export { sessionsStore, settingsStore, sidebarStore, areasStore, projectsStore, layoutStore, headerStore, avatarsStore, navigationStore };

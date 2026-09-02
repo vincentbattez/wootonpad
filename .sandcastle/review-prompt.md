@@ -55,4 +55,16 @@ If you find improvements to make:
 
 If the code is already clean and well-structured, do nothing.
 
-Once complete, output <promise>COMPLETE</promise>.
+# HOW TO FINISH
+
+You are the only review pass. Nothing runs after you and nothing re-reviews your
+work, so finish what you start: every problem you report, you fix here.
+
+- You reviewed the branch, fixed what you found, and the feedback loops pass:
+  output <promise>COMPLETE</promise>.
+- You found a problem you cannot fix — the implementation is wrong in a way that
+  needs the issue re-worked, or the feedback loops fail and you cannot make them
+  pass: output <promise>BLOCKED</promise>.
+
+Listing findings and signing off without applying them is the one outcome that
+must not happen. Either the fix is committed, or the branch is BLOCKED.

@@ -1,7 +1,4 @@
-const { test, expect } = require('./app-fixture');
-
-// Mirrors ProjectGroup.vue's folderId — the sidebar header's DOM id.
-const headerId = (projectPath) => '#ph-project-' + projectPath.replace(/[^a-zA-Z0-9_-]/g, '_');
+const { test, expect, headerId } = require('./app-fixture');
 
 // A marker the shell will echo, so the assertion reads the real PTY output
 // rather than the command the renderer believes it sent.

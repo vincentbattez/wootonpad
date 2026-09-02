@@ -95,12 +95,26 @@
 
               <!-- Plans panel -->
               <div id="plans-content" v-show="store.activeTab === 'plans'">
-                <PlansApp ref="plansRef" :callbacks="demoCallbacks" />
+                <AgentFileGroup label="Plans" :files="demoPlanRows" />
               </div>
 
               <!-- Memory panel -->
               <div id="memory-content" v-show="store.activeTab === 'memory'">
-                <MemoryApp ref="memoryRef" :callbacks="demoCallbacks" />
+                <AgentFileGroup
+                  label="Global"
+                  :files="demoMemoryRows(MOCK_MEMORIES.global.files)"
+                  :collapsible="true"
+                  :show-count="true"
+                />
+                <AgentFileGroup
+                  v-for="proj in MOCK_MEMORIES.projects"
+                  :key="proj.folder"
+                  :label="proj.shortName"
+                  :files="demoMemoryRows(proj.files)"
+                  :collapsible="true"
+                  :show-count="true"
+                  :avatar="demoAvatar(proj.projectPath)"
+                />
               </div>
 
               <!-- Stats / other placeholder -->
@@ -121,7 +135,7 @@
 
               <div v-else class="lp-terminal-area">
                 <div id="vue-session-header">
-                  <SessionHeaderApp />
+                  <SessionHeaderContainer />
                 </div>
                 <div class="lp-terminal-body">
                   <template v-for="(line, i) in terminalLines" :key="i">
@@ -367,15 +381,27 @@ import { ref, computed, onMounted, nextTick, watch } from 'vue';
 
 const iconUrl = 'icon.png';
 import { store } from '../vue/store.js';
-import SessionHeaderApp from '../vue/components/SessionHeaderApp.vue';
+import SessionHeaderContainer from '../vue/features/sessions/containers/SessionHeaderContainer.vue';
 import SidebarApp from '../vue/components/SidebarApp.vue';
 import AccountsApp from '../vue/components/AccountsApp.vue';
 import AccountDropdownApp from '../vue/components/AccountDropdownApp.vue';
 import ProjectsApp from '../vue/components/ProjectsApp.vue';
-import PlansApp from '../vue/components/PlansApp.vue';
-import MemoryApp from '../vue/components/MemoryApp.vue';
+import AgentFileGroup from '../vue/features/agent-files/components/AgentFileGroup.vue';
+import { planRow, memoryRow } from '../vue/features/agent-files/rows.mjs';
+import { avatarFromPath } from '../vue/avatar.mjs';
 import ProjectViewerApp from '../vue/components/ProjectViewerApp.vue';
 import { MOCK_ACCOUNTS, MOCK_PROJECTS, MOCK_TERMINAL_LINES, MOCK_USAGE, MOCK_PLANS, MOCK_MEMORIES } from './mock-data.js';
+
+// The agent-files panels render the Feature's Dumb group directly off mock rows — no store, no
+// service — so the demo shows the same Plans and Agent Files as the app without the Bridge.
+const demoFmt = (d) => (window.formatDate ? window.formatDate(new Date(d)) : d);
+const demoPlanRows = MOCK_PLANS.map((p) => planRow(p, { activePlan: null, fmtDate: demoFmt }));
+const demoMemoryRows = (files) =>
+  files.map((f) => memoryRow(f, { activeFile: null, runningFile: null, doneFile: null, fmtDate: demoFmt }));
+const demoAvatar = (projectPath) => {
+  const { initials, color } = avatarFromPath(projectPath);
+  return { dataUrl: null, alt: projectPath.split('/').filter(Boolean).pop() || '', initials, color };
+};
 
 const stars = ref(null);
 const SPIN_FRAMES = ['⠸', '⠼', '⠴', '⠦', '⠇', '⠏', '⠋', '⠙'];
@@ -385,8 +411,6 @@ const spinChar = ref(SPIN_FRAMES[0]);
 const accountDropdownRef = ref(null);
 const accountsRef = ref(null);
 const projectsRef = ref(null);
-const plansRef = ref(null);
-const memoryRef = ref(null);
 const projectViewerRef = ref(null);
 
 // Tabs shown in the demo (full set)
@@ -462,8 +486,6 @@ onMounted(async () => {
   accountsRef.value?.setAccounts(MOCK_ACCOUNTS, 'default');
   accountsRef.value?.setUsage(MOCK_USAGE);
   projectsRef.value?.setProjects(MOCK_PROJECTS);
-  plansRef.value?.setPlans(MOCK_PLANS);
-  memoryRef.value?.setMemories(MOCK_MEMORIES);
   projectViewerRef.value?.open({ projectPath: '/Users/demo/Projects/my-api' });
   // ProjectGroup.vue uses ref(fn) for lazy collapsed init. In Vue 3.5, if the
   // lazy init resolves to a truthy function rather than a boolean, all projects
@@ -885,7 +907,7 @@ html, body {
   background: var(--surface-app);
 }
 
-/* SessionHeaderApp handles header styles via public/style.css */
+/* SessionHeaderContainer handles header styles via public/style.css */
 #vue-session-header {
   flex-shrink: 0;
 }

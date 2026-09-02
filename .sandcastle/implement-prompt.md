@@ -6,7 +6,9 @@ Pull in the issue using `linear issue view {{TASK_ID}} --json --no-pager`. If it
 
 Only work on the issue specified.
 
-Work on branch {{BRANCH}}. Make commits and run tests.
+Work on branch {{BRANCH}}, which is cut from `{{BASE_BRANCH}}`. That base already
+contains the work of every issue scheduled before yours, so the code you depend
+on should be there. Make commits and run tests.
 
 # CONTEXT
 
@@ -58,7 +60,29 @@ If the task is not complete, leave a comment on the issue with what was done, us
 
 Do not close the issue - this will be done later.
 
-Once complete, output <promise>COMPLETE</promise>.
+# HOW TO FINISH
+
+You must end with exactly one of two signals. Nothing else counts as finishing,
+and picking the wrong one is worse than picking none.
+
+- The task is done and committed, or you established there was genuinely nothing
+  to do: output <promise>COMPLETE</promise>.
+- You cannot do the task: output <promise>BLOCKED</promise>.
+
+Output BLOCKED — do not output COMPLETE — whenever any of these holds:
+
+- Code, files or infrastructure the issue depends on are missing from
+  `{{BASE_BRANCH}}` and you would have to invent them
+- The issue is ambiguous enough that you would have to guess at the requirement
+- The feedback loops above will not pass and you cannot fix them
+- You did part of the work but stopped short of what the issue asks
+
+Before outputting BLOCKED, leave a comment on the issue saying what is missing
+and what you did complete, using
+`linear issue comment add {{TASK_ID}} --body "<what is missing>"`.
+
+Committing partial work and outputting COMPLETE is the one failure the
+orchestrator cannot detect. Do not do it.
 
 # FINAL RULES
 
