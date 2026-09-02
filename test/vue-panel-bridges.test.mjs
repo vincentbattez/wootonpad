@@ -2,16 +2,12 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { effect, markRaw } from 'vue';
 import {
-  createPlansBridge,
-  createMemoryBridge,
   createAccountsBridge,
   createAccountDropdownBridge,
   createGridBridge,
   createProjectsBridge,
   createJsonlViewerBridge,
 } from '../src/vue/bridge.js';
-import { plansStore } from '../src/vue/stores/plans.js';
-import { memoryStore } from '../src/vue/stores/memory.js';
 import { accountsStore } from '../src/vue/stores/accounts.js';
 import { accountDropdownStore } from '../src/vue/stores/account-dropdown.js';
 import { gridStore } from '../src/vue/stores/grid.js';
@@ -21,52 +17,8 @@ import { jsonlStore } from '../src/vue/stores/jsonl.js';
 // The panel bridges invert the old template-ref setters: every method writes a
 // feature store the panel reads reactively, instead of calling into a component
 // through defineExpose. The method names and signatures are the frozen contract
-// app.js calls (window.vuePlans, window.vueMemory, …).
-
-test('plans bridge writes the plans list and active plan into the store', () => {
-  const bridge = createPlansBridge(plansStore);
-  const list = [{ filename: 'a.md' }, { filename: 'b.md' }];
-  bridge.setPlans(list);
-  assert.deepEqual(plansStore.plans, list);
-  bridge.setActive('a.md');
-  assert.equal(plansStore.activePlan, 'a.md');
-  bridge.clearActive();
-  assert.equal(plansStore.activePlan, null);
-  bridge.setPlans([]);
-});
-
-test('a plans-store write triggers effects that read the store', () => {
-  const bridge = createPlansBridge(plansStore);
-  let seen;
-  const stop = effect(() => { seen = plansStore.activePlan; });
-  assert.equal(seen, null);
-  bridge.setActive('c.md');
-  assert.equal(seen, 'c.md', 'effect reading the store saw the bridge write');
-  bridge.clearActive();
-  stop.effect.stop();
-});
-
-test('memory bridge writes data, filter ids and active file', () => {
-  const bridge = createMemoryBridge(memoryStore);
-  const data = { global: { files: [{ filePath: '/g' }] }, projects: [] };
-  const ids = new Set(['/g']);
-  bridge.setMemories(data, ids);
-  assert.deepEqual(memoryStore.data, data);
-  assert.deepEqual([...memoryStore.filterIds], [...ids]);
-  bridge.setFilter(null);
-  assert.equal(memoryStore.filterIds, null);
-  bridge.setActive('/g');
-  assert.equal(memoryStore.activeFile, '/g');
-  bridge.clearActive();
-  assert.equal(memoryStore.activeFile, null);
-});
-
-test('memory setMemories defaults the filter ids to null', () => {
-  const bridge = createMemoryBridge(memoryStore);
-  bridge.setFilter(new Set(['x']));
-  bridge.setMemories({ global: { files: [] }, projects: [] });
-  assert.equal(memoryStore.filterIds, null);
-});
+// app.js calls (window.vueAccounts, window.vueGrid, …). The Plans and Memory bridges moved to
+// the agent-files Feature, tested next to their code in features/agent-files/bridge.test.mjs.
 
 test('accounts bridge sets the list, active id and usage', () => {
   const bridge = createAccountsBridge(accountsStore);

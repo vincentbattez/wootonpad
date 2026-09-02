@@ -27,27 +27,8 @@ export function createSidebarBridge(store) {
   };
 }
 
-// window.vuePlans: the Plans list and which plan is open.
-export function createPlansBridge(store) {
-  return {
-    setPlans(list) { store.plans = list; },
-    setActive(filename) { store.activePlan = filename; },
-    clearActive() { store.activePlan = null; },
-  };
-}
-
-// window.vueMemory: the Agent Files tree, the active-file highlight and the search filter.
-export function createMemoryBridge(store) {
-  return {
-    setMemories(data, ids = null) {
-      store.data = data;
-      store.filterIds = ids;
-    },
-    setFilter(ids) { store.filterIds = ids; },
-    setActive(filePath) { store.activeFile = filePath; },
-    clearActive() { store.activeFile = null; },
-  };
-}
+// The Plans and Memory panels moved to the agent-files Feature; window.vuePlans and
+// window.vueMemory are composed there (see features/agent-files/bridge.js).
 
 // window.vueAccounts: the Accounts panel list, its active account and usage.
 export function createAccountsBridge(store) {

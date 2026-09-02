@@ -77,21 +77,20 @@
     <div v-if="store.accountSwitching && store.activeTab === 'sessions'" id="account-switch-overlay" class="account-switch-preloader">
       <div class="acct-spinner"></div><span>Switching account…</span>
     </div>
-    <div id="plans-content" v-show="store.activeTab === 'plans'">
-      <PlansApp :callbacks="planCallbacks" />
-    </div>
+    <!-- The Plans list and the Memory tree are Teleported into these panels from the
+         agent-files Feature's Container, mounted below once both mount points exist. -->
+    <div id="plans-content" v-show="store.activeTab === 'plans'"></div>
     <div id="stats-content" v-show="store.activeTab === 'stats'">
       <div class="plans-empty">Click the Stats tab to view activity heatmap.</div>
     </div>
-    <div id="memory-content" v-show="store.activeTab === 'memory'">
-      <MemoryApp :callbacks="memoryCallbacks" />
-    </div>
+    <div id="memory-content" v-show="store.activeTab === 'memory'"></div>
     <div id="accounts-content" v-show="store.activeTab === 'accounts'">
       <AccountsApp :callbacks="accountsCallbacks" />
     </div>
     <div id="projects-content" v-show="store.activeTab === 'projects'">
       <ProjectsApp :callbacks="projectsCallbacks" />
     </div>
+    <AgentFilesContainer />
   </div>
 
   <!-- ── RESIZE HANDLE ──────────────────────────────────────────── -->
@@ -117,7 +116,7 @@
       <StatsApp ref="statsRef" />
     </div>
     <div id="memory-viewer" v-show="store.memoryViewerOpen">
-      <ViewerContentApp
+      <ViewerContainer
         ref="memoryViewerRef"
         language="markdown"
         storage-key="markdownPreviewMode"
@@ -127,7 +126,7 @@
       />
     </div>
     <div id="plan-viewer" v-show="store.planViewerOpen">
-      <ViewerContentApp
+      <ViewerContainer
         ref="planViewerRef"
         language="markdown"
         storage-key="markdownPreviewMode"
@@ -197,8 +196,7 @@ import SbSearchField from '../shared/ui/SbSearchField.vue';
 import NavigationTabs from '../features/navigation/components/NavigationTabs.vue';
 import SidebarApp from './SidebarApp.vue';
 import SessionHeaderContainer from '../features/sessions/containers/SessionHeaderContainer.vue';
-import PlansApp from './PlansApp.vue';
-import MemoryApp from './MemoryApp.vue';
+import AgentFilesContainer from '../features/agent-files/containers/AgentFilesContainer.vue';
 import AccountsApp from './AccountsApp.vue';
 import AccountDropdownApp from './AccountDropdownApp.vue';
 import ProjectsApp from './ProjectsApp.vue';
@@ -208,7 +206,7 @@ import SettingsPanelContainer from '../features/settings/containers/SettingsPane
 import ProjectViewerApp from './ProjectViewerApp.vue';
 import StatsApp from './StatsApp.vue';
 import JsonlViewerApp from './JsonlViewerApp.vue';
-import ViewerContentApp from './ViewerContentApp.vue';
+import ViewerContainer from '../features/viewer/containers/ViewerContainer.vue';
 import DialogsApp from './DialogsApp.vue';
 const { EXPAND_SVG, COLLAPSE_SVG, GEAR_SVG, STATS_REFRESH_SVG, RUNNING_SVG, STAR_SVG, TODAY_SVG, GRID_SVG, FILTERS_SVG, RESORT_SVG, ADD_AREA_SVG, ADD_PROJECT_SVG } = appIcons;
 
@@ -337,14 +335,6 @@ const sidebarCallbacks = {
   runProject: (path) => sb.runProject?.(path),
   archiveSessions: (sessions) => sb.archiveSessions?.(sessions),
   removeProject: (path) => sb.removeProject?.(path),
-};
-
-const planCallbacks = {
-  openPlan: (plan) => sb.openPlan?.(plan),
-};
-
-const memoryCallbacks = {
-  openMemory: (file) => sb.openMemory?.(file),
 };
 
 const accountsCallbacks = {

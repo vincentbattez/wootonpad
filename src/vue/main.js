@@ -2,8 +2,6 @@ import { createApp } from 'vue';
 import { store } from './store.js';
 import {
   createSidebarBridge,
-  createPlansBridge,
-  createMemoryBridge,
   createAccountsBridge,
   createAccountDropdownBridge,
   createGridBridge,
@@ -13,8 +11,8 @@ import {
 import { createNavigationBridge } from './features/navigation/bridge.js';
 import { createSettingsBridge } from './features/settings/bridge.js';
 import { settingsStore } from './features/settings/store.js';
-import { plansStore } from './stores/plans.js';
-import { memoryStore } from './stores/memory.js';
+import { createAgentFilesBridge } from './features/agent-files/bridge.js';
+import { agentFilesStore } from './features/agent-files/store.js';
 import { accountsStore } from './stores/accounts.js';
 import { accountDropdownStore } from './stores/account-dropdown.js';
 import { createStatusBarBridge } from './features/status-bar/bridge.js';
@@ -23,7 +21,9 @@ import { gridStore } from './stores/grid.js';
 import { projectsStore } from './stores/projects.js';
 import { jsonlStore } from './stores/jsonl.js';
 import App from './components/App.vue';
-import ViewerContentApp from './components/ViewerContentApp.vue';
+import ViewerContainer from './features/viewer/containers/ViewerContainer.vue';
+import { viewerStore } from './features/viewer/store.js';
+import { createViewerBridge } from './features/viewer/bridge.js';
 
 // The aggregate store facade app.js mutates by field name.
 window.vueStore = store;
@@ -40,8 +40,11 @@ window.vueSidebar.setFilters = navigationBridge.setFilters;
 window.vueApp = { setTab: navigationBridge.setTab };
 
 // Installed before mount so they exist ahead of any app.js call.
-window.vuePlans = createPlansBridge(plansStore);
-window.vueMemory = createMemoryBridge(memoryStore);
+// The agent-files Feature owns both plan and memory panels; its Bridge composes the two
+// legacy globals app.js still calls by name.
+const agentFiles = createAgentFilesBridge(agentFilesStore);
+window.vuePlans = agentFiles.plans;
+window.vueMemory = agentFiles.memory;
 window.vueAccounts = createAccountsBridge(accountsStore);
 window.vueAccountDropdown = createAccountDropdownBridge(accountDropdownStore);
 window.vueStatusBar = createStatusBarBridge(statusBarStore);
@@ -50,20 +53,25 @@ window.vueProjects = createProjectsBridge(projectsStore);
 window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
 window.vueSettings = createSettingsBridge(settingsStore);
 
-// Factory for mounting ViewerContentApp into a plain DOM container (used by file-panel.js)
+// The file panel (public/file-panel.js) mounts its viewer here. The Container is bridged: it
+// reacts to the viewer store the Feature's Bridge writes, so file-panel.js drives open/destroy
+// through the Bridge rather than through a template ref. getContent stays on the instance —
+// the Bridge carries only what the frozen file panel calls.
 window.createViewerPanel = function(container, opts = {}) {
-  const app = createApp(ViewerContentApp, {
+  const app = createApp(ViewerContainer, {
     language: opts.language || 'markdown',
     storageKey: opts.storageKey,
     showCopyPath: !!opts.copyPath,
     showCopyContent: !!opts.copyContent,
     onSave: opts.onSave || null,
     onClose: opts.onClose || null,
+    bridged: true,
   });
   const instance = app.mount(container);
+  const bridge = createViewerBridge(viewerStore);
   return {
-    open: (...args) => instance.open(...args),
-    destroy: () => instance.destroy(),
+    open: (...args) => bridge.open(...args),
+    destroy: () => bridge.destroy(),
     getContent: () => instance.getContent(),
   };
 };
