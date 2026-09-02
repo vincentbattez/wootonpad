@@ -575,6 +575,7 @@ const { deriveProjectPath } = require('./derive-project-path');
 
 // Session cache → session-cache.js
 const sessionCache = require('./session-cache');
+const { resolveSessionTitle } = require('./session-title');
 
 function initSessionCache() {
   const account = getActiveAccount();
@@ -1045,7 +1046,7 @@ ipcMain.handle('get-project-sessions', (_event, projectPath) => {
     const projects = buildProjectsFromCache();
     const proj = projects.find(p => p.projectPath === projectPath);
     const sessions = (proj?.sessions || []).filter(s => !s.archived).slice(0, 10).map(s => ({
-      id: s.sessionId, name: s.name || s.aiTitle || s.summary?.slice(0, 40) || s.sessionId?.slice(0, 8), updatedAt: s.modified, running: false,
+      id: s.sessionId, name: resolveSessionTitle(s, 40), updatedAt: s.modified, running: false,
     }));
     return { ok: true, sessions };
   } catch (e) { return { ok: false, sessions: [] }; }
