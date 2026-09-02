@@ -136,7 +136,7 @@
     </div>
     <SettingsPanelContainer v-if="store.settingsOpen" />
     <div id="project-viewer" style="display:none;">
-      <ProjectViewerApp ref="projectViewerRef" :callbacks="projectViewerCallbacks" />
+      <ProjectViewerView ref="projectViewerRef" :callbacks="projectViewerCallbacks" />
     </div>
     <div id="jsonl-viewer" v-show="store.showJsonl">
       <JsonlViewerContainer />
@@ -201,7 +201,7 @@ import ProjectsApp from './ProjectsApp.vue';
 import StatusBarContainer from '../features/status-bar/containers/StatusBarContainer.vue';
 import GridCardsContainer from '../features/grid/containers/GridCardsContainer.vue';
 import SettingsPanelContainer from '../features/settings/containers/SettingsPanelContainer.vue';
-import ProjectViewerApp from './ProjectViewerApp.vue';
+import ProjectViewerView from '../views/ProjectViewerView.vue';
 import StatsContainer from '../features/stats/containers/StatsContainer.vue';
 import JsonlViewerContainer from '../features/jsonl/containers/JsonlViewerContainer.vue';
 import ViewerContainer from '../features/viewer/containers/ViewerContainer.vue';

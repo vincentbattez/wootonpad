@@ -386,15 +386,70 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick, onMounted, onUnmounted } from 'vue';
-import { api } from '../shared/services/api.js';
-import { sb } from '../shared/services/sb.js';
-import { store } from '../store.js';
-import FileTreeNode from './FileTreeNode.vue';
-import SbButton from './SbButton.vue';
-import SbSwitch from './SbSwitch.vue';
+import { ref, computed, watch } from 'vue';
 import ProjectAvatar from '../features/projects/components/ProjectAvatar.vue';
+import FileTreeNode from '../features/projects/components/FileTreeNode.vue';
+import SbButton from '../components/SbButton.vue';
+import SbSwitch from '../components/SbSwitch.vue';
+import { useGitSnapshot } from '../features/projects/composables/use-git-snapshot.js';
+import { useFileTree } from '../features/projects/composables/use-file-tree.js';
+import { useProjectAvatarCard } from '../features/projects/composables/use-project-avatar-card.js';
+import { useStatsRefresh } from '../features/projects/composables/use-stats-refresh.js';
+import { useFileOverlay } from '../features/viewer/composables/use-file-overlay.js';
+import { useProjectSessions } from '../features/sessions/composables/use-project-sessions.js';
 
+// The Project Viewer as a View: it owns no entity and imports no service. It holds only the
+// surface's navigation state — the Project in view, its worktrees, the active tab — and assembles
+// the Containers and composables that carry the behaviour: the Git Snapshot, the file tree, the
+// diff/file overlay (routed through the viewer Feature), the avatar card, the stats refresh timing
+// and the Project's Sessions (owned by the sessions Feature). Everything on screen keeps its
+// layout, its refresh timing and its interactions; the pv-* class names are preserved verbatim.
+const props = defineProps({ callbacks: { type: Object, required: true } });
+
+// ── Navigation state owned by the View ────────────────────────────
+const project = ref(null);
+const worktrees = ref([]);
+const viewedPath = ref('');
+const activeTab = ref('overview');
+// Incremented each time open() is called so the watcher fires even when the same project path is
+// re-opened (a net-zero ref change would otherwise suppress the Vue watcher).
+const _openCount = ref(0);
+
+// ── Assembled concerns ────────────────────────────────────────────
+const git = useGitSnapshot(viewedPath);
+const {
+  overview, loading, branches, remoteBranches, gitBusy, gitMessage, gitError,
+  commitMessage, generating, confirmPush, showCreateBranch, newBranchName, checkoutBranch,
+  readmeHtml, gitUser, changedFiles, unpushedCommits, unpushedCount, mrLink,
+  fileStatus, fileStatusChar,
+  switchBranch, doFetch, doPull, generateCommitMsg, doCommit, doPush, doCreateBranch, openExternal,
+} = git;
+
+const tree = useFileTree(viewedPath);
+const { treeSearch, treeLoading, filteredTree } = tree;
+
+const overlay = useFileOverlay(viewedPath, changedFiles);
+const {
+  activeDiff, activeFile, fileModified, fileSaving, loadingFile, diffContainerRef,
+  currentFileIndex, overlayTitle, overlayPath, openDiff, saveFile, prevFile, nextFile,
+} = overlay;
+const closeOverlay = overlay.close;
+const openFileFromTree = overlay.openFile;
+
+const avatarCard = useProjectAvatarCard(project, overview);
+const { avatarDataUrl, avatarLoading, avatar, updateAvatar } = avatarCard;
+
+const projectSessions = useProjectSessions();
+const { sessions, activeSessions, openSession, fmtDate } = projectSessions;
+
+const stats = useStatsRefresh({
+  hasActiveSessions: () => activeSessions.value.length > 0,
+  refreshFull: git.refreshOverview,
+  refreshSilent: git.refreshOverviewSilent,
+});
+const { statsRefreshing, refreshStats } = stats;
+
+// ── Tabs ──────────────────────────────────────────────────────────
 const TABS = computed(() => [
   { id: 'overview', label: 'Overview' },
   { id: 'commits', label: unpushedCount.value ? `Commits (${unpushedCount.value})` : 'Commits' },
@@ -402,461 +457,77 @@ const TABS = computed(() => [
   { id: 'sessions', label: activeSessions.value.length ? `Sessions (${activeSessions.value.length})` : 'Sessions' },
   ...(overview.value?.readmePath ? [{ id: 'readme', label: 'README' }] : []),
 ]);
-
-const props = defineProps({ callbacks: { type: Object, required: true } });
-
-const project = ref(null);
-const worktrees = ref([]);
-const viewedPath = ref('');
-const overview = ref(null);
-const loading = ref(false);
-const activeTab = ref('overview');
 watch(activeTab, (tab) => props.callbacks.onTabChange?.(tab));
 
-// Incremented each time open() is called so the watcher fires
-// even when the same project path is re-opened (net-zero ref change
-// would otherwise suppress the Vue watcher).
-const _openCount = ref(0);
-
-// Git actions
-const branches = ref([]);
-const remoteBranches = ref([]);
-const gitBusy = ref(false);
-const gitMessage = ref('');
-const gitError = ref(false);
-const commitMessage = ref('');
-const generating = ref(false);
-const confirmPush = ref(false);
-
-// Create branch dialog
-const showCreateBranch = ref(false);
-const newBranchName = ref('');
-const checkoutBranch = ref(true);
-
-// Avatar
-const avatarDataUrl = ref(null);
-const avatarLoading = ref(false);
-
-// README
-const readmeHtml = ref('');
-
-// Changed files
-const loadingFile = ref(null);
-
-// Diff / file overlay
-const activeDiff = ref(null);
-const activeFile = ref(null);
-const fileContent = ref('');
-const fileModified = ref(false);
-const fileSaving = ref(false);
-const diffContainerRef = ref(null);
-let editorView = null;
-
-// File tree
-const fileTree = ref([]);
-const treeLoading = ref(false);
-const treeSearch = ref('');
-
-// Sessions
-const sessions = ref([]);
-const activeSessions = ref([]);
-
-// Git user identity
-const gitUser = ref({ name: '', email: '' });
-
-// ── Computed ──────────────────────────────────────────────────────
-const avatar = computed(() =>
-  project.value && window.getProjectAvatar
-    ? window.getProjectAvatar(project.value.projectPath)
-    : { initials: '?', color: '#666' }
-);
 const projectName = computed(() =>
   project.value?.projectPath.split('/').filter(Boolean).pop() || ''
 );
-const changedFiles = computed(() => overview.value?.changedFiles || []);
-const unpushedCommits = computed(() => overview.value?.unpushedCommits || []);
-const unpushedCount = computed(() => unpushedCommits.value.length);
-const currentFileIndex = computed(() =>
-  changedFiles.value.findIndex(f => f.file === activeDiff.value?.filePath)
-);
-const overlayTitle = computed(() => {
-  if (activeDiff.value) return basename(activeDiff.value.filePath);
-  if (activeFile.value) return basename(activeFile.value);
-  return '';
-});
-const overlayPath = computed(() => activeDiff.value?.filePath || activeFile.value || '');
 
-const filteredTree = computed(() => {
-  if (!treeSearch.value) return fileTree.value;
-  return filterTree(fileTree.value, treeSearch.value.toLowerCase());
-});
-
-const mrLink = computed(() => {
-  const url = overview.value?.remoteUrl;
-  const branch = overview.value?.branch;
-  if (!url) return null;
-  // Normalise SSH → HTTPS: git@host:path.git → https://host/path
-  let base = url.trim();
-  const ssh = base.match(/^git@([^:]+):(.+?)(?:\.git)?$/);
-  if (ssh) base = `https://${ssh[1]}/${ssh[2]}`;
-  else base = base.replace(/\.git$/, '');
-  if (base.includes('github.com')) {
-    return { type: 'github', label: 'Pull Requests', listUrl: `${base}/pulls` };
-  }
-  if (base.includes('gitlab')) {
-    return { type: 'gitlab', label: 'Merge Requests', listUrl: `${base}/-/merge_requests` };
-  }
-  return null;
-});
-
-// ── Utils ─────────────────────────────────────────────────────────
-function basename(p) { return p ? p.replace(/\\/g, '/').split('/').pop() || p : ''; }
-function fmtDate(t) {
-  if (!t) return '';
-  try { return window.formatDate ? window.formatDate(new Date(t)) : new Date(t).toLocaleDateString(); } catch { return ''; }
-}
-
-function fileStatus(f) {
-  if (!f.added && f.deleted) return 'deleted';
-  if (f.added && !f.deleted) return 'added';
-  return 'modified';
-}
-function fileStatusChar(f) {
-  if (!f.added && f.deleted) return 'D';
-  if (f.added && !f.deleted) return 'A';
-  return 'M';
-}
-
-function filterTree(nodes, q) {
-  const result = [];
-  for (const n of nodes) {
-    if (n.isDir) {
-      const children = filterTree(n.children || [], q);
-      if (children.length) result.push({ ...n, children, _expanded: true });
-    } else if (n.name.toLowerCase().includes(q)) {
-      result.push(n);
-    }
-  }
-  return result;
-}
-
-// ── Data loading ──────────────────────────────────────────────────
-watch([viewedPath, _openCount], async ([p]) => {
-  if (!p) return;
-  activeDiff.value = null;
-  activeFile.value = null;
-  commitMessage.value = '';
-  avatarDataUrl.value = null;
-  readmeHtml.value = '';
-  if (activeTab.value === 'readme') activeTab.value = 'overview';
-  loadAvatar();
-  // Show stale cache immediately — no blank flash
-  const cached = await api.getProjectGitCache(p).catch(() => null);
-  if (cached) {
-    overview.value = cached;
-    loading.value = false;
-  } else {
-    overview.value = null;
-    loading.value = true;
-  }
-  // Load branches + sessions in parallel with fresh overview
-  const rootPath = project.value?.projectPath;
-  const [fresh, br, sess, terminals, userInfo] = await Promise.all([
-    api.getProjectOverview(p).catch(() => null),
-    api.gitBranches(p).catch(() => null),
-    api.getProjectSessions(rootPath || p).catch(() => null),
-    api.getActiveTerminals().catch(() => null),
-    api.getGitUserInfo(p).catch(() => null),
-  ]);
-  overview.value = fresh || overview.value;
-  if (fresh) _pushProjectInfo(p, fresh);
-  branches.value = br?.ok ? br.branches : [];
-  remoteBranches.value = br?.ok ? (br.remotes || []) : [];
-  if (sess?.ok) sessions.value = sess.sessions;
-  if (userInfo?.ok) gitUser.value = { name: userInfo.name, email: userInfo.email };
-  if (terminals) {
-    activeSessions.value = Object.values(terminals)
-      .filter(t => t.projectPath === (rootPath || p) && !t.exited)
-      .map(t => ({ id: t.id, name: t.title || t.id?.slice(0, 12), busy: t.busy || false }));
-  }
-  // Reconcile worktrees against actual git state (source of truth: git worktree list)
-  if (fresh?.worktreePaths !== undefined) {
-    const wtPattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
-    const actualPaths = new Set(fresh.worktreePaths);
-    // Remove stale entries
-    const stale = worktrees.value.filter(w => !actualPaths.has(w.projectPath));
-    if (stale.length) {
-      stale.forEach(w => props.callbacks.worktreeDeleted?.(w.projectPath));
-      if (!actualPaths.has(viewedPath.value)) setViewedPath(rootPath || p);
-    }
-    // Add new entries not yet in store.projects
-    const known = new Set(worktrees.value.map(w => w.projectPath));
-    const added = fresh.worktreePaths
-      .filter(wp => !known.has(wp))
-      .map(wp => { const m = wp.match(wtPattern); return m ? { projectPath: wp, name: m[2] } : null; })
-      .filter(Boolean);
-    if (stale.length || added.length) {
-      worktrees.value = [
-        ...worktrees.value.filter(w => actualPaths.has(w.projectPath)),
-        ...added,
-      ];
-    }
-  }
-  loading.value = false;
-});
-
-watch(activeTab, async (tab) => {
-  if (tab === 'files' && !fileTree.value.length && viewedPath.value) {
-    treeLoading.value = true;
-    const res = await api.getFileTree(viewedPath.value).catch(() => null);
-    if (res?.ok) fileTree.value = res.tree;
-    treeLoading.value = false;
-  }
-  if (tab === 'readme' && !readmeHtml.value && overview.value?.readmePath) {
-    const res = await api.readFileForPanel(overview.value.readmePath).catch(() => null);
-    const content = res?.ok ? res.content : '';
-    readmeHtml.value = content && window.marked ? window.marked.parse(content) : content;
-  }
-});
-
-// ── Diff overlay ──────────────────────────────────────────────────
-watch([activeDiff, activeFile], async ([diff, file]) => {
-  if (editorView) {
-    try { typeof editorView.destroy === 'function' ? editorView.destroy() : editorView.a?.destroy(); } catch {}
-    editorView = null;
-  }
-  if (!diff && !file) return;
-  await nextTick();
-  const el = diffContainerRef.value;
-  if (!el) return;
-  el.innerHTML = '';
-  if (diff) {
-    editorView = window.createReadOnlyMergeViewer?.(el, diff.oldContent, diff.newContent, diff.filePath);
-  } else if (file) {
-    editorView = window.createEditableViewer?.(el, fileContent.value, file);
-    if (editorView) {
-      editorView.dom?.addEventListener('input', () => { fileModified.value = true; });
-    }
-  }
-});
-
-async function openDiff(filePath) {
-  if (loadingFile.value) return;
-  loadingFile.value = filePath;
-  try {
-    const result = await api.getFileDiff(viewedPath.value, filePath);
-    if (!result?.ok) return;
-    activeFile.value = null;
-    activeDiff.value = { filePath, oldContent: result.oldContent, newContent: result.newContent };
-  } finally { loadingFile.value = null; }
-}
-
-async function openFileFromTree(path) {
-  const fullPath = `${viewedPath.value}/${path}`;
-  const res = await api.readFileForPanel(fullPath).catch(() => null);
-  if (!res?.ok) return;
-  fileContent.value = res.content;
-  fileModified.value = false;
-  activeDiff.value = null;
-  activeFile.value = fullPath;
-}
-
-async function saveFile() {
-  if (!activeFile.value || !editorView) return;
-  fileSaving.value = true;
-  const content = editorView.state?.doc?.toString?.() ?? fileContent.value;
-  await api.saveFileForPanel(activeFile.value, content).catch(() => {});
-  fileModified.value = false;
-  fileSaving.value = false;
-}
-
-function closeOverlay() {
-  activeDiff.value = null;
-  activeFile.value = null;
-}
-function prevFile() {
-  const i = currentFileIndex.value;
-  if (i > 0) openDiff(changedFiles.value[i - 1].file);
-}
-function nextFile() {
-  const i = currentFileIndex.value;
-  if (i < changedFiles.value.length - 1) openDiff(changedFiles.value[i + 1].file);
-}
-
-// ── Git actions ───────────────────────────────────────────────────
-function showGitMsg(msg, isError = false, ms = 4000) {
-  gitMessage.value = msg; gitError.value = isError;
-  setTimeout(() => { gitMessage.value = ''; gitError.value = false; }, ms);
-}
-
-async function switchBranch(branch) {
-  if (branch === overview.value?.branch) return;
-  gitBusy.value = true;
-  const res = await api.gitCheckout(viewedPath.value, branch);
-  gitBusy.value = false;
-  if (res.ok) { showGitMsg(`Switched to ${branch}`); await reload(); }
-  else showGitMsg(res.stderr || 'Checkout failed', true);
-}
-
-async function doFetch() {
-  gitBusy.value = true;
-  showGitMsg('Fetching…');
-  const res = await api.gitFetch(viewedPath.value);
-  gitBusy.value = false;
-  if (res.ok) { showGitMsg('Fetched'); const br = await api.gitBranches(viewedPath.value); if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; } }
-  else showGitMsg(res.stderr || 'Fetch failed', true);
-}
-
-async function doPull() {
-  gitBusy.value = true;
-  showGitMsg('Pulling…');
-  const res = await api.gitPull(viewedPath.value);
-  gitBusy.value = false;
-  if (res.ok) { showGitMsg('Pulled'); await reload(); }
-  else showGitMsg(res.stderr || 'Pull failed', true);
-}
-
-async function generateCommitMsg(style = 'short') {
-  generating.value = true; gitBusy.value = true;
-  const res = await api.gitGenerateCommitMsg(viewedPath.value, style);
-  generating.value = false; gitBusy.value = false;
-  if (res.ok) commitMessage.value = res.message;
-  else showGitMsg(res.stderr || 'Generation failed', true);
-}
-
-async function doCommit() {
-  if (!commitMessage.value.trim()) return;
-  gitBusy.value = true;
-  const res = await api.gitCommit(viewedPath.value, commitMessage.value.trim());
-  gitBusy.value = false;
-  if (res.ok) { showGitMsg('Committed'); commitMessage.value = ''; await reload(); }
-  else showGitMsg(res.stderr || 'Commit failed', true);
-}
-
-async function doPush() {
-  confirmPush.value = false;
-  gitBusy.value = true;
-  showGitMsg('Pushing…');
-  const res = await api.gitPush(viewedPath.value);
-  gitBusy.value = false;
-  if (res.ok) { showGitMsg('Pushed successfully'); await reload(); }
-  else showGitMsg(res.stderr || 'Push failed', true);
-}
-
-async function doCreateBranch() {
-  const name = newBranchName.value.trim();
-  if (!name) return;
-  showCreateBranch.value = false;
-  gitBusy.value = true;
-  const res = await api.gitCreateBranch(viewedPath.value, name, checkoutBranch.value);
-  gitBusy.value = false;
-  if (res.ok) {
-    showGitMsg(checkoutBranch.value ? `Switched to new branch "${name}"` : `Created branch "${name}"`);
-    newBranchName.value = '';
-    checkoutBranch.value = true;
-    const br = await api.gitBranches(viewedPath.value).catch(() => null);
-    if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
-    await reload();
-  } else {
-    showGitMsg(res.stderr || 'Failed to create branch', true);
-  }
-}
-
-async function reload() {
-  const p = viewedPath.value;
-  if (!p) return;
-  const fresh = await api.getProjectOverview(p).catch(() => null);
-  overview.value = fresh;
-  _pushProjectInfo(p, fresh);
-}
-
-const statsRefreshing = ref(false);
-
-async function refreshStats() {
-  const p = viewedPath.value;
-  if (!p || statsRefreshing.value) return;
-  statsRefreshing.value = true;
-  try {
-    const [fresh, br] = await Promise.all([
-      api.getProjectOverview(p).catch(() => null),
-      api.gitBranches(p).catch(() => null),
-    ]);
-    if (fresh) overview.value = fresh;
-    if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
-    _pushProjectInfo(p, fresh);
-  } finally {
-    statsRefreshing.value = false;
-  }
-}
-
-function _pushProjectInfo(path, fresh) {
-  if (!fresh) return;
-  window.vueProjects?.updateProjectInfo?.(path, {
-    branch: fresh.branch,
-    added: fresh.totalAdded,
-    deleted: fresh.totalDeleted,
-    unpushedCount: fresh.unpushedCommits?.length ?? 0,
-    containers: fresh.containers,
-  });
-}
-
+// ── Navigation + orchestration ────────────────────────────────────
 function setViewedPath(path) {
   if (path === viewedPath.value) return;
-  fileTree.value = [];
+  tree.reset();
   viewedPath.value = path;
+}
+
+// Each time the viewed path changes (or the same project is re-opened), reset the overlay,
+// avatar and README, reload the Git Snapshot and the Sessions, and reconcile the worktree list
+// against git's source of truth.
+watch([viewedPath, _openCount], async ([p]) => {
+  if (!p) return;
+  closeOverlay();
+  avatarCard.reset();
+  if (activeTab.value === 'readme') activeTab.value = 'overview';
+  avatarCard.loadAvatar();
+  const rootPath = project.value?.projectPath || p;
+  const fresh = await git.load();
+  projectSessions.load(rootPath);
+  reconcileWorktrees(fresh, rootPath);
+});
+
+watch(activeTab, (tab) => {
+  if (tab === 'files') tree.loadTree();
+  if (tab === 'readme') git.loadReadme();
+});
+
+// Reconcile the worktree list against actual git state (source of truth: git worktree list).
+function reconcileWorktrees(fresh, rootPath) {
+  if (fresh?.worktreePaths === undefined) return;
+  const wtPattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
+  const actualPaths = new Set(fresh.worktreePaths);
+  // Remove stale entries
+  const stale = worktrees.value.filter(w => !actualPaths.has(w.projectPath));
+  if (stale.length) {
+    stale.forEach(w => props.callbacks.worktreeDeleted?.(w.projectPath));
+    if (!actualPaths.has(viewedPath.value)) setViewedPath(rootPath);
+  }
+  // Add new entries not yet in the list
+  const known = new Set(worktrees.value.map(w => w.projectPath));
+  const added = fresh.worktreePaths
+    .filter(wp => !known.has(wp))
+    .map(wp => { const m = wp.match(wtPattern); return m ? { projectPath: wp, name: m[2] } : null; })
+    .filter(Boolean);
+  if (stale.length || added.length) {
+    worktrees.value = [
+      ...worktrees.value.filter(w => actualPaths.has(w.projectPath)),
+      ...added,
+    ];
+  }
 }
 
 async function deleteWorktree(wt) {
   if (!confirm(`Delete worktree "${wt.name}" and its branch?\n\nThis cannot be undone.`)) return;
-  const res = await api.deleteWorktree(project.value.projectPath, wt.projectPath);
-  if (!res.ok) { showGitMsg(res.stderr || 'Failed to delete worktree', true); return; }
+  const res = await git.removeWorktree(project.value.projectPath, wt.projectPath);
+  if (!res.ok) { git.showGitMsg(res.stderr || 'Failed to delete worktree', true); return; }
   if (viewedPath.value === wt.projectPath) setViewedPath(project.value.projectPath);
   worktrees.value = worktrees.value.filter(w => w.projectPath !== wt.projectPath);
-  showGitMsg(`Deleted worktree "${wt.name}"${res.branch ? ` and branch "${res.branch}"` : ''}`);
+  git.showGitMsg(`Deleted worktree "${wt.name}"${res.branch ? ` and branch "${res.branch}"` : ''}`);
   props.callbacks.worktreeDeleted?.(wt.projectPath);
 }
 
-function openSession(s) { sb.openSessionById?.(s.id); }
-function openExternal(url) { api.openExternal?.(url); }
-
-async function loadAvatar() {
-  if (!project.value) return;
-  const url = await api.getProjectAvatar(project.value.projectPath).catch(() => null);
-  avatarDataUrl.value = url;
-  if (url) store.avatarDataUrls[project.value.projectPath] = url;
-}
-
-async function updateAvatar() {
-  if (!project.value || !overview.value?.remoteUrl) return;
-  avatarLoading.value = true;
-  try {
-    const url = await api.fetchGitlabAvatar(project.value.projectPath, overview.value.remoteUrl);
-    avatarDataUrl.value = url;
-    if (url) store.avatarDataUrls[project.value.projectPath] = url;
-    else delete store.avatarDataUrls[project.value.projectPath];
-  } catch (e) {
-    console.error('Avatar fetch failed:', e);
-  } finally {
-    avatarLoading.value = false;
-  }
-}
 function newSession(e) { if (project.value) props.callbacks.newSession?.(project.value, e?.currentTarget); }
 
-// ── Periodic git refresh when active sessions are running ─────────
-let _gitRefreshTimer = null;
-
-onMounted(() => {
-  _gitRefreshTimer = setInterval(async () => {
-    const p = viewedPath.value;
-    if (!p || !activeSessions.value.length) return;
-    const fresh = await api.getProjectOverview(p).catch(() => null);
-    if (fresh) overview.value = fresh;
-  }, 30000);
-});
-
-onUnmounted(() => clearInterval(_gitRefreshTimer));
-
-// ── Expose ────────────────────────────────────────────────────────
+// ── Expose (window.vueProjectViewer, installed by the shell) ──────
 defineExpose({
   open(proj, wts = []) {
     project.value = proj;
@@ -864,7 +535,10 @@ defineExpose({
     viewedPath.value = proj?.projectPath || '';
     _openCount.value++;
   },
-  close() { project.value = null; worktrees.value = []; viewedPath.value = ''; overview.value = null; activeDiff.value = null; activeFile.value = null; },
+  close() {
+    project.value = null; worktrees.value = []; viewedPath.value = '';
+    git.reset(); closeOverlay();
+  },
   setTab(tab) { activeTab.value = tab; },
   setViewedPath,
 });
