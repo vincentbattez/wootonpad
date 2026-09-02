@@ -9,6 +9,7 @@
 
 <script setup>
 import { ref, watch } from 'vue';
+import { api } from '../../../shared/services/api.js';
 import { jsonlStore } from '../store.js';
 import { renderTranscript, escapeHtml } from '../render-jsonl.mjs';
 import JsonlPanel from '../components/JsonlPanel.vue';
@@ -24,7 +25,7 @@ const sessionId = ref('');
 const bodyHtml = ref('');
 
 async function open(session) {
-  const result = await window.api.readSessionJsonl(session.sessionId);
+  const result = (await api.readSessionJsonl?.(session.sessionId)) || {};
 
   title.value = session.name || session.aiTitle || session.summary || session.sessionId;
   sessionId.value = session.sessionId;

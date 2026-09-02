@@ -6930,9 +6930,9 @@ body.hide-avatars .grid-card-avatar {
   max-width: 280px;
   padding: 4px;
   background: var(--surface-panel-raised, var(--surface-card));
-  border: 1px solid var(--border-subtle, rgba(255, 255, 255, 0.08));
+  border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+  box-shadow: var(--shadow-md);
   display: flex;
   flex-direction: column;
   gap: 1px;
@@ -6960,7 +6960,7 @@ body.hide-avatars .grid-card-avatar {
 
 .project-menu .project-menu-item:hover {
   background: var(--surface-card);
-  color: var(--gray-100, #fff);
+  color: var(--gray-100);
   opacity: 1;
 }
 
