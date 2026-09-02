@@ -15,6 +15,16 @@ worked so that concurrent agents don't collide.
 Each entry carries `id`, `title`, `body` and `branch`. Use the branch name exactly
 as given — it is deterministic so that a re-run resumes the accumulated progress.
 
+The bodies are not the whole story. When an issue's ordering is unclear, read its
+place in the tree with:
+
+```
+linear issue view <id> --json --no-pager | jq '{parent, children}'
+```
+
+Read **only** those two fields — the full record is far too much to carry for
+every issue, and nothing else in it changes the ordering.
+
 ## Already landed in an earlier iteration
 
 {{LANDED_ISSUES}}
@@ -24,8 +34,13 @@ These are done. Do **not** include them in your output.
 # TASK
 
 Group the remaining issues into **waves**. All issues inside a wave run
-concurrently, in separate sandboxes, each branched from `{{BASE_BRANCH}}`. Waves
-run one after another.
+concurrently, in separate sandboxes. Waves run one after another, and each wave
+is branched from `{{BASE_BRANCH}}` **plus everything the earlier waves landed** —
+so an issue placed in a later wave really can read and build on the code the
+earlier ones wrote.
+
+That chaining is also the cost: everything in the same wave sees only the waves
+before it, never its own siblings.
 
 Put issue B in a later wave than issue A when:
 
