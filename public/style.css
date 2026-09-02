@@ -843,22 +843,36 @@ body { display: flex; flex-direction: column; }
   flex-shrink: 0;
 }
 
-.account-usage-bar {
-  flex: 1;
+/* The shared SbMeter Primitive: track + fill + optional tick. Its accent and
+   the warn/danger flips all come from the token layer, never a raw colour. */
+.sb-meter {
   height: 3px;
   background: var(--neutral-a4);
   border-radius: 2px;
   overflow: hidden;
+  position: relative;
 }
 
-.account-usage-bar-fill {
+.sb-meter-fill {
   height: 100%;
   background: var(--orange-500);
   border-radius: 2px;
 }
 
-.account-usage-bar-fill.warn { background: var(--amber-9); }
-.account-usage-bar-fill.danger { background: var(--red-9); }
+.sb-meter-fill.warn { background: var(--amber-9); }
+.sb-meter-fill.danger { background: var(--red-9); }
+
+.sb-meter-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--text-tertiary);
+}
+
+/* The account usage bar fills the row between its label and its figure — the
+   layout the SbMeter sits in, kept on the account side of the Primitive. */
+.account-usage-meter { flex: 1; }
 
 .account-usage-info {
   font-size: 10px;

@@ -19,6 +19,16 @@ export function usageRows(u) {
   return rows;
 }
 
+// The panel's severity rule for a usage percentage: warn at 70 %, danger at 90 %. These two
+// thresholds live here — the caller's rule — because the shared SbMeter Primitive knows no
+// threshold; it is handed the already-computed severity state. The context gauge (a second
+// SbMeter caller) keeps its own, different rule in its own pure module.
+export function usageSeverity(pct) {
+  if (pct >= 90) return 'danger';
+  if (pct >= 70) return 'warn';
+  return '';
+}
+
 // The dropdown's compact chips: just the 5-hour figure when it is usable.
 export function usageChips(u) {
   if (!hasUsage(u)) return [];
