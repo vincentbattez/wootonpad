@@ -389,8 +389,8 @@
 import { ref, computed, watch } from 'vue';
 import ProjectAvatar from '../features/projects/components/ProjectAvatar.vue';
 import FileTreeNode from '../features/projects/components/FileTreeNode.vue';
-import SbButton from '../components/SbButton.vue';
-import SbSwitch from '../components/SbSwitch.vue';
+import SbButton from '../shared/ui/SbButton.vue';
+import SbSwitch from '../shared/ui/SbSwitch.vue';
 import { useGitSnapshot } from '../features/projects/composables/use-git-snapshot.js';
 import { useFileTree } from '../features/projects/composables/use-file-tree.js';
 import { useProjectAvatarCard } from '../features/projects/composables/use-project-avatar-card.js';

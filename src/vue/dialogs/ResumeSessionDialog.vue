@@ -41,7 +41,7 @@
 <script setup>
 import { computed, watch } from 'vue';
 import SbDialog from '../shared/ui/SbDialog.vue';
-import SbSwitch from '../components/SbSwitch.vue';
+import SbSwitch from '../shared/ui/SbSwitch.vue';
 import PermissionModeGrid from '../shared/ui/PermissionModeGrid.vue';
 import { dialogStore, closeResumeSession } from './dialog-store.js';
 import { useDialogKeys } from './use-dialog-keys.js';

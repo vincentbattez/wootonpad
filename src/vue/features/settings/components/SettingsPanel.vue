@@ -236,8 +236,8 @@
 
 <script setup>
 import SettingsField from './SettingsField.vue';
-import SbSwitch from '../../../components/SbSwitch.vue';
-import SbButton from '../../../components/SbButton.vue';
+import SbSwitch from '../../../shared/ui/SbSwitch.vue';
+import SbButton from '../../../shared/ui/SbButton.vue';
 
 // The Settings panel, made Dumb: every setting is a SettingsField entry wrapping its own
 // control. It holds no service and no store — the reactive `form` and `useGlobal` objects

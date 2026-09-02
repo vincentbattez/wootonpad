@@ -19,15 +19,17 @@
 
 <script setup>
 import { computed } from 'vue';
-import { store } from '../store.js';
-import { buildSidebarTree, subtreeAreaIds } from '../area-tree.mjs';
-import { filterSessions } from '../session-list.mjs';
-import { useDropTarget } from '../shared/composables/use-drop-target.js';
-import AreaContainer from '../features/areas/containers/AreaContainer.vue';
+import { store } from '../../../store.js';
+import { sb } from '../../../shared/services/sb.js';
+import { buildSidebarTree, subtreeAreaIds } from '../../../area-tree.mjs';
+import { filterSessions } from '../../../session-list.mjs';
+import { useDropTarget } from '../../../shared/composables/use-drop-target.js';
+import AreaContainer from '../../areas/containers/AreaContainer.vue';
 
-const props = defineProps({
-  callbacks: { type: Object, required: true },
-});
+// The sessions sidebar tree — the Session/Project/Area/Slug rows filed under the
+// Sessions tab. It reads the store, builds the tree through the pure modules and
+// turns every row emit into a service call directly, so the callbacks prop object the
+// shell used to hand down is gone (VIN-124, user story 25).
 
 const worktreePattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
 
@@ -139,21 +141,21 @@ const shared = computed(() => ({
 }));
 
 const listeners = {
-  onOpen: (session) => props.callbacks.openSession?.(session),
-  onStop: (id) => props.callbacks.stopSession?.(id),
-  onStar: (id) => props.callbacks.toggleStar?.(id),
-  onArchive: (id) => props.callbacks.archiveSession?.(id),
-  onFork: (id) => props.callbacks.forkSession?.(id),
-  onJsonl: (id) => props.callbacks.showJsonl?.(id),
-  onLaunchConfig: (id) => props.callbacks.launchConfig?.(id),
-  onRename: (id, name) => props.callbacks.renameSession?.(id, name),
-  onNewSession: (project, btn) => props.callbacks.newSession?.(project, btn),
-  onSettings: (path) => props.callbacks.openSettings?.(path),
-  onOpenExternalIde: (path) => props.callbacks.openExternalIde?.(path),
-  onOpenProjectFolder: (path) => props.callbacks.openProjectFolder?.(path),
-  onRunProject: (path) => props.callbacks.runProject?.(path),
-  onArchiveSessions: (sessions) => props.callbacks.archiveSessions?.(sessions),
-  onRemoveProject: (path) => props.callbacks.removeProject?.(path),
+  onOpen: (session) => sb.openSession?.(session),
+  onStop: (id) => sb.stopSession?.(id),
+  onStar: (id) => sb.toggleStar?.(id),
+  onArchive: (id) => sb.archiveSession?.(id),
+  onFork: (id) => sb.forkSession?.(id),
+  onJsonl: (id) => sb.showJsonl?.(id),
+  onLaunchConfig: (id) => sb.launchConfig?.(id),
+  onRename: (id, name) => sb.renameSession?.(id, name),
+  onNewSession: (project, btn) => sb.newSession?.(project, btn),
+  onSettings: (path) => sb.openSettings?.(path),
+  onOpenExternalIde: (path) => sb.openExternalIde?.(path),
+  onOpenProjectFolder: (path) => sb.openProjectFolder?.(path),
+  onRunProject: (path) => sb.runProject?.(path),
+  onArchiveSessions: (sessions) => sb.archiveSessions?.(sessions),
+  onRemoveProject: (path) => sb.removeProject?.(path),
 };
 
 // The root drop zone: a drop that reaches this outer element (not caught by an Area or Project

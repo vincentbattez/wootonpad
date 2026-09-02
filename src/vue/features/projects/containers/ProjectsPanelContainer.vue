@@ -3,7 +3,7 @@
     <div class="project-group">
       <div class="project-header">
         <span class="project-name">Projects ({{ filteredProjects.length }})</span>
-        <button class="project-new-btn" data-tooltip="Add" @click="callbacks.addProject?.()">
+        <button class="project-new-btn" data-tooltip="Add" @click="onAddProject">
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
             <line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/>
           </svg>
@@ -84,7 +84,7 @@
               <button
                 class="project-card-new-btn"
                 data-tooltip="New session"
-                @click.stop="callbacks.newSession?.(project, $event.currentTarget)"
+                @click.stop="onNewSession(project, $event.currentTarget)"
               >
                 <svg width="13" height="13" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
                   <line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/>
@@ -101,7 +101,7 @@
         </div>
       </div>
       <div class="projects-add-row">
-        <button class="projects-add-btn" @click="callbacks.addProject?.()">
+        <button class="projects-add-btn" @click="onAddProject">
           <svg width="11" height="11" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
             <line x1="6" y1="1" x2="6" y2="11"/><line x1="1" y1="6" x2="11" y2="6"/>
           </svg>
@@ -114,15 +114,16 @@
 
 <script setup>
 import { ref, computed } from 'vue';
-import { projectsIcons } from '../shared/lib/icons.js';
-import { api } from '../shared/services/api.js';
-import ProjectAvatar from '../features/projects/components/ProjectAvatar.vue';
-import { projectsStore } from '../stores/projects.js';
+import { projectsIcons } from '../../../shared/lib/icons.js';
+import { api } from '../../../shared/services/api.js';
+import { sb } from '../../../shared/services/sb.js';
+import ProjectAvatar from '../components/ProjectAvatar.vue';
+import { projectsStore } from '../../../stores/projects.js';
 const { trashSvg } = projectsIcons;
 
-const props = defineProps({
-  callbacks: { type: Object, required: true },
-});
+// The Projects tab panel. It reads the panel store the projects Bridge writes
+// (window.vueProjects → stores/projects.js) and turns each row action into a service
+// call, so the callbacks prop object the shell used to hand down is gone (VIN-124).
 
 // Read the feature store the projects bridge writes; the info queue and its
 // rAF batching live in the bridge now, so this component is a pure reader.
@@ -185,16 +186,19 @@ function parseUptime(status) {
   return window.parseContainerUptime ? window.parseContainerUptime(status) : '';
 }
 
+function onAddProject() { sb.addProject?.(); }
+function onNewSession(project, btn) { sb.newSession?.(project, btn); }
+
 function openProject(project) {
   projectsStore.activeProjectPath = project.projectPath;
-  props.callbacks.openProject?.(project);
+  sb.openProject?.(project);
 }
 
 async function removeProject(project) {
   const name = project.projectPath.split('/').pop();
   if (!confirm(`Remove "${name}" from the project list?\n\nSession files are not deleted.`)) return;
   await api.removeProject(project.projectPath);
-  props.callbacks.projectRemoved?.();
+  sb.projectRemoved?.();
 }
 
 </script>
