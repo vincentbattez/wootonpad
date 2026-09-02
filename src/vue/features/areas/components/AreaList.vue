@@ -14,7 +14,7 @@
         v-bind="$attrs"
       />
     </AreaItem>
-    <ProjectGroup
+    <ProjectContainer
       v-else
       :project="node.project"
       :worktrees="worktreeMap.get(node.projectPath) || []"
@@ -25,12 +25,13 @@
 
 <script setup>
 import AreaItem from './AreaItem.vue';
-import ProjectGroup from '../../../components/ProjectGroup.vue';
+import ProjectContainer from '../../projects/containers/ProjectContainer.vue';
 
 // The ordered list of Area rows and the Project rows filed at that level: Areas render as an
-// AreaItem whose slot is this same list one level down, Projects as a ProjectGroup. A Dumb
-// Component — the Area handlers arrive as a bundle and the Project row's props and listeners ride
-// through on `$attrs`, both passed straight through however deep the tree goes.
+// AreaItem whose slot is this same list one level down, Projects as a ProjectContainer (the
+// projects Feature's edge). A Dumb Component — the Area handlers arrive as a bundle and the Project
+// row's props and listeners ride through on `$attrs`, both passed straight through however deep the
+// tree goes.
 defineOptions({ inheritAttrs: false });
 
 defineProps({

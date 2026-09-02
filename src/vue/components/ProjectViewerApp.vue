@@ -393,7 +393,7 @@ import { store } from '../store.js';
 import FileTreeNode from './FileTreeNode.vue';
 import SbButton from './SbButton.vue';
 import SbSwitch from './SbSwitch.vue';
-import ProjectAvatar from './ProjectAvatar.vue';
+import ProjectAvatar from '../features/projects/components/ProjectAvatar.vue';
 
 const TABS = computed(() => [
   { id: 'overview', label: 'Overview' },

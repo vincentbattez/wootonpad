@@ -13,7 +13,7 @@ import NewSessionPopover from '../dialogs/NewSessionPopover.vue';
 import NewSessionDialog from '../dialogs/NewSessionDialog.vue';
 import ResumeSessionDialog from '../dialogs/ResumeSessionDialog.vue';
 import AreaDialog from '../features/areas/dialogs/AreaDialog.vue';
-import AddProjectDialog from '../dialogs/AddProjectDialog.vue';
+import AddProjectDialog from '../features/projects/dialogs/AddProjectDialog.vue';
 import {
   openNewSession, openResumeSession, openAddProject, openPopover, openAreaDialog,
 } from '../dialogs/dialog-store.js';

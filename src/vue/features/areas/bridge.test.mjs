@@ -9,7 +9,6 @@ function makeStore() {
     areas: [],
     areaAssignments: [],
     renamingAreaId: null,
-    renamingProjectPath: null,
   };
 }
 
