@@ -64,3 +64,39 @@ _Avoid_: detail, info, status
 **External IDE**:
 A code editor installed on the machine, outside WootonPad, that a Project can be handed off to. Always qualified as _external_ — unqualified "IDE" refers to WootonPad acting as an IDE for the Claude CLI.
 _Avoid_: IDE (unqualified), editor
+
+## Architecture front
+
+Terms describing how the renderer's Vue layer is organised. Each is defined by the constraint it carries in this repo, not by its generic meaning elsewhere.
+
+**Feature**:
+A folder under `src/vue/features/` owning one piece of the domain — its Dumb Components, its Containers, its composables, its store, its Bridge and its pure modules. Movable: everything crossing its boundary is a prop, an emit, or its Bridge.
+_Avoid_: Module, package, domain
+
+**Dumb Component**:
+A component that may import from `vue` and `shared/ui` and nothing else — no store, no service, no `window.*`. Its inputs are props, its outputs are emits, and it never invents a CSS class.
+_Avoid_: Presentational, pure component, view component
+
+**Container**:
+A component holding behaviour: it reads its Feature's store, calls services, and composes Dumb Components. Exactly one per Feature — the one the outside mounts — imports the service layer; the others receive what they need as props.
+_Avoid_: Smart component, controller, provider
+
+**Page**:
+A screen occupying the sidebar column, one per sidebar tab. It assembles Containers and holds no logic of its own.
+_Avoid_: Panel, tab, screen
+
+**View**:
+A screen occupying the main surface — the JSONL viewer, the Project Viewer, Stats, Grid. Same rule as a Page, different surface.
+_Avoid_: Overlay, viewer (unqualified), route
+
+**Primitive**:
+A cross-Feature Dumb Component under `shared/ui`, prefixed `Sb`. It carries no word from this glossary — a file naming a Session, an Area, a Project or a Slug belongs to its Feature.
+_Avoid_: Atom, base component, widget
+
+**Compound Component**:
+A Primitive whose parts share a context provided by the parent. A part is never rendered outside its parent, and exists only when it consumes that context — otherwise the parent exposes a named slot instead.
+_Avoid_: Slot component, subcomponent (unqualified)
+
+**Bridge**:
+The set of `window.vue*` objects a Feature exposes to the frozen legacy renderer. Owned by the Feature it serves, and written into that Feature's store — never into a component's private state.
+_Avoid_: Adapter, API, glue
