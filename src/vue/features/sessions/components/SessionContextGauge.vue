@@ -19,7 +19,7 @@
 import { computed } from 'vue';
 import SbMeter from '../../../shared/ui/SbMeter.vue';
 import {
-  windowFor, tickTokens, contextTotal, formatTokens, formatLabel, severityFor,
+  windowFor, tickTokens, contextTotal, formatLabel, severityFor,
 } from '../context-gauge.mjs';
 
 // The resting context gauge for the terminal header. Dumb: it takes the last assistant
@@ -46,7 +46,7 @@ const tooltip = computed(() => {
   const u = props.usage;
   const n = (x) => (x || 0).toLocaleString();
   return [
-    'Context ' + formatTokens(total.value) + ' / ' + formatTokens(windowSize.value),
+    'Context ' + label.value,
     'Model: ' + (props.model || 'unknown'),
     'Cache read: ' + n(u.cacheReadTokens),
     'Cache creation: ' + n(u.cacheCreationTokens),
