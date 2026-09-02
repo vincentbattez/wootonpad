@@ -12,7 +12,7 @@ import { store, slices, sessionsStore, settingsStore, sidebarStore, areasStore, 
 const OWNERSHIP = {
   sessionsStore: [
     'projects', 'activePtyIds', 'activeSessionId', 'sessionBusyState',
-    'attentionSessions', 'responseReadySessions', 'lastActivityTime', 'pendingSessions',
+    'attentionSessions', 'responseReadySessions', 'lastActivityTime', 'pendingSessions', 'sessionContext',
   ],
   settingsStore: ['settingsOpen', 'settingsScope', 'settingsProjectPath'],
   sidebarStore: [
@@ -24,7 +24,7 @@ const OWNERSHIP = {
     'loadingStatus', 'accountSwitching', 'showStats',
     'showJsonl', 'planViewerOpen', 'memoryViewerOpen', 'gridViewActive', 'gridViewerCount',
   ],
-  headerStore: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts', 'headerContext'],
+  headerStore: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts'],
   avatarsStore: ['avatarDataUrls', 'areaAvatarDataUrls'],
   navigationStore: [
     'activeTab', 'sidebarCollapsed', 'searchQuery', 'searchTitlesOnly',

@@ -38,7 +38,6 @@
         </div>
       </div>
       <div class="vsh-controls">
-        <SessionContextGauge :usage="contextUsage" :model="contextModel" />
         <span v-if="account" class="terminal-account-badge">{{ account }}</span>
         <span v-if="shellProfile" class="vsh-shell-badge">{{ shellProfile }}</span>
         <button class="session-stop-btn vsh-stop" data-tooltip="Stop session" @click="$emit('stop')"><SessionStopIcon /></button>
@@ -51,7 +50,6 @@
 import { computed } from 'vue';
 import SbAvatar from '../../../shared/ui/SbAvatar.vue';
 import SessionStopIcon from '../icons/SessionStopIcon.vue';
-import SessionContextGauge from './SessionContextGauge.vue';
 
 // The terminal header for the active Session. Dumb: it takes the Session plus its already-resolved
 // name, AI title, time and live status, and emits `stop`. The pure pieces — the shortened project
@@ -68,8 +66,6 @@ const props = defineProps({
   account: { type: String, default: null },
   shellProfile: { type: String, default: null },
   avatar: { type: Object, default: () => ({ dataUrl: null, alt: '', initials: '', color: '' }) },
-  contextUsage: { type: Object, default: null },
-  contextModel: { type: String, default: null },
 });
 
 defineEmits(['stop']);

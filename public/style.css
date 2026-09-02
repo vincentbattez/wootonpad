@@ -859,7 +859,9 @@ body { display: flex; flex-direction: column; }
   border-radius: 2px;
 }
 
+.sb-meter-fill.base { background: var(--blue-9); }
 .sb-meter-fill.warn { background: var(--amber-9); }
+.sb-meter-fill.high { background: var(--orange-9); }
 .sb-meter-fill.danger { background: var(--red-9); }
 
 /* The optional autocompact tick: a 1px marker across the track. Its colour comes from
@@ -1943,6 +1945,49 @@ body { display: flex; flex-direction: column; }
   font-size: 13px;
   color: var(--text-disabled);
   margin-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-meta-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The context gauge slot. At full density it reserves its width whether or not a gauge is
+   showing, so the first assistant turn's arrival shifts nothing; on a Session row it is
+   compact and collapses to nothing until there is a context to show. */
+.session-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 96px;
+  flex-shrink: 0;
+}
+
+.session-context--compact {
+  width: auto;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.session-context-meter {
+  flex: 1;
+}
+
+.session-context--compact .session-context-meter {
+  flex: none;
+  width: 32px;
+}
+
+.session-context-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 /* ---- Session action buttons ---- */
@@ -2537,26 +2582,6 @@ body { display: flex; flex-direction: column; }
   justify-content: center;
 }
 
-/* The context gauge slot in the header controls. It reserves its width whether or not a
-   gauge is showing, so the first assistant turn's arrival shifts nothing. */
-.vsh-context {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  width: 96px;
-  flex-shrink: 0;
-}
-
-.vsh-context-meter {
-  flex: 1;
-}
-
-.vsh-context-label {
-  font-size: 10px;
-  color: var(--text-tertiary);
-  font-family: var(--font-mono);
-  white-space: nowrap;
-}
 /* ─────────────────────────────────────────────────────────────── */
 
 #terminals {

@@ -52,8 +52,36 @@ export function formatLabel(used, window) {
   return formatTokens(used) + ' / ' + formatTokens(window);
 }
 
-// One calm accent colour up to the tick, a flip to danger past it — no intermediate bands.
-// The empty string is the calm state; 'danger' is the SbMeter severity modifier.
-export function severityFor(used, model) {
-  return used >= tickTokens(model) ? 'danger' : '';
+// The colour tiers, in absolute tokens — not fractions of the window. Copied from the
+// terminal statusline's context bar (~/.claude/statusline/context-bar/context-bar.sh) so
+// both gauges flip on the same numbers: blue, then yellow, orange and red.
+export const WARN_TOKENS = 90000;
+export const HIGH_TOKENS = 120000;
+export const CRIT_TOKENS = 150000;
+
+// The SbMeter severity modifier for a context size. Absolute thresholds, so a 1M-window
+// model colours on the same tokens a 200k one does — what hurts is the count, not the ratio.
+export function severityFor(used) {
+  if (used >= CRIT_TOKENS) return 'danger';
+  if (used >= HIGH_TOKENS) return 'high';
+  if (used >= WARN_TOKENS) return 'warn';
+  return 'base';
+}
+
+// The live push's values, re-applied onto a freshly rebuilt Session tree. `projects` comes
+// back from the main process on every folder refresh, its rows rebuilt from the cache — and
+// a row rebuilt before the .jsonl's last turn is indexed carries no usage yet. Without this
+// the gauge would blink out under a running session and only settle once it stopped.
+// `contexts` is a Map of sessionId → { usage, model }; mutates the rows in place.
+export function applyStoredContext(projects, contexts) {
+  if (!contexts || !contexts.size) return projects;
+  for (const project of projects || []) {
+    for (const session of project.sessions || []) {
+      const ctx = contexts.get(session.sessionId);
+      if (!ctx) continue;
+      session.contextUsage = ctx.usage;
+      session.contextModel = ctx.model;
+    }
+  }
+  return projects;
 }

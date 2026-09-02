@@ -3,6 +3,10 @@ import assert from 'node:assert/strict';
 import {
   DEFAULT_WINDOW,
   AUTOCOMPACT_FRACTION,
+  applyStoredContext,
+  WARN_TOKENS,
+  HIGH_TOKENS,
+  CRIT_TOKENS,
   windowFor,
   tickTokens,
   contextTotal,
@@ -49,10 +53,40 @@ test('formatLabel reads "used / window"', () => {
   assert.equal(formatLabel(48000, 200000), '48k / 200k');
 });
 
-test('severityFor stays calm below the tick and flips to danger past it', () => {
-  const tick = tickTokens('claude-opus-4'); // 184000
-  assert.equal(severityFor(tick - 1, 'claude-opus-4'), '');
-  assert.equal(severityFor(tick, 'claude-opus-4'), 'danger');
-  assert.equal(severityFor(tick + 1, 'claude-opus-4'), 'danger');
-  assert.equal(severityFor(0, 'claude-opus-4'), '');
+test('severityFor climbs the statusline tiers on absolute token counts', () => {
+  assert.equal(severityFor(0), 'base');
+  assert.equal(severityFor(WARN_TOKENS - 1), 'base');
+  assert.equal(severityFor(WARN_TOKENS), 'warn');
+  assert.equal(severityFor(HIGH_TOKENS - 1), 'warn');
+  assert.equal(severityFor(HIGH_TOKENS), 'high');
+  assert.equal(severityFor(CRIT_TOKENS - 1), 'high');
+  assert.equal(severityFor(CRIT_TOKENS), 'danger');
+});
+
+test('the tiers are the statusline context bar\'s, in absolute tokens', () => {
+  assert.equal(WARN_TOKENS, 90000);
+  assert.equal(HIGH_TOKENS, 120000);
+  assert.equal(CRIT_TOKENS, 150000);
+});
+
+test('a 1M-window model colours on the same counts as a 200k one', () => {
+  assert.equal(severityFor(contextTotal({ inputTokens: CRIT_TOKENS })), 'danger');
+});
+
+test('applyStoredContext puts the live values back on a rebuilt tree', () => {
+  const usage = { inputTokens: 1, cacheCreationTokens: 2, cacheReadTokens: 3, outputTokens: 4 };
+  const projects = [{ sessions: [{ sessionId: 'a' }, { sessionId: 'b', contextUsage: null }] }];
+  const contexts = new Map([['b', { usage, model: 'claude-opus-5' }]]);
+
+  applyStoredContext(projects, contexts);
+
+  assert.equal(projects[0].sessions[0].contextUsage, undefined);
+  assert.deepEqual(projects[0].sessions[1].contextUsage, usage);
+  assert.equal(projects[0].sessions[1].contextModel, 'claude-opus-5');
+});
+
+test('applyStoredContext leaves the tree alone when nothing is stored', () => {
+  const projects = [{ sessions: [{ sessionId: 'a', contextUsage: null }] }];
+  assert.equal(applyStoredContext(projects, new Map()), projects);
+  assert.equal(projects[0].sessions[0].contextUsage, null);
 });
