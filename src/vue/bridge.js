@@ -32,31 +32,9 @@ export function createSidebarBridge(store) {
 // The Plans and Memory panels moved to the agent-files Feature; window.vuePlans and
 // window.vueMemory are composed there (see features/agent-files/bridge.js).
 
-// window.vueAccounts: the Accounts panel list, its active account and usage.
-export function createAccountsBridge(store) {
-  return {
-    setAccounts(list, activeId) {
-      store.accounts = list;
-      if (activeId !== undefined) store.activeAccountId = activeId;
-    },
-    setActiveAccount(id) { store.activeAccountId = id; },
-    setUsage(usage) { store.usage = { ...usage }; },
-  };
-}
-
-// window.vueAccountDropdown: the sidebar account switcher.
-export function createAccountDropdownBridge(store) {
-  return {
-    setAccounts(list, activeId, usage) {
-      store.accounts = list;
-      if (activeId !== undefined) store.activeAccountId = activeId;
-      if (usage !== undefined) store.usage = usage;
-    },
-    setActiveAccount(id) { store.activeAccountId = id; },
-    setUsage(usage) { store.usage = { ...usage }; },
-    close() { store.open = false; },
-  };
-}
+// The accounts panel and the sidebar switcher declare their Bridges in the accounts Feature
+// (features/accounts/bridge.js), composed into window.vueAccounts / window.vueAccountDropdown
+// in main.js, so the folder can move with its whole contract.
 
 // window.vueProjects: the Projects panel, plus the lazy per-project git/container
 // info queue. Guarded so the bridge stays inert without window.api or rAF.

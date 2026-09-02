@@ -2,8 +2,6 @@ import { createApp } from 'vue';
 import { store } from './store.js';
 import {
   createSidebarBridge,
-  createAccountsBridge,
-  createAccountDropdownBridge,
   createGridBridge,
   createProjectsBridge,
   createJsonlViewerBridge,
@@ -15,8 +13,8 @@ import { createAgentFilesBridge } from './features/agent-files/bridge.js';
 import { agentFilesStore } from './features/agent-files/store.js';
 import { statsStore } from './features/stats/stats-store.js';
 import { createStatsBridge } from './features/stats/stats-bridge.js';
-import { accountsStore } from './stores/accounts.js';
-import { accountDropdownStore } from './stores/account-dropdown.js';
+import { createAccountsBridge, createAccountDropdownBridge } from './features/accounts/bridge.js';
+import { accountsStore, accountDropdownStore } from './features/accounts/store.js';
 import { createStatusBarBridge } from './features/status-bar/bridge.js';
 import { statusBarStore } from './features/status-bar/store.js';
 import { gridStore } from './stores/grid.js';
