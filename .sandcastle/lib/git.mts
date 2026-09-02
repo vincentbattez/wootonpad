@@ -9,6 +9,8 @@ const SANDCASTLE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
 export const {
   git,
+  listRefs,
+  fetchRemote,
   tipOf,
   isAncestor,
   branchHasCommits,

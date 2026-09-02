@@ -116,16 +116,18 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
   };
 
   /**
-   * The branch a wave is cut from: the base branch plus every leaf branch that
-   * landed before it, in landing order. Rebuilt from scratch on every wave, so
-   * it never drifts from the list it is meant to represent.
+   * The branch a wave is cut from: `base` plus every leaf branch that landed
+   * before it, in landing order. Rebuilt from scratch on every wave, so it
+   * never drifts from the list it is meant to represent. `base` is the root's
+   * resume point, not necessarily the project's base branch.
    */
   const buildWaveBase = async (
     branch: string,
+    base: string,
     sources: string[],
   ): Promise<string> => {
-    if (sources.length === 0) return baseBranch;
-    await mergeInWorktree(branch, baseBranch, sources);
+    if (sources.length === 0) return base;
+    await mergeInWorktree(branch, base, sources);
     return branch;
   };
 
@@ -150,8 +152,26 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
     await mergeInWorktree(branch, null, [base]);
   };
 
+  /** Every branch known locally, plus every branch known on the remote. */
+  const listRefs = async (remote: string): Promise<string[]> => {
+    const out = await git(
+      "for-each-ref",
+      "--format=%(refname:short)",
+      "refs/heads",
+      `refs/remotes/${remote}`,
+    );
+    return out ? out.split("\n") : [];
+  };
+
+  /** Best-effort: a stale remote view is worse than a slow start, never fatal. */
+  const fetchRemote = async (remote: string): Promise<void> => {
+    await git("fetch", "--prune", remote).catch(() => {});
+  };
+
   return {
     git,
+    listRefs,
+    fetchRemote,
     tipOf,
     isAncestor,
     branchHasCommits,

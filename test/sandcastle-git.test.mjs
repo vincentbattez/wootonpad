@@ -89,7 +89,7 @@ test("buildWaveBase: with nothing landed, the base is the base branch", async (t
   const { ops, cleanup } = await fixture();
   t.after(cleanup);
 
-  assert.equal(await ops.buildWaveBase("wave-base/R", []), "main");
+  assert.equal(await ops.buildWaveBase("wave-base/R", "main", []), "main");
 });
 
 test("buildWaveBase: carries every landed branch's files", async (t) => {
@@ -102,7 +102,7 @@ test("buildWaveBase: carries every landed branch's files", async (t) => {
   await commit("b.txt", "b\n");
   await git("checkout", "main");
 
-  const base = await ops.buildWaveBase("wave-base/R", ["leaf-a", "leaf-b"]);
+  const base = await ops.buildWaveBase("wave-base/R", "main", ["leaf-a", "leaf-b"]);
   assert.equal(base, "wave-base/R");
 
   const files = await git("ls-tree", "--name-only", "-r", base);
@@ -119,8 +119,8 @@ test("buildWaveBase: rebuilt from the base branch, never drifting", async (t) =>
   await commit("b.txt", "b\n");
   await git("checkout", "main");
 
-  await ops.buildWaveBase("wave-base/R", ["leaf-a", "leaf-b"]);
-  await ops.buildWaveBase("wave-base/R", ["leaf-a"]);
+  await ops.buildWaveBase("wave-base/R", "main", ["leaf-a", "leaf-b"]);
+  await ops.buildWaveBase("wave-base/R", "main", ["leaf-a"]);
 
   const files = await git("ls-tree", "--name-only", "-r", "wave-base/R");
   assert.deepEqual(
@@ -141,7 +141,7 @@ test("buildWaveBase: a conflict throws instead of shipping a guess", async (t) =
   await git("checkout", "main");
 
   await assert.rejects(
-    () => ops.buildWaveBase("wave-base/R", ["leaf-a", "leaf-b"]),
+    () => ops.buildWaveBase("wave-base/R", "main", ["leaf-a", "leaf-b"]),
     /Cannot assemble wave-base\/R: merging leaf-b conflicts/,
   );
 });
@@ -156,8 +156,8 @@ test("buildWaveBase: leaves no worktree behind, success or failure", async (t) =
   await commit("shared.txt", "from b\n");
   await git("checkout", "main");
 
-  await ops.buildWaveBase("wave-base/R", ["leaf-a"]);
-  await ops.buildWaveBase("wave-base/R", ["leaf-a", "leaf-b"]).catch(() => {});
+  await ops.buildWaveBase("wave-base/R", "main", ["leaf-a"]);
+  await ops.buildWaveBase("wave-base/R", "main", ["leaf-a", "leaf-b"]).catch(() => {});
 
   const worktrees = await git("worktree", "list");
   assert.equal(worktrees.split("\n").length, 1, worktrees);

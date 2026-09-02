@@ -8,6 +8,7 @@ import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { config } from "./config.mts";
 import { git } from "./git.mts";
+import { integrationBranchPattern } from "./resume.mts";
 
 const exec = promisify(execFile);
 
@@ -19,11 +20,6 @@ const REPO = config.git.repo!;
 async function gh(...args: string[]): Promise<string> {
   const { stdout } = await exec("gh", args, { maxBuffer: 16 * 1024 * 1024 });
   return stdout.trim();
-}
-
-/** `ABC-1`, `ABC-1-2`, `ABC-1-3`, … — matches the integration branch family. */
-function integrationBranchPattern(rootId: string): RegExp {
-  return new RegExp(`^${rootId}(-\\d+)?$`);
 }
 
 /**

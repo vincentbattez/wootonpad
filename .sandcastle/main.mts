@@ -29,9 +29,13 @@ import { markPhase, phaseDone } from "./lib/progress.mts";
 import {
   branchHasCommits,
   buildWaveBase,
+  fetchRemote,
+  isAncestor,
+  listRefs,
   rebaseLeafOnto,
   tipOf,
 } from "./lib/git.mts";
+import { alreadyLanded, pickResumeBase } from "./lib/resume.mts";
 import {
   createPullRequest,
   nextIntegrationBranch,
@@ -165,6 +169,19 @@ async function runLeaf(
   branch: string,
   baseBranch: string,
 ): Promise<Outcome> {
+  // Work an earlier attempt already folded into the base needs no agent. A
+  // branch that exists but never produced anything is not that — it is the
+  // work this run is here to finish.
+  const landedEarlier = await alreadyLanded(branch, {
+    hasOwnWork: () => branchHasCommits(branch, BASE_BRANCH),
+    isContainedInResumeBase: () => isAncestor(branch, baseBranch),
+  });
+
+  if (landedEarlier) {
+    console.log(`[${leaf.id}] already in ${baseBranch} — skipping`);
+    return "empty";
+  }
+
   await rebaseLeafOnto(branch, baseBranch);
 
   const baseTip = await tipOf(baseBranch);
@@ -272,6 +289,7 @@ async function planWaves(
   root: Root,
   remaining: Issue[],
   landed: string[],
+  resumeBase: string,
 ): Promise<Issue[][]> {
   const plan = await sandcastle.run({
     hooks,
@@ -282,7 +300,7 @@ async function planWaves(
     promptFile: PROMPTS.plan,
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
     promptArgs: checkedPromptArgs(PROMPTS.plan, {
-      BASE_BRANCH,
+      BASE_BRANCH: resumeBase,
       ROOT_ID: root.issue.id,
       ROOT_TITLE: root.issue.title,
       REMAINING_ISSUES: JSON.stringify(
@@ -349,13 +367,21 @@ function pullRequestBody(root: Root, worked: Issue[]): string {
   return sections.join("\n\n");
 }
 
-async function ship(root: Root, branches: string[], worked: Issue[]) {
+async function ship(
+  root: Root,
+  branches: string[],
+  worked: Issue[],
+  resumeBase: string,
+) {
   const branch = await nextIntegrationBranch(root.issue.id);
-  console.log(`[${root.issue.id}] assembling ${branch}`);
+  console.log(`[${root.issue.id}] assembling ${branch} from ${resumeBase}`);
 
+  // Cut from the resume base so the attempt keeps what earlier ones landed,
+  // even when this run's leaves were all no-ops. The pull request still targets
+  // the project's base branch — that is what `baseBranch` means for a PR.
   const sandbox = await sandcastle.createSandbox({
     branch,
-    baseBranch: BASE_BRANCH,
+    baseBranch: resumeBase,
     sandbox: docker(),
     hooks,
     copyToWorktree,
@@ -372,7 +398,7 @@ async function ship(root: Root, branches: string[], worked: Issue[]) {
         ROOT_ID: root.issue.id,
         ROOT_TITLE: root.issue.title,
         INTEGRATION_BRANCH: branch,
-        BASE_BRANCH,
+        BASE_BRANCH: resumeBase,
         BRANCHES: branches.map((b) => `- ${b}`).join("\n"),
       }),
     });
@@ -410,6 +436,33 @@ async function ship(root: Root, branches: string[], worked: Issue[]) {
 // Per-root pipeline
 // ---------------------------------------------------------------------------
 
+/**
+ * Where this root picks up. An unmerged integration branch from a previous
+ * attempt holds everything that already landed; starting from the project's
+ * base branch instead would hide it from every agent — which is how the last
+ * three issues of an epic came back empty, each reporting that the code they
+ * depended on did not exist.
+ */
+async function resumeBaseOf(rootId: string): Promise<string> {
+  const { remote } = config.git;
+  await fetchRemote(remote);
+
+  const base = await pickResumeBase(rootId, {
+    baseBranch: BASE_BRANCH,
+    remote,
+    refs: await listRefs(remote),
+    isMergedIntoBase: (ref) => isAncestor(ref, BASE_BRANCH),
+  });
+
+  console.log(
+    base === BASE_BRANCH
+      ? `[${rootId}] starting from ${BASE_BRANCH}`
+      : `[${rootId}] resuming from ${base} — a previous attempt's work`,
+  );
+
+  return base;
+}
+
 async function runRoot(root: Root): Promise<string | null> {
   const { id } = root.issue;
 
@@ -426,11 +479,13 @@ async function runRoot(root: Root): Promise<string | null> {
 
   await trySetState(id, config.linear.inProgressState);
 
+  const resumeBase = await resumeBaseOf(id);
+
   const deps = {
     runLeaf,
     branchOf: leafBranch,
     baseFor: (branches: string[]) =>
-      buildWaveBase(`${config.git.waveBasePrefix}${id}`, branches),
+      buildWaveBase(`${config.git.waveBasePrefix}${id}`, resumeBase, branches),
     log: (message: string) => console.log(message),
     logError: (message: string) => console.error(message),
   };
@@ -452,7 +507,7 @@ async function runRoot(root: Root): Promise<string | null> {
       .filter(([, outcome]) => isSettled(outcome))
       .map(([leafId]) => leafId);
 
-    const waves = await planWaves(root, remaining, settledIds);
+    const waves = await planWaves(root, remaining, settledIds, resumeBase);
     const before = settledIds.length;
 
     const result = await runWaves(deps, {
@@ -489,7 +544,7 @@ async function runRoot(root: Root): Promise<string | null> {
     return null;
   }
 
-  return ship(root, landedBranches, root.eligibleLeaves);
+  return ship(root, landedBranches, root.eligibleLeaves, resumeBase);
 }
 
 // ---------------------------------------------------------------------------
