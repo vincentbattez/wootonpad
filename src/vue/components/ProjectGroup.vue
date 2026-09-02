@@ -257,7 +257,7 @@ import ProjectAvatar from './ProjectAvatar.vue';
 import { isStaleProject } from '../project-collapse.mjs';
 import { partitionSessionList } from '../session-list.mjs';
 import { store } from '../store.js';
-import { startDrag, endDrag, dropOnTarget, isDragging } from '../area-drag.js';
+import { useDropTarget } from '../shared/composables/use-drop-target.js';
 const { gearSvg, archiveSvg, codeSvg, playSvg, folderSvg, plusSvg, plusSmSvg, pencilSvg, eyeOffSvg, chevronSvg, dotsSvg, closeSvg, branchSvg } = projectGroupIcons;
 
 const props = defineProps({
@@ -285,15 +285,12 @@ const emit = defineEmits([
 const folderId = computed(() => 'project-' + props.project.projectPath.replace(/[^a-zA-Z0-9_-]/g, '_'));
 
 // Drag a Project into an Area; drop another row on this Project files it into the Project's own
-// Area (its nearest enclosing Area), resolved in the pure module (VIN-78).
-const dropHover = ref(false);
-function onDragStart(ev) { startDrag('project', props.project.projectPath, ev); }
-function onDragEnd() { endDrag(); dropHover.value = false; }
-function onDragOver() { if (isDragging()) dropHover.value = true; }
-async function onDrop() {
-  dropHover.value = false;
-  await dropOnTarget(props.project.projectPath);
-}
+// Area (its nearest enclosing Area), resolved in the pure module (VIN-78). The one drop-target
+// composable carries the same semantics the Area row and the sidebar root share.
+const { dropHover, onDragStart, onDragEnd, onDragOver, onDrop } = useDropTarget({
+  type: 'project',
+  id: () => props.project.projectPath,
+});
 
 const avatar = computed(() =>
   window.getProjectAvatar ? window.getProjectAvatar(props.project.projectPath) : { initials: '?', color: '#666' }

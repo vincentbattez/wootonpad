@@ -907,7 +907,7 @@ html, body {
   background: var(--surface-app);
 }
 
-/* SessionHeaderApp handles header styles via public/style.css */
+/* SessionHeaderContainer handles header styles via public/style.css */
 #vue-session-header {
   flex-shrink: 0;
 }
