@@ -116,7 +116,7 @@
 import { ref, computed } from 'vue';
 import { projectsIcons } from '../shared/lib/icons.js';
 import { api } from '../shared/services/api.js';
-import ProjectAvatar from './ProjectAvatar.vue';
+import ProjectAvatar from '../features/projects/components/ProjectAvatar.vue';
 import { projectsStore } from '../stores/projects.js';
 const { trashSvg } = projectsIcons;
 

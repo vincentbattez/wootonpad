@@ -17,10 +17,10 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
-import { api } from '../shared/services/api.js';
-import SbDialog from '../shared/ui/SbDialog.vue';
-import { dialogStore, closeAddProject } from './dialog-store.js';
-import { useDialogKeys } from './use-dialog-keys.js';
+import { api } from '../../../shared/services/api.js';
+import SbDialog from '../../../shared/ui/SbDialog.vue';
+import { dialogStore, closeAddProject } from '../../../dialogs/dialog-store.js';
+import { useDialogKeys } from '../../../dialogs/use-dialog-keys.js';
 
 const open = computed(() => !!dialogStore.addProject);
 const path = ref('');
