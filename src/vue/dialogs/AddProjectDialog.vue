@@ -17,6 +17,7 @@
 
 <script setup>
 import { ref, computed, watch, nextTick } from 'vue';
+import { api } from '../shared/services/api.js';
 import SbDialog from '../shared/ui/SbDialog.vue';
 import { dialogStore, closeAddProject } from './dialog-store.js';
 import { useDialogKeys } from './use-dialog-keys.js';
@@ -39,7 +40,7 @@ useDialogKeys('addProject', { onEscape: close, onEnter: add });
 function close() { closeAddProject(); }
 
 async function browse() {
-  const folder = await window.api.browseFolder();
+  const folder = await api.browseFolder();
   if (folder) path.value = folder;
 }
 
@@ -47,7 +48,7 @@ async function add() {
   const p = path.value.trim();
   if (!p) { error.value = 'Please enter a folder path.'; return; }
   error.value = '';
-  const result = await window.api.addProject(p);
+  const result = await api.addProject(p);
   if (result.error) { error.value = result.error; return; }
   const cb = dialogStore.addProject?.onAdd;
   close();

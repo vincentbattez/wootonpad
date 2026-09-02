@@ -18,66 +18,60 @@
     </div>
 
     <div class="slug-group-sessions">
-      <SessionItem
-        v-for="s in promoted"
-        :key="s.sessionId"
-        :session="s"
-        v-bind="sessionProps(s)"
-        @open="$emit('open', s)"
-        @stop="$emit('stop', s.sessionId)"
-        @star="$emit('star', s.sessionId)"
-        @archive="$emit('archive', s.sessionId)"
-        @fork="$emit('fork', s.sessionId)"
-        @jsonl="$emit('jsonl', s.sessionId)"
-        @launch-config="$emit('launch-config', s.sessionId)"
+      <SessionList
+        :sessions="promoted"
+        :active-pty-ids="activePtyIds"
+        :active-session-id="activeSessionId"
+        :session-busy-state="sessionBusyState"
+        :attention-sessions="attentionSessions"
+        :response-ready-sessions="responseReadySessions"
+        @open="(s) => $emit('open', s)"
+        @stop="(id) => $emit('stop', id)"
+        @star="(id) => $emit('star', id)"
+        @archive="(id) => $emit('archive', id)"
+        @fork="(id) => $emit('fork', id)"
+        @jsonl="(id) => $emit('jsonl', id)"
+        @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
       />
 
-      <template v-if="promoted.length > 0 && rest.length > 0">
-        <div class="slug-group-more" :class="{ expanded: showRest }" @click="showRest = !showRest">
-          <template v-if="!showRest">+ {{ rest.length }} more</template>
-        </div>
-        <template v-if="showRest">
-          <SessionItem
-            v-for="s in rest"
-            :key="s.sessionId"
-            :session="s"
-            v-bind="sessionProps(s)"
-            @open="$emit('open', s)"
-            @stop="$emit('stop', s.sessionId)"
-            @star="$emit('star', s.sessionId)"
-            @archive="$emit('archive', s.sessionId)"
-            @fork="$emit('fork', s.sessionId)"
-            @jsonl="$emit('jsonl', s.sessionId)"
-            @launch-config="$emit('launch-config', s.sessionId)"
-            @rename="(id, name) => $emit('rename', id, name)"
-          />
-        </template>
-      </template>
+      <!-- When both a promoted run and a rest exist, the rest hides behind a "+N more" toggle;
+           otherwise (either side empty) it renders inline. -->
+      <div
+        v-if="hasMore"
+        class="slug-group-more"
+        :class="{ expanded: showRest }"
+        @click="showRest = !showRest"
+      >
+        <template v-if="!showRest">+ {{ rest.length }} more</template>
+      </div>
 
-      <template v-else>
-        <SessionItem
-          v-for="s in rest"
-          :key="s.sessionId"
-          :session="s"
-          v-bind="sessionProps(s)"
-          @open="$emit('open', s)"
-          @stop="$emit('stop', s.sessionId)"
-          @star="$emit('star', s.sessionId)"
-          @archive="$emit('archive', s.sessionId)"
-          @fork="$emit('fork', s.sessionId)"
-          @jsonl="$emit('jsonl', s.sessionId)"
-          @launch-config="$emit('launch-config', s.sessionId)"
-          @rename="(id, name) => $emit('rename', id, name)"
-        />
-      </template>
+      <SessionList
+        v-if="!hasMore || showRest"
+        :sessions="rest"
+        :active-pty-ids="activePtyIds"
+        :active-session-id="activeSessionId"
+        :session-busy-state="sessionBusyState"
+        :attention-sessions="attentionSessions"
+        :response-ready-sessions="responseReadySessions"
+        @open="(s) => $emit('open', s)"
+        @stop="(id) => $emit('stop', id)"
+        @star="(id) => $emit('star', id)"
+        @archive="(id) => $emit('archive', id)"
+        @fork="(id) => $emit('fork', id)"
+        @jsonl="(id) => $emit('jsonl', id)"
+        @launch-config="(id) => $emit('launch-config', id)"
+        @rename="(id, name) => $emit('rename', id, name)"
+      />
     </div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref } from 'vue';
-import SessionItem from './SessionItem.vue';
+import { slugGroupIcons } from '../shared/lib/icons.js';
+import SessionList from '../features/sessions/components/SessionList.vue';
+const { archiveSvg } = slugGroupIcons;
 
 const props = defineProps({
   slug: { type: String, required: true },
@@ -136,19 +130,11 @@ const hasRunning = computed(() => props.sessions.some(s => props.activePtyIds.ha
 const promoted = computed(() => props.sessions.filter(s => props.activePtyIds.has(s.sessionId)));
 const rest = computed(() => props.sessions.filter(s => !props.activePtyIds.has(s.sessionId)));
 
-function sessionProps(s) {
-  return {
-    isActive: props.activeSessionId === s.sessionId,
-    isRunning: props.activePtyIds.has(s.sessionId),
-    isBusy: props.sessionBusyState.get(s.sessionId) || false,
-    isAttention: props.attentionSessions.has(s.sessionId),
-    isResponseReady: props.responseReadySessions.has(s.sessionId),
-  };
-}
+// A "+N more" toggle appears only when a promoted run and a rest coexist.
+const hasMore = computed(() => promoted.value.length > 0 && rest.value.length > 0);
 
 async function archiveAll() {
   emit('archive-all', props.sessions);
 }
 
-const archiveSvg = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>';
 </script>

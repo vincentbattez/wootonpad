@@ -114,8 +114,11 @@
 
 <script setup>
 import { ref, computed } from 'vue';
+import { projectsIcons } from '../shared/lib/icons.js';
+import { api } from '../shared/services/api.js';
 import ProjectAvatar from './ProjectAvatar.vue';
 import { projectsStore } from '../stores/projects.js';
+const { trashSvg } = projectsIcons;
 
 const props = defineProps({
   callbacks: { type: Object, required: true },
@@ -190,9 +193,8 @@ function openProject(project) {
 async function removeProject(project) {
   const name = project.projectPath.split('/').pop();
   if (!confirm(`Remove "${name}" from the project list?\n\nSession files are not deleted.`)) return;
-  await window.api.removeProject(project.projectPath);
+  await api.removeProject(project.projectPath);
   props.callbacks.projectRemoved?.();
 }
 
-const trashSvg = '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4h6v2"/></svg>';
 </script>

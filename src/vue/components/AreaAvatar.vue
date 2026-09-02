@@ -5,6 +5,7 @@
 
 <script setup>
 import { computed, onMounted, watch } from 'vue';
+import { api } from '../shared/services/api.js';
 import { store } from '../store.js';
 import { avatarFromName } from '../avatar.mjs';
 
@@ -21,8 +22,8 @@ const dataUrl = computed(() => store.areaAvatarDataUrls[props.areaId] || null);
 const fallback = computed(() => avatarFromName(props.name));
 
 async function load() {
-  if (dataUrl.value || !props.areaId || !window.api?.getAreaAvatar) return;
-  const url = await window.api.getAreaAvatar(props.areaId).catch(() => null);
+  if (dataUrl.value || !props.areaId || !api.getAreaAvatar) return;
+  const url = await api.getAreaAvatar(props.areaId).catch(() => null);
   if (url) store.areaAvatarDataUrls[props.areaId] = url;
 }
 

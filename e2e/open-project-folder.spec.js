@@ -1,7 +1,4 @@
-const { test, expect } = require('./app-fixture');
-
-// Mirrors ProjectGroup.vue's folderId — the sidebar header's DOM id.
-const headerId = (projectPath) => '#ph-project-' + projectPath.replace(/[^a-zA-Z0-9_-]/g, '_');
+const { test, expect, headerId } = require('./app-fixture');
 
 // The OS open API is the boundary with the outside world. Replaced by a recorder in the
 // main process before any click, so the suite never opens a burst of Finder windows.

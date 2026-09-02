@@ -1,4 +1,10 @@
 import { markRaw } from 'vue';
+import { api } from './shared/services/api.js';
+import { createSessionsBridge } from './features/sessions/bridge.js';
+
+// window.vueGrid: the Session-overview cards, owned by the grid Feature's Bridge. Re-exported
+// so main.js and the bridge-contract spec keep one import site.
+export { createGridBridge } from './features/grid/bridge.js';
 
 // The renderer-to-Vue surface `public/app.js` calls. Every method writes a feature
 // store rather than a component ref; app.js is frozen, so these names and signatures
@@ -6,41 +12,17 @@ import { markRaw } from 'vue';
 // their template-ref setters in App.vue.
 
 // window.vueSidebar: the Session/Project tree, the live PTY sets and the
-// terminal-header context. The filters and search matches it also carries are
-// written by the navigation Feature Bridge (merged onto this object in main.js),
-// since public/app.js addresses them as window.vueSidebar.setFilters/setSearch.
+// terminal-header context, all owned by the sessions Feature's Bridge and spread
+// in here. The filters and search matches it also carries are written by the
+// navigation Feature Bridge (merged onto this object in main.js), since
+// public/app.js addresses them as window.vueSidebar.setFilters/setSearch.
 export function createSidebarBridge(store) {
   return {
     store,
-    setProjects(projects) { store.projects = projects.map(p => ({ ...p })); },
-    setActivePtyIds(ids) { store.activePtyIds = new Set(ids); },
-    setActiveSession(id) { store.activeSessionId = id; },
-    setBusy(sessionId, busy) {
-      if (busy) store.sessionBusyState.set(sessionId, true);
-      else store.sessionBusyState.delete(sessionId);
-    },
-    addAttention(sessionId) { store.attentionSessions.add(sessionId); },
-    setResponseReady(sessionId) {
-      store.responseReadySessions.add(sessionId);
-      store.sessionBusyState.delete(sessionId);
-    },
-    clearNotifications(sessionId) {
-      store.attentionSessions.delete(sessionId);
-      store.responseReadySessions.delete(sessionId);
-    },
+    ...createSessionsBridge(store),
     setVisibility(count, ageDays) {
       store.visibleSessionCount = count;
       store.sessionMaxAgeDays = ageDays;
-    },
-    setHeaderSession(session) { store.headerSession = session; },
-    setHeaderPtyTitle(title) { store.headerPtyTitle = title || null; },
-    setHeaderShellProfile(profile) { store.headerShellProfile = profile || null; },
-    setHeaderAccount(name) { store.headerAccount = name || null; },
-    clearHeader() {
-      store.headerSession = null;
-      store.headerPtyTitle = null;
-      store.headerShellProfile = null;
-      store.headerAccount = null;
     },
   };
 }
@@ -93,33 +75,12 @@ export function createAccountDropdownBridge(store) {
   };
 }
 
-// window.vueGrid: the Session-overview cards. GridCardsApp teleports each card into
-// the header/footer element the vanilla grid renderer built.
-export function createGridBridge(store) {
-  return {
-    addCard(sessionId, headerEl, footerEl, { name, project, initials, color, running, busy, time }) {
-      store.cards.set(sessionId, { headerEl, footerEl, name, project, initials, color, running: !!running, busy: !!busy, time: time || '' });
-    },
-    updateCard(sessionId, running, busy, time) {
-      const card = store.cards.get(sessionId);
-      if (!card) return;
-      card.running = !!running;
-      card.busy = !!busy;
-      if (time !== undefined) card.time = time;
-    },
-    removeCard(sessionId) { store.cards.delete(sessionId); },
-    clearAll() { store.cards.clear(); },
-  };
-}
-
 // window.vueProjects: the Projects panel, plus the lazy per-project git/container
 // info queue. Guarded so the bridge stays inert without window.api or rAF.
 export function createProjectsBridge(store) {
   let queueGen = 0;
   let pendingInfoUpdates = {};
   let flushScheduled = false;
-
-  const api = typeof window !== 'undefined' ? window.api : undefined;
 
   function flush() {
     flushScheduled = false;

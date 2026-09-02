@@ -1,8 +1,7 @@
-import { sessionsStore } from './stores/sessions.js';
+import { sessionsStore, headerStore } from './features/sessions/store.js';
 import { sidebarStore } from './stores/sidebar.js';
 import { areasStore } from './stores/areas.js';
 import { layoutStore } from './stores/layout.js';
-import { headerStore } from './stores/header.js';
 import { avatarsStore } from './stores/avatars.js';
 import { navigationStore } from './features/navigation/store.js';
 
