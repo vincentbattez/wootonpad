@@ -1,21 +1,12 @@
 <template>
   <div class="slug-group" :class="{ collapsed: !expanded, 'has-promoted': promoted.length > 0 }" :id="groupId">
-    <div class="slug-group-header" @click.self="toggle">
-      <div class="slug-group-row">
-        <span class="slug-group-expand" @click.stop="toggle">
-          <span class="arrow">&#9654;</span>
-        </span>
-        <div class="slug-group-info" @click="toggle">
-          <div class="slug-group-name">{{ displayName }}</div>
-          <div class="slug-group-meta">
-            <span class="slug-group-dot" :class="{ running: hasRunning }"></span>
-            <span class="slug-group-count">{{ sessions.length }} sessions</span>
-            {{ ' ' + timeStr }}
-          </div>
-        </div>
-        <button class="slug-group-archive-btn" data-tooltip="Archive all sessions in group" @click.stop="archiveAll" v-html="archiveSvg"></button>
-      </div>
-    </div>
+    <SlugHeader
+      :slug="slug"
+      :sessions="sessions"
+      :active-pty-ids="activePtyIds"
+      @toggle="toggle"
+      @archive-all="$emit('archive-all', sessions)"
+    />
 
     <div class="slug-group-sessions">
       <SessionList
@@ -69,10 +60,13 @@
 
 <script setup>
 import { computed, ref } from 'vue';
-import { slugGroupIcons } from '../shared/lib/icons.js';
-import SessionList from '../features/sessions/components/SessionList.vue';
-const { archiveSvg } = slugGroupIcons;
+import SessionList from '../../sessions/components/SessionList.vue';
+import SlugHeader from './SlugHeader.vue';
 
+// A collapsible group of Sessions that share a slug. The item (SlugHeader) and the list
+// (SessionList) are separate components; this wrapper only holds the expand state and splits the
+// Sessions into the promoted run and the rest. A Dumb Component — it reads no store and forwards
+// every row event untouched.
 const props = defineProps({
   slug: { type: String, required: true },
   sessions: { type: Array, required: true },
@@ -83,7 +77,7 @@ const props = defineProps({
   responseReadySessions: { type: Set, required: true },
 });
 
-const emit = defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-all']);
+defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-all']);
 
 const groupId = computed(() => 'slug-' + props.slug.replace(/[^a-zA-Z0-9_-]/g, '_'));
 
@@ -106,35 +100,9 @@ function toggle() {
   } catch {}
 }
 
-const mostRecent = computed(() =>
-  props.sessions.reduce((a, b) => {
-    const aTime = window.lastActivityTime?.get(a.sessionId) || new Date(a.modified);
-    const bTime = window.lastActivityTime?.get(b.sessionId) || new Date(b.modified);
-    return bTime > aTime ? b : a;
-  })
-);
-
-const displayName = computed(() => {
-  const s = mostRecent.value;
-  const name = s.name || s.summary || props.slug;
-  return window.cleanDisplayName ? window.cleanDisplayName(name) : name;
-});
-
-const timeStr = computed(() => {
-  const t = window.lastActivityTime?.get(mostRecent.value.sessionId) || new Date(mostRecent.value.modified);
-  return window.formatDate ? window.formatDate(t) : '';
-});
-
-const hasRunning = computed(() => props.sessions.some(s => props.activePtyIds.has(s.sessionId)));
-
 const promoted = computed(() => props.sessions.filter(s => props.activePtyIds.has(s.sessionId)));
 const rest = computed(() => props.sessions.filter(s => !props.activePtyIds.has(s.sessionId)));
 
 // A "+N more" toggle appears only when a promoted run and a rest coexist.
 const hasMore = computed(() => promoted.value.length > 0 && rest.value.length > 0);
-
-async function archiveAll() {
-  emit('archive-all', props.sessions);
-}
-
 </script>

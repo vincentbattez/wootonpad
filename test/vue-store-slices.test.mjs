@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { effect } from 'vue';
-import { store, slices, sessionsStore, settingsStore, sidebarStore, areasStore, layoutStore, headerStore, avatarsStore, navigationStore } from '../src/vue/store.js';
+import { store, slices, sessionsStore, settingsStore, sidebarStore, areasStore, projectsStore, layoutStore, headerStore, avatarsStore, navigationStore } from '../src/vue/store.js';
 
 // The flat store the bridge used to write is cut into feature slices, but the
 // aggregate exposed as window.vueStore must keep every field name so the frozen
@@ -16,9 +16,10 @@ const OWNERSHIP = {
   ],
   settingsStore: ['settingsOpen', 'settingsScope', 'settingsProjectPath'],
   sidebarStore: [
-    'collapsedProjects', 'visibleSessionCount', 'sessionMaxAgeDays',
+    'visibleSessionCount', 'sessionMaxAgeDays',
   ],
-  areasStore: ['areas', 'areaAssignments', 'renamingAreaId', 'renamingProjectPath'],
+  areasStore: ['areas', 'areaAssignments', 'renamingAreaId'],
+  projectsStore: ['collapsedProjects', 'renamingProjectPath'],
   layoutStore: [
     'loadingStatus', 'accountSwitching', 'showStats',
     'showJsonl', 'planViewerOpen', 'memoryViewerOpen', 'gridViewActive', 'gridViewerCount',
@@ -116,6 +117,7 @@ test('the named slice exports are the same objects the facade delegates to', () 
   assert.equal(slices.settingsStore, settingsStore);
   assert.equal(slices.sidebarStore, sidebarStore);
   assert.equal(slices.areasStore, areasStore);
+  assert.equal(slices.projectsStore, projectsStore);
   assert.equal(slices.layoutStore, layoutStore);
   assert.equal(slices.headerStore, headerStore);
   assert.equal(slices.avatarsStore, avatarsStore);
