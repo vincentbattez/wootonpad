@@ -6,7 +6,6 @@ import {
   createMemoryBridge,
   createAccountsBridge,
   createAccountDropdownBridge,
-  createStatusBarBridge,
   createGridBridge,
   createProjectsBridge,
   createJsonlViewerBridge,
@@ -16,7 +15,8 @@ import { plansStore } from './stores/plans.js';
 import { memoryStore } from './stores/memory.js';
 import { accountsStore } from './stores/accounts.js';
 import { accountDropdownStore } from './stores/account-dropdown.js';
-import { statusBarStore } from './stores/status-bar.js';
+import { createStatusBarBridge } from './features/status-bar/bridge.js';
+import { statusBarStore } from './features/status-bar/store.js';
 import { gridStore } from './stores/grid.js';
 import { projectsStore } from './stores/projects.js';
 import { jsonlStore } from './stores/jsonl.js';
