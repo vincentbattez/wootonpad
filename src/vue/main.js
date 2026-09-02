@@ -13,6 +13,8 @@ import { createSettingsBridge } from './features/settings/bridge.js';
 import { settingsStore } from './features/settings/store.js';
 import { createAgentFilesBridge } from './features/agent-files/bridge.js';
 import { agentFilesStore } from './features/agent-files/store.js';
+import { statsStore } from './features/stats/stats-store.js';
+import { createStatsBridge } from './features/stats/stats-bridge.js';
 import { accountsStore } from './stores/accounts.js';
 import { accountDropdownStore } from './stores/account-dropdown.js';
 import { createStatusBarBridge } from './features/status-bar/bridge.js';
@@ -52,6 +54,7 @@ window.vueGrid = createGridBridge(gridStore);
 window.vueProjects = createProjectsBridge(projectsStore);
 window.vueJsonlViewer = createJsonlViewerBridge(jsonlStore);
 window.vueSettings = createSettingsBridge(settingsStore);
+window.vueStats = createStatsBridge(statsStore);
 
 // The file panel (public/file-panel.js) mounts its viewer here. The Container is bridged: it
 // reacts to the viewer store the Feature's Bridge writes, so file-panel.js drives open/destroy

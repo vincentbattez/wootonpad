@@ -113,7 +113,7 @@
           v-html="STATS_REFRESH_SVG"
         ></button>
       </div>
-      <StatsApp ref="statsRef" />
+      <StatsContainer ref="statsRef" />
     </div>
     <div id="memory-viewer" v-show="store.memoryViewerOpen">
       <ViewerContainer
@@ -204,7 +204,7 @@ import StatusBarContainer from '../features/status-bar/containers/StatusBarConta
 import GridCardsContainer from '../features/grid/containers/GridCardsContainer.vue';
 import SettingsPanelContainer from '../features/settings/containers/SettingsPanelContainer.vue';
 import ProjectViewerApp from './ProjectViewerApp.vue';
-import StatsApp from './StatsApp.vue';
+import StatsContainer from '../features/stats/containers/StatsContainer.vue';
 import JsonlViewerContainer from '../features/jsonl/containers/JsonlViewerContainer.vue';
 import ViewerContainer from '../features/viewer/containers/ViewerContainer.vue';
 import DialogsApp from './DialogsApp.vue';
@@ -379,10 +379,6 @@ onMounted(async () => {
     },
     close: () => projectViewerRef.value?.close(),
     setTab: (tab) => projectViewerRef.value?.setTab(tab),
-  };
-  window.vueStats = {
-    load: () => statsRef.value?.load(),
-    invalidate: () => statsRef.value?.invalidate(),
   };
   Object.assign(window.vueDialogs, {
     openNewSession: (...args) => dialogsRef.value?.openNewSession(...args),
