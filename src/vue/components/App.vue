@@ -140,7 +140,7 @@
       <ProjectViewerApp ref="projectViewerRef" :callbacks="projectViewerCallbacks" />
     </div>
     <div id="jsonl-viewer" v-show="store.showJsonl">
-      <JsonlViewerApp />
+      <JsonlViewerContainer />
     </div>
     <div id="terminal-area">
       <div id="vue-session-header">
@@ -205,7 +205,7 @@ import GridCardsContainer from '../features/grid/containers/GridCardsContainer.v
 import SettingsPanelContainer from '../features/settings/containers/SettingsPanelContainer.vue';
 import ProjectViewerApp from './ProjectViewerApp.vue';
 import StatsApp from './StatsApp.vue';
-import JsonlViewerApp from './JsonlViewerApp.vue';
+import JsonlViewerContainer from '../features/jsonl/containers/JsonlViewerContainer.vue';
 import ViewerContainer from '../features/viewer/containers/ViewerContainer.vue';
 import DialogsApp from './DialogsApp.vue';
 const { EXPAND_SVG, COLLAPSE_SVG, GEAR_SVG, STATS_REFRESH_SVG, RUNNING_SVG, STAR_SVG, TODAY_SVG, GRID_SVG, FILTERS_SVG, RESORT_SVG, ADD_AREA_SVG, ADD_PROJECT_SVG } = appIcons;

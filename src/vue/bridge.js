@@ -1,10 +1,12 @@
-import { markRaw } from 'vue';
 import { api } from './shared/services/api.js';
 import { createSessionsBridge } from './features/sessions/bridge.js';
 
 // window.vueGrid: the Session-overview cards, owned by the grid Feature's Bridge. Re-exported
 // so main.js and the bridge-contract spec keep one import site.
 export { createGridBridge } from './features/grid/bridge.js';
+
+// The jsonl Feature owns its Bridge; re-exported here so main.js keeps one bridge import.
+export { createJsonlViewerBridge } from './features/jsonl/bridge.js';
 
 // The renderer-to-Vue surface `public/app.js` calls. Every method writes a feature
 // store rather than a component ref; app.js is frozen, so these names and signatures
@@ -129,12 +131,3 @@ export function createProjectsBridge(store) {
   };
 }
 
-// window.vueJsonlViewer: the Message History viewer. The seq bump makes re-opening
-// the same session re-trigger the component's watcher.
-export function createJsonlViewerBridge(store) {
-  let seq = 0;
-  return {
-    // markRaw: read once to render, so deep-proxying buys nothing.
-    open(session) { store.openRequest = { session: markRaw(session), seq: ++seq }; },
-  };
-}
