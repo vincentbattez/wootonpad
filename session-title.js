@@ -26,7 +26,6 @@ function resolveSessionTitle(session, maxLen) {
     s.customTitle ||
     s.aiTitle ||
     s.summary ||
-    s.firstPrompt ||
     (typeof s.sessionId === 'string' ? s.sessionId.slice(0, 8) : '') ||
     '';
   if (maxLen != null && title.length > maxLen) return title.slice(0, maxLen);
