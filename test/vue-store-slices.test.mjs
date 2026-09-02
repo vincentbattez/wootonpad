@@ -24,7 +24,7 @@ const OWNERSHIP = {
     'loadingStatus', 'accountSwitching', 'showStats',
     'showJsonl', 'planViewerOpen', 'memoryViewerOpen', 'gridViewActive', 'gridViewerCount',
   ],
-  headerStore: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts'],
+  headerStore: ['headerSession', 'headerPtyTitle', 'headerShellProfile', 'headerAccount', 'headerAccounts', 'headerContext'],
   avatarsStore: ['avatarDataUrls', 'areaAvatarDataUrls'],
   navigationStore: [
     'activeTab', 'sidebarCollapsed', 'searchQuery', 'searchTitlesOnly',

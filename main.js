@@ -70,6 +70,7 @@ const { resolveIdeLaunch, launchErrorMessage } = require('./external-ide');
 const { resolveRunTerminal, RUN_TERMINAL_TYPE } = require('./run-command');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
+const { readSessionContextTail } = require('./read-session-file');
 
 
 
@@ -595,6 +596,22 @@ function initSessionCache() {
 initSessionCache();
 const { readSessionFile, readFolderFromFilesystem, refreshFolder, populateCacheFromFilesystem,
         buildProjectsFromCache, notifyRendererProjectsChanged, sendStatus, populateCacheViaWorker } = sessionCache;
+
+/**
+ * Read the tail of a Session's .jsonl and push its live context to the renderer (VIN-143).
+ * Called on a busy→idle transition. Plain terminals and un-located sessions have no
+ * transcript, so they are skipped silently.
+ */
+function pushSessionContext(session, currentId) {
+  if (!session || session.isPlainTerminal || !session.projectFolder) return;
+  try {
+    const filePath = path.join(activeProjectsDir(), session.projectFolder, currentId + '.jsonl');
+    const ctx = readSessionContextTail(filePath);
+    if (ctx && mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('session-context', currentId, ctx.contextUsage, ctx.contextModel);
+    }
+  } catch {}
+}
 
 
 // --- IPC: browse-folder ---
@@ -2260,6 +2277,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('cli-busy-state', currentId, false);
             }
+            // Context gauge fast path (VIN-143): a turn just ended, so the .jsonl's last
+            // assistant usage changed. Read only its tail and push the new context, one
+            // read per turn, exactly when the value moves. Never touches the CLI or
+            // ~/.claude/settings.json.
+            pushSessionContext(session, currentId);
           }
         }
       }

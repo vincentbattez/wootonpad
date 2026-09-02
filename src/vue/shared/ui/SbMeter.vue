@@ -5,6 +5,11 @@
       :class="severity || null"
       :style="{ width: fillWidth }"
     ></div>
+    <div
+      v-if="tick != null"
+      class="sb-meter-tick"
+      :style="{ left: tickLeft }"
+    ></div>
   </div>
 </template>
 
@@ -21,7 +26,12 @@ const props = defineProps({
   max: { type: Number, default: 100 },
   // '' | 'warn' | 'danger' — a caller-computed state, never a threshold.
   severity: { type: String, default: '' },
+  // An optional marker on the track, in value units (the context gauge's autocompact line).
+  // null hides it; the accounts bar leaves it null.
+  tick: { type: Number, default: null },
 });
 
-const fillWidth = computed(() => Math.min(Math.max((props.value / props.max) * 100, 0), 100) + '%');
+const clampPct = (n) => Math.min(Math.max(n, 0), 100);
+const fillWidth = computed(() => clampPct((props.value / props.max) * 100) + '%');
+const tickLeft = computed(() => clampPct((props.tick / props.max) * 100) + '%');
 </script>

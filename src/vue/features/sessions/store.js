@@ -27,4 +27,8 @@ export const headerStore = reactive({
   headerShellProfile: null,
   headerAccount: null,
   headerAccounts: [],
+  // The live context push (VIN-143): { sessionId, usage, model } written by the context
+  // service on each busy→idle turn. It overrides the Session's resting value in the header
+  // when it is for the Session on screen, so the gauge moves within a second of a turn.
+  headerContext: null,
 });

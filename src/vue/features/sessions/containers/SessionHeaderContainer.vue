@@ -11,16 +11,19 @@
     :account="headerStore.headerAccount"
     :shell-profile="headerStore.headerShellProfile"
     :avatar="avatar"
+    :context-usage="contextUsage"
+    :context-model="contextModel"
     @stop="onStop"
   />
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { sb } from '../../../shared/services/sb.js';
 import { sessionsStore, headerStore } from '../store.js';
 import { useProjectAvatar } from '../../../shared/composables/use-avatar.js';
 import { cleanDisplayName, sessionTimeStr } from '../composables/use-session-display.js';
+import { subscribeSessionContext } from '../context-service.js';
 import SessionHeader from '../components/SessionHeader.vue';
 
 // The sessions Feature's edge Container for the terminal header: it reads the feature store and
@@ -58,6 +61,19 @@ const avatar = computed(() => ({
   initials: fallback.value.initials,
   color: fallback.value.color,
 }));
+
+// The gauge value: the live push wins while it is for the Session on screen (it lands within
+// a second of a turn ending), otherwise the Session's resting value carried on its row. Both
+// are a { usage breakdown, model } pair, so the Session on screen never shows a stale number
+// nor a number belonging to another Session.
+const liveContext = computed(() => {
+  const c = headerStore.headerContext;
+  return c && c.sessionId === sessionId.value ? c : null;
+});
+const contextUsage = computed(() => liveContext.value?.usage ?? session.value?.contextUsage ?? null);
+const contextModel = computed(() => liveContext.value?.model ?? session.value?.contextModel ?? null);
+
+onMounted(subscribeSessionContext);
 
 function onStop() {
   if (sessionId.value) sb.stopSession?.(sessionId.value);
