@@ -102,6 +102,12 @@ export function useGitSnapshot(viewedPath) {
   }
 
   // ── Git actions ─────────────────────────────────────────────────
+  // Fold a `gitBranches` result into the local/remote branch lists, leaving them untouched when the
+  // read failed. (`load` resets instead, since a fresh project starts from an empty list.)
+  function applyBranches(br) {
+    if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
+  }
+
   function showGitMsg(msg, isError = false, ms = 4000) {
     gitMessage.value = msg; gitError.value = isError;
     setTimeout(() => { gitMessage.value = ''; gitError.value = false; }, ms);
@@ -121,7 +127,7 @@ export function useGitSnapshot(viewedPath) {
     showGitMsg('Fetching…');
     const res = await api.gitFetch(viewedPath.value);
     gitBusy.value = false;
-    if (res.ok) { showGitMsg('Fetched'); const br = await api.gitBranches(viewedPath.value); if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; } }
+    if (res.ok) { showGitMsg('Fetched'); applyBranches(await api.gitBranches(viewedPath.value)); }
     else showGitMsg(res.stderr || 'Fetch failed', true);
   }
 
@@ -172,8 +178,7 @@ export function useGitSnapshot(viewedPath) {
       showGitMsg(checkoutBranch.value ? `Switched to new branch "${name}"` : `Created branch "${name}"`);
       newBranchName.value = '';
       checkoutBranch.value = true;
-      const br = await api.gitBranches(viewedPath.value).catch(() => null);
-      if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
+      applyBranches(await api.gitBranches(viewedPath.value).catch(() => null));
       await reload();
     } else {
       showGitMsg(res.stderr || 'Failed to create branch', true);
@@ -198,7 +203,7 @@ export function useGitSnapshot(viewedPath) {
       api.gitBranches(p).catch(() => null),
     ]);
     if (fresh) overview.value = fresh;
-    if (br?.ok) { branches.value = br.branches; remoteBranches.value = br.remotes || []; }
+    applyBranches(br);
     _pushProjectInfo(p, fresh);
   }
 
