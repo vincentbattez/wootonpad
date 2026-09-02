@@ -69,9 +69,17 @@ export function createProgress(cwd: string) {
     }
   };
 
-  return { phaseDone, markPhase };
+  /** Drops both halves of a marker, sending the phase back to "never done". */
+  const clearPhase = async (phase: Phase, id: string): Promise<void> => {
+    for (const kind of ["tip", "base"] as const) {
+      await git("update-ref", "-d", refName(phase, id, kind)).catch(() => {});
+    }
+  };
+
+  return { phaseDone, markPhase, clearPhase };
 }
 
 const SANDCASTLE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
-export const { phaseDone, markPhase } = createProgress(dirname(SANDCASTLE_DIR));
+export const { phaseDone, markPhase, clearPhase } =
+  createProgress(dirname(SANDCASTLE_DIR));

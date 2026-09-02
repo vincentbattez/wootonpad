@@ -25,7 +25,7 @@ import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
 import { config, checkedPromptArgs } from "./lib/config.mts";
-import { markPhase, phaseDone } from "./lib/progress.mts";
+import { clearPhase, markPhase, phaseDone } from "./lib/progress.mts";
 import {
   branchHasCommits,
   buildWaveBase,
@@ -164,6 +164,34 @@ async function resolveRoot(id: string): Promise<Root> {
  * every judgement below (is there work? is the marker still valid?) is relative
  * to it.
  */
+/**
+ * The reviewer gets a single pass and has to sign off on the branch it is
+ * handed, so it must start from a green suite: a failure it did not cause
+ * either eats that pass or gets signed off with the branch. Running the
+ * project's own feedback loops here keeps that from ever reaching it.
+ */
+async function verifyBranch(
+  sandbox: sandcastle.Sandbox,
+  leafId: string,
+): Promise<boolean> {
+  for (const command of config.project.verifyCommands) {
+    console.log(`[${leafId}] verifying: ${command}`);
+
+    const result = await sandbox.exec(command, {
+      onLine: (line) => console.log(`[${leafId}]   ${line}`),
+    });
+
+    if (result.exitCode !== 0) {
+      console.error(
+        `[${leafId}] ✗ ${command} failed (exit ${result.exitCode})\n${result.stderr}`,
+      );
+      return false;
+    }
+  }
+
+  return true;
+}
+
 async function runLeaf(
   leaf: Issue,
   branch: string,
@@ -241,6 +269,15 @@ async function runLeaf(
       signal,
       await branchHasCommits(branch, baseBranch),
     );
+
+    // A branch whose feedback loops fail is not review material — it goes back
+    // for another implement round, which means dropping the markers a resume
+    // would otherwise read as "implemented, review only".
+    if (outcome === "landed" && !(await verifyBranch(sandbox, leaf.id))) {
+      await clearPhase("implemented", leaf.id);
+      await clearPhase("reviewed", leaf.id);
+      outcome = "blocked";
+    }
 
     if (outcome === "landed") {
       const review = await sandbox.run({

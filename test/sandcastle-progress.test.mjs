@@ -123,3 +123,21 @@ test("markers live outside refs/heads, so they never look like branches", async 
   assert.equal(await git("branch", "--format=%(refname:short)"), "main");
   assert.equal(await git("tag", "--list"), "");
 });
+
+test("clearing a phase sends it back to never done", async (t) => {
+  const { progress, base, commit, cleanup } = await fixture();
+  t.after(cleanup);
+
+  const tip = await commit("work.txt", "work\n");
+  await progress.markPhase("implemented", "VIN-1", tip, base);
+  await progress.clearPhase("implemented", "VIN-1");
+
+  assert.equal(await progress.phaseDone("implemented", "VIN-1", tip, base), false);
+});
+
+test("clearing a phase that was never marked is a no-op", async (t) => {
+  const { progress, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await progress.clearPhase("reviewed", "VIN-1");
+});
