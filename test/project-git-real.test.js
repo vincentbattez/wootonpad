@@ -20,7 +20,8 @@ const git = createProjectGit({
 });
 
 function makeRepo(t) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'project-git-'));
+  // realpathSync.native: on Windows os.tmpdir() is an 8.3 short path, git reports the long one.
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'project-git-')));
   t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
   const run = (...argv) => execFileSync('git', argv, { cwd: dir, stdio: 'ignore' });
   run('init', '-b', 'main');
@@ -79,7 +80,7 @@ test('a real Worktree is listed, then removed with its branch, then removed agai
   run('worktree', 'add', '-b', 'feat', worktree);
 
   const listed = await git.snapshot(dir);
-  assert.deepEqual(listed.worktreePaths.map(p => fs.realpathSync(p)), [fs.realpathSync(worktree)]);
+  assert.deepEqual(listed.worktreePaths.map(p => fs.realpathSync.native(p)), [fs.realpathSync.native(worktree)]);
 
   const removed = await git.removeWorktree(dir, worktree);
   assert.deepEqual(removed, { ok: true, branch: 'feat' });
