@@ -21,7 +21,9 @@ export type IncidentKind =
   /** A wave base needed judgement to assemble. */
   | "wave-base-escalated"
   /** An integration branch shipped unfinished, or without every leaf. */
-  | "shipped-incomplete";
+  | "shipped-incomplete"
+  /** A leaf spent its wall-clock budget without finishing. */
+  | "leaf-timeout";
 
 export interface Incident {
   kind: IncidentKind;

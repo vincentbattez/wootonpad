@@ -252,3 +252,57 @@ test("runWaves: a leaf that crashes every attempt still settles as failed", asyn
   assert.equal(attempts, 3);
   assert.equal(result.outcomes.get("A"), "failed");
 });
+
+test("runWaves: an interrupted leaf is not retried and ends the run", async () => {
+  const { InterruptedError } = await import("../.sandcastle/lib/interruption.mts");
+  const attempts = [];
+  const deps = {
+    branchOf: (id) => id,
+    baseFor: async () => "main",
+    runLeaf: async (item) => {
+      attempts.push(item.id);
+      if (item.id === "A") throw new InterruptedError("quota");
+      return "landed";
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  await assert.rejects(
+    runWaves(deps, {
+      rootId: "VIN-1",
+      waves: [[leaf("A"), leaf("B")], [leaf("C")]],
+      leafAttempts: 3,
+    }),
+    InterruptedError,
+  );
+
+  assert.deepEqual(attempts, ["A", "B"], "no retry of A, no wave 2");
+});
+
+test("runWaves: the quota error the runner throws is read as an interruption", async () => {
+  const { InterruptedError } = await import("../.sandcastle/lib/interruption.mts");
+  let calls = 0;
+  const deps = {
+    branchOf: (id) => id,
+    baseFor: async () => "main",
+    runLeaf: async () => {
+      calls++;
+      throw new Error(
+        "claude-code exited with code 1:\nYou've hit your session limit · resets 12:10am (UTC)",
+      );
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  await assert.rejects(
+    runWaves(deps, { rootId: "VIN-1", waves: [[leaf("A")]], leafAttempts: 2 }),
+    InterruptedError,
+  );
+  assert.equal(calls, 1);
+});
+
+test("isSettled: interrupted is neither settled nor a failure of the leaf", () => {
+  assert.equal(isSettled("interrupted"), false);
+});

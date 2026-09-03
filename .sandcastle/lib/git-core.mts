@@ -196,6 +196,18 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
     return "restarted";
   };
 
+  /**
+   * Commit everything in a worktree, so a leaf cut short by a timeout leaves
+   * its work on the branch where the next run reads it (ADR 0012). Returns
+   * false when there was nothing to commit.
+   */
+  const commitAll = async (dir: string, message: string): Promise<boolean> => {
+    await run(dir, ["add", "--all"]);
+    if ((await run(dir, ["status", "--porcelain"])) === "") return false;
+    await run(dir, ["commit", "--quiet", "--message", message]);
+    return true;
+  };
+
   /** Every branch known locally, plus every branch known on the remote. */
   const listRefs = async (remote: string): Promise<string[]> => {
     const out = await git(
@@ -222,6 +234,7 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
     buildWaveBase,
     rebaseLeafOnto,
     resetBranchTo,
+    commitAll,
   };
 }
 

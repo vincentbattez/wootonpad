@@ -3,6 +3,8 @@
 // Nothing here touches git, Docker or Linear, so the rules that decide whether
 // a leaf landed — and what a wave is cut from — are testable without a sandbox.
 
+import { asInterruption, isInterruption } from "./interruption.mts";
+
 /** Emitted by an agent that finished the task. */
 export const COMPLETE_SIGNAL = "<promise>COMPLETE</promise>";
 
@@ -26,7 +28,9 @@ export type Outcome =
   /** Never signalled — ran out of iterations. */
   | "exhausted"
   /** The run itself threw. */
-  | "failed";
+  | "failed"
+  /** The platform stopped us — quota, timeout. The work is unjudged. */
+  | "interrupted";
 
 /** Settled outcomes are done with; the rest are worth another round. */
 export const isSettled = (outcome: Outcome): boolean =>
@@ -107,6 +111,9 @@ export interface WaveDeps<T extends Leaf> {
  * did: a sandbox that would not start, a prompt whose shell expansion hit a ref
  * that had just moved. Those clear on a second go, and letting one end the
  * round costs a whole re-plan, so the round retries before recording `failed`.
+ *
+ * Unless the platform threw. A closed quota window does not clear on a second
+ * go, and every retry against it is a leaf reported `failed` for no reason.
  */
 async function runLeafWithRetries<T extends Leaf>(
   deps: WaveDeps<T>,
@@ -119,6 +126,8 @@ async function runLeafWithRetries<T extends Leaf>(
     try {
       return await deps.runLeaf(leaf, deps.branchOf(leaf.id), base);
     } catch (cause) {
+      const interruption = asInterruption(cause);
+      if (interruption) throw interruption;
       if (attempt >= attempts) throw cause;
       deps.logError(
         `[${rootId}]   ↻ ${leaf.id} crashed (${cause}) — attempt ${attempt + 1}/${attempts}`,
@@ -168,10 +177,18 @@ export async function runWaves<T extends Leaf>(
       ),
     );
 
+    // One interrupted leaf interrupts the run: its siblings died of the same
+    // wall, and the next wave would only confirm it at the price of a re-plan.
+    // Their outcomes are still recorded first, so the journal says which
+    // leaves were in flight.
     for (const [i, result] of settled.entries()) {
       const leaf = wave[i]!;
 
       if (result.status === "rejected") {
+        if (isInterruption(result.reason)) {
+          outcomes.set(leaf.id, "interrupted");
+          continue;
+        }
         outcomes.set(leaf.id, "failed");
         deps.logError(`[${rootId}]   ✗ ${leaf.id} failed: ${result.reason}`);
         continue;
@@ -192,8 +209,15 @@ export async function runWaves<T extends Leaf>(
         case "exhausted":
           deps.logError(`[${rootId}]   ✗ ${leaf.id}: ran out of iterations`);
           break;
+        case "interrupted":
+          break;
       }
     }
+
+    const interruption = settled.find(
+      (result) => result.status === "rejected" && isInterruption(result.reason),
+    );
+    if (interruption?.status === "rejected") throw interruption.reason;
   }
 
   return { outcomes, landedBranches };

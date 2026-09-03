@@ -19,17 +19,35 @@
 //   4. Ship     — only when every eligible leaf landed: an agent assembles the
 //                 integration branch, then the host pushes it and opens a PR.
 //
-// A root that never completes ships nothing; the other roots are unaffected.
+// A root that never completes ships what it has as a draft; the other roots
+// are unaffected. Roots run one after another: they share one token quota, so
+// running them side by side buys nothing and hides a closed window behind a
+// burst of identical failures.
+//
+// Built to run from a cron with nobody watching. A run holds a lock, stops
+// itself before the next tick, and when the platform cuts it off — the 5-hour
+// window closing, a timeout — it records when to come back and leaves every
+// issue exactly where it was (see lib/interruption.mts).
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 import { config, checkedPromptArgs } from "./lib/config.mts";
+import {
+  InterruptedError,
+  asInterruption,
+  looksLikeQuotaWall,
+} from "./lib/interruption.mts";
+import { createJournal } from "./lib/journal.mts";
+import { createLock } from "./lib/lock.mts";
 import { clearPhase, markPhase, phaseDone } from "./lib/progress.mts";
 import { phaseError, phaseLog } from "./lib/log.mts";
 import {
   branchHasCommits,
   buildWaveBase,
+  commitAll,
   fetchRemote,
   isAncestor,
   listRefs,
@@ -76,6 +94,24 @@ const planSchema = z.object({
 // ---------------------------------------------------------------------------
 
 const BASE_BRANCH = config.git.baseBranch;
+const SANDCASTLE_DIR = dirname(fileURLToPath(import.meta.url));
+const MINUTE = 60_000;
+
+const journal = createJournal(join(SANDCASTLE_DIR, "state"));
+
+/**
+ * Aborted when the run must stop as a whole — the global timeout, a SIGTERM
+ * from the scheduler. Every agent run listens to it. The reason is always an
+ * `InterruptedError`, so a leaf killed this way is reported as interrupted
+ * and not as failed.
+ */
+const runController = new AbortController();
+
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.once(signal, () =>
+    runController.abort(new InterruptedError(`${signal} received`)),
+  );
+}
 
 /** Each phase runs on the model and effort its own config entry declares. */
 const agentFor = (phase: keyof typeof config.agent.phases) => {
@@ -253,6 +289,13 @@ async function runLeaf(
 
   await trySetState(leaf.id, config.linear.inProgressState);
 
+  // The leaf's own budget, on top of the run's. Its expiry is a leaf timeout
+  // (retried next round); the run's is an interruption (ends the run).
+  const leafTimeout = AbortSignal.timeout(
+    config.schedule.leafTimeoutMinutes * MINUTE,
+  );
+  const signal = AbortSignal.any([runController.signal, leafTimeout]);
+
   const sandbox = await sandcastle.createSandbox({
     branch,
     baseBranch,
@@ -262,17 +305,19 @@ async function runLeaf(
   });
 
   try {
-    let signal: string | undefined = needsImplement
+    let completion: string | undefined = needsImplement
       ? undefined
       : COMPLETION_SIGNALS[0];
 
     if (needsImplement) {
+      const started = Date.now();
       const implement = await sandbox.run({
         name: "implementer",
         maxIterations: config.agent.implementIterations,
         agent: agentFor("implement"),
         completionSignal: COMPLETION_SIGNALS,
         promptFile: PROMPTS.implement,
+        signal,
         promptArgs: checkedPromptArgs(PROMPTS.implement, {
           ...projectPromptArgs,
           TASK_ID: leaf.id,
@@ -282,15 +327,31 @@ async function runLeaf(
         }),
       });
 
-      signal = implement.completionSignal;
+      completion = implement.completionSignal;
+      const durationMs = Date.now() - started;
+
+      if (
+        looksLikeQuotaWall({
+          outcome: classifyOutcome(completion, implement.commits.length > 0),
+          durationMs,
+          committed: implement.commits.length > 0,
+          fastFailMs: config.agent.quotaFastFailMs,
+        })
+      ) {
+        throw new InterruptedError(
+          `${leaf.id} exhausted ${config.agent.implementIterations} iterations in ` +
+            `${Math.round(durationMs / 1000)}s with no commit — the platform is refusing us`,
+        );
+      }
+
       const tip = await tipOf(branch);
-      if (signal && tip) await markPhase("implemented", leaf.id, tip, baseTip);
+      if (completion && tip) await markPhase("implemented", leaf.id, tip, baseTip);
     } else {
       phaseLog("review", `[${leaf.id}] already implemented — reviewing only`);
     }
 
     let outcome = classifyOutcome(
-      signal,
+      completion,
       await branchHasCommits(branch, baseBranch),
     );
 
@@ -310,6 +371,7 @@ async function runLeaf(
         agent: agentFor("review"),
         completionSignal: COMPLETION_SIGNALS,
         promptFile: PROMPTS.review,
+        signal,
         promptArgs: checkedPromptArgs(PROMPTS.review, {
           ...projectPromptArgs,
           BRANCH: branch,
@@ -343,6 +405,39 @@ async function runLeaf(
 
     return outcome;
   } catch (cause) {
+    // Whatever stopped the agent, its uncommitted work goes on the branch
+    // first: resumption reads git, and a killed sandbox is the one place work
+    // gets lost otherwise.
+    if (signal.aborted) {
+      const committed = await commitAll(
+        sandbox.worktreePath,
+        `${config.project.commitPrefix} checkpoint — agent stopped by the orchestrator`,
+      ).catch(() => false);
+      if (committed) console.log(`[${leaf.id}] committed what the agent had`);
+    }
+
+    // The leaf's own timeout is a retry, not a verdict: an agent looping on a
+    // ticket for 45 minutes is the token sink this budget exists to cap, and
+    // the next round gets it with whatever it committed.
+    if (leafTimeout.aborted && !runController.signal.aborted) {
+      fileIncident({
+        kind: "leaf-timeout",
+        rootId: leaf.id,
+        leafId: leaf.id,
+        detail: `stopped after ${config.schedule.leafTimeoutMinutes} minutes`,
+      });
+      console.error(
+        `[${leaf.id}] stopped after ${config.schedule.leafTimeoutMinutes} minutes — retried next round`,
+      );
+      return "exhausted";
+    }
+
+    // An interruption leaves the issue `In Progress`. That is true — the work
+    // is on a branch and will resume — and dropping it to `Todo` here would
+    // erase the only visible trace that something is in flight.
+    const interruption = asInterruption(cause);
+    if (interruption) throw interruption;
+
     await trySetState(leaf.id, config.linear.unstartedState);
     throw cause;
   } finally {
@@ -368,6 +463,7 @@ async function planWaves(
     maxIterations: 1,
     agent: agentFor("plan"),
     promptFile: PROMPTS.plan,
+    signal: runController.signal,
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
     promptArgs: checkedPromptArgs(PROMPTS.plan, {
       BASE_BRANCH: resumeBase,
@@ -496,6 +592,7 @@ async function integrateWithAgent(options: {
       maxIterations: config.agent.integrateIterations,
       agent: agentFor("integrate"),
       promptFile: PROMPTS.integrate,
+      signal: runController.signal,
       promptArgs: checkedPromptArgs(PROMPTS.integrate, {
         ...projectPromptArgs,
         ROOT_ID: options.rootId,
@@ -786,6 +883,24 @@ async function runRoot(root: Root): Promise<string | null> {
 // Entry point
 // ---------------------------------------------------------------------------
 
+const startedAt = new Date();
+
+const lock = createLock({ path: join(SANDCASTLE_DIR, "lock") });
+const holder = lock.acquire();
+if (holder) {
+  console.log(
+    `Another run holds the lock (pid ${holder.pid}, since ${holder.startedAt}). Exiting.`,
+  );
+  process.exit(0);
+}
+process.on("exit", () => lock.release());
+
+const pause = journal.activePause(startedAt);
+if (pause) {
+  console.log(`Paused until ${pause.until} — ${pause.reason}. Exiting.`);
+  process.exit(0);
+}
+
 const requested = parseArgs();
 const rootIds = requested.length > 0 ? requested : await discoverRootIds();
 
@@ -804,16 +919,67 @@ for (const root of roots) {
   );
 }
 
-const settled = await Promise.allSettled(roots.map(runRoot));
+const runTimer = setTimeout(
+  () =>
+    runController.abort(
+      new InterruptedError(
+        `run budget of ${config.schedule.runTimeoutMinutes} minutes spent`,
+      ),
+    ),
+  config.schedule.runTimeoutMinutes * MINUTE,
+);
+runTimer.unref();
 
-console.log("\n=== Summary ===");
-for (const [i, outcome] of settled.entries()) {
-  const { id } = roots[i]!.issue;
-  if (outcome.status === "rejected") {
-    console.error(`  ✗ ${id}: ${outcome.reason}`);
-  } else if (outcome.value) {
-    console.log(`  ✓ ${id}: ${outcome.value}`);
-  } else {
-    console.log(`  – ${id}: no pull request`);
+type RootReport = { id: string; pullRequest: string | null; outcome: string };
+const reports: RootReport[] = [];
+let interruption: InterruptedError | null = null;
+
+for (const root of roots) {
+  const { id } = root.issue;
+  try {
+    const url = await runRoot(root);
+    reports.push({ id, pullRequest: url, outcome: url ? "shipped" : "nothing" });
+  } catch (cause) {
+    interruption = asInterruption(cause);
+    if (interruption) {
+      reports.push({ id, pullRequest: null, outcome: "interrupted" });
+      break;
+    }
+    reports.push({ id, pullRequest: null, outcome: `failed: ${cause}` });
   }
 }
+
+clearTimeout(runTimer);
+
+if (interruption) {
+  const until =
+    interruption.resumeAfter ??
+    new Date(Date.now() + config.schedule.pauseMinutes * MINUTE);
+  journal.pauseUntil(until, interruption.reason);
+  console.error(
+    `\nInterrupted — ${interruption.reason}. Back after ${until.toISOString()}.`,
+  );
+}
+
+journal.recordRun({
+  startedAt: startedAt.toISOString(),
+  endedAt: new Date().toISOString(),
+  roots: reports,
+  ...(interruption ? { interrupted: interruption.reason } : {}),
+});
+
+console.log("\n=== Summary ===");
+for (const report of reports) {
+  if (report.pullRequest) {
+    console.log(`  ✓ ${report.id}: ${report.pullRequest}`);
+  } else if (report.outcome.startsWith("failed")) {
+    console.error(`  ✗ ${report.id}: ${report.outcome}`);
+  } else {
+    console.log(`  – ${report.id}: ${report.outcome}`);
+  }
+}
+for (const root of roots.slice(reports.length)) {
+  console.log(`  – ${root.issue.id}: not started`);
+}
+
+process.exit(reports.some((r) => r.outcome.startsWith("failed")) ? 1 : 0);

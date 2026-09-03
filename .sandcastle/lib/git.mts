@@ -17,6 +17,7 @@ export const {
   buildWaveBase,
   rebaseLeafOnto,
   resetBranchTo,
+  commitAll,
 } = createGit({
   cwd: dirname(SANDCASTLE_DIR),
   baseBranch: config.git.baseBranch,
