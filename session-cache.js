@@ -5,7 +5,7 @@ const { getFolderIndexMtimeMs } = require('./folder-index-state');
 const { deriveProjectPath } = require('./derive-project-path');
 const { readSessionFile } = require('./read-session-file');
 const { encodeProjectPath } = require('./encode-project-path');
-const { resolveSessionTitle } = require('./session-title');
+const { resolveSessionTitle, resolveSessionSearchTitle } = require('./session-title');
 
 /**
  * Session cache module.
@@ -119,14 +119,14 @@ function refreshFolder(folder) {
     const s = readSessionFile(filePath, folder, projectPath);
     if (s) {
       sessionsToUpsert.push(s);
-      // Title precedence: user rename (session_meta.name) > JSONL custom-title > JSONL ai-title.
-      // Only customTitle (Claude /title) promotes to session_meta.name — AI titles stay in
-      // session_cache.aiTitle and are preserved once written (COALESCE in the upsert).
+      // Title precedence lives in session-title.js. Only customTitle (Claude /title) promotes to
+      // session_meta.name — AI titles stay in session_cache.aiTitle and are preserved once written
+      // (COALESCE in the upsert).
       const existingName = getMeta(s.sessionId)?.name;
       if (!existingName && s.customTitle) namesToSet.push({ id: s.sessionId, name: s.customTitle });
       searchEntriesToUpsert.push({
         id: s.sessionId, type: 'session', folder: s.folder,
-        title: resolveSessionTitle({ ...s, name: existingName }), body: s.textContent,
+        title: resolveSessionSearchTitle({ ...s, name: existingName }), body: s.textContent,
       });
     }
     changed = true;
@@ -363,8 +363,7 @@ function populateCacheViaWorker() {
         }
         upsertSearchEntries(sessions.map(s => ({
           id: s.sessionId, type: 'session', folder: s.folder,
-          // Same resolved title the sidebar renders; the first prompt stays searchable through body.
-          title: resolveSessionTitle({ ...s, name: getMeta(s.sessionId)?.name }),
+          title: resolveSessionSearchTitle({ ...s, name: getMeta(s.sessionId)?.name }),
           body: s.textContent,
         })));
       }

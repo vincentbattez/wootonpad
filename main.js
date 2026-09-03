@@ -576,7 +576,7 @@ const { deriveProjectPath } = require('./derive-project-path');
 
 // Session cache → session-cache.js
 const sessionCache = require('./session-cache');
-const { resolveSessionTitle } = require('./session-title');
+const { resolveSessionTitle, resolveSessionSearchTitle } = require('./session-title');
 
 function initSessionCache() {
   const account = getActiveAccount();
@@ -1926,11 +1926,12 @@ ipcMain.handle('toggle-star', (_event, sessionId) => {
 // --- IPC: rename-session ---
 ipcMain.handle('rename-session', (_event, sessionId, name) => {
   setName(sessionId, name || null);
-  // Update search index title to include the new name
-  const cached = getCachedSession(sessionId);
-  const summary = cached?.summary || '';
-  updateSearchTitle(sessionId, 'session', (name ? name + ' ' : '') + summary);
-  return { name: name || null };
+  // Re-resolve both titles against the new name: the search entry so the row stays findable under
+  // it, and the display title so the renderer can drop its now-stale copy without re-deriving the
+  // precedence rule itself. Clearing a rename falls back through the same chain.
+  const renamed = { sessionId, ...getCachedSession(sessionId), name: name || null };
+  updateSearchTitle(sessionId, 'session', resolveSessionSearchTitle(renamed));
+  return { name: name || null, title: resolveSessionTitle(renamed) };
 });
 
 // --- IPC: archive-session ---

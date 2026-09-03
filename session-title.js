@@ -1,10 +1,8 @@
 'use strict';
 
-// The one place the display title of a Session is resolved. Pure, with no dependency on the
-// database layer, so it loads under bare `node` (Electron's ABI is not required) and its rule is
-// testable against literal Session objects. Every consumer — the sidebar, the Session header, the
-// JSONL viewer, the resume dialog, the Grid, the IPC-exposed list and the two search-index titles —
-// reads this instead of re-composing its own chain of `||`.
+// The one place a Session's title is composed. Pure, with no dependency on the database layer, so
+// it loads under bare `node` (Electron's ABI is not required) and its rules are testable against
+// literal Session objects. Every consumer reads this instead of re-composing its own chain of `||`.
 
 /**
  * Resolve the title to display for a Session.
@@ -26,10 +24,25 @@ function resolveSessionTitle(session, maxLen) {
     s.customTitle ||
     s.aiTitle ||
     s.summary ||
-    (typeof s.sessionId === 'string' ? s.sessionId.slice(0, 8) : '') ||
-    '';
+    (typeof s.sessionId === 'string' ? s.sessionId.slice(0, 8) : '');
   if (maxLen != null && title.length > maxLen) return title.slice(0, maxLen);
   return title;
 }
 
-module.exports = { resolveSessionTitle };
+/**
+ * Compose the `title` column of a Session's search-index entry.
+ *
+ * That column is a haystack, not a label: the titles-only search mode matches it alone, so it
+ * carries the first prompt alongside the resolved title. Without it a Session named by a rename,
+ * a custom title or an AI title would stop being findable by the words of its first prompt.
+ *
+ * @param {object} session  A Session object; `name` must already hold the stored user rename.
+ * @returns {string}
+ */
+function resolveSessionSearchTitle(session) {
+  const title = resolveSessionTitle(session);
+  const summary = session?.summary || '';
+  return title === summary ? summary : `${title} ${summary}`.trim();
+}
+
+module.exports = { resolveSessionTitle, resolveSessionSearchTitle };
