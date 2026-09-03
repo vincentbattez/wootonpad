@@ -10,7 +10,6 @@ import {
   classifyOutcome,
   classifyReview,
   isSettled,
-  normalizeWaves,
   runWaves,
 } from "../.sandcastle/lib/pipeline.mts";
 
@@ -184,25 +183,6 @@ test("runWaves: landing order is merge order", async () => {
     "sandcastle/issue-B",
     "sandcastle/issue-C",
   ]);
-});
-
-test("normalizeWaves: drops invented entries and duplicates", () => {
-  const remaining = [leaf("A"), leaf("B")];
-  const waves = normalizeWaves(
-    [[{ id: "A" }, { id: "GHOST" }], [{ id: "A" }, { id: "B" }]],
-    remaining,
-  );
-
-  assert.deepEqual(waves, [[leaf("A")], [leaf("B")]]);
-});
-
-test("normalizeWaves: appends what the planner forgot rather than dropping it", () => {
-  const waves = normalizeWaves([[{ id: "A" }]], [leaf("A"), leaf("B")]);
-  assert.deepEqual(waves, [[leaf("A")], [leaf("B")]]);
-});
-
-test("normalizeWaves: an empty plan still works every remaining leaf", () => {
-  assert.deepEqual(normalizeWaves([], [leaf("A")]), [[leaf("A")]]);
 });
 
 test("runWaves: a leaf whose run crashes is retried before it counts as failed", async () => {

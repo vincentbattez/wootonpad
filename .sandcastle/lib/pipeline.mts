@@ -67,35 +67,6 @@ export interface Leaf {
   id: string;
 }
 
-/**
- * The planner occasionally drops or invents an entry; trust our own leaf list.
- * Anything it forgot is appended as a final wave rather than silently dropped.
- */
-export function normalizeWaves<T extends Leaf>(
-  planned: { id: string }[][],
-  remaining: T[],
-): T[][] {
-  const byId = new Map(remaining.map((leaf) => [leaf.id, leaf]));
-  const seen = new Set<string>();
-
-  const waves = planned
-    .map((wave) =>
-      wave
-        .map((entry) => byId.get(entry.id))
-        .filter((leaf): leaf is T => {
-          if (!leaf || seen.has(leaf.id)) return false;
-          seen.add(leaf.id);
-          return true;
-        }),
-    )
-    .filter((wave) => wave.length > 0);
-
-  const forgotten = remaining.filter((leaf) => !seen.has(leaf.id));
-  if (forgotten.length > 0) waves.push(forgotten);
-
-  return waves;
-}
-
 export interface WaveDeps<T extends Leaf> {
   /** Run one leaf against the base its wave is cut from. */
   runLeaf(leaf: T, branch: string, baseBranch: string): Promise<Outcome>;

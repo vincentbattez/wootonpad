@@ -9,7 +9,9 @@
 // leaf. With no arguments, every eligible root in the project is worked.
 //
 // Per root, independently of the others:
-//   1. Plan     — an opus agent groups the remaining leaves into dependency waves.
+//   1. Plan     — the remaining leaves are sorted into waves from the tracker's
+//                 `blocks` relations. An agent infers them only when none is
+//                 declared, and writes what it inferred back into the tracker.
 //   2. Execute  — one sandbox per leaf. Waves run in order, leaves inside a
 //                 wave run concurrently. Wave N is cut from the base branch
 //                 plus everything landed in waves 1..N-1, so a leaf can build
@@ -70,24 +72,33 @@ import {
   classifyOutcome,
   classifyReview,
   isSettled,
-  normalizeWaves,
   runWaves,
   type Outcome,
 } from "./lib/pipeline.mts";
 import {
+  addComment,
+  createBlocksRelation,
   discoverRootIds,
   fetchIssueTree,
   descendantIds,
+  isBlocked,
   isEligible,
   leavesOf,
   setState,
   trySetState,
   type Issue,
 } from "./lib/linear.mts";
+import {
+  DependencyCycleError,
+  hasDeclaredRelations,
+  normalizeDependencies,
+  wavesFromRelations,
+  type Dependent,
+} from "./lib/plan.mts";
 
 const planSchema = z.object({
-  waves: z.array(
-    z.array(z.object({ id: z.string(), title: z.string(), branch: z.string() })),
+  dependencies: z.array(
+    z.object({ id: z.string(), blockedBy: z.array(z.string()) }),
   ),
 });
 
@@ -186,14 +197,27 @@ function assertNoNesting(roots: Root[]): void {
   }
 }
 
+/**
+ * A leaf blocked by an open issue *outside* this root is not workable yet —
+ * its blocker is nobody's job in this run. A blocker inside the root is only
+ * an ordering constraint, and the planner honours it.
+ */
 async function resolveRoot(id: string): Promise<Root> {
   const issue = await fetchIssueTree(id);
   const leaves = leavesOf(issue);
+  const inside = descendantIds(issue).add(issue.id);
+
+  const workable = (leaf: Issue) =>
+    isEligible(leaf) &&
+    !isBlocked({
+      ...leaf,
+      blockers: leaf.blockers.filter((blocker) => !inside.has(blocker.id)),
+    });
 
   return {
     issue,
-    eligibleLeaves: leaves.filter(isEligible),
-    skippedLeaves: leaves.filter((leaf) => !isEligible(leaf)),
+    eligibleLeaves: leaves.filter(workable),
+    skippedLeaves: leaves.filter((leaf) => !workable(leaf)),
   };
 }
 
@@ -448,21 +472,28 @@ async function runLeaf(
   }
 }
 
-async function planWaves(
+/**
+ * Ask an agent which remaining leaves depend on which, and declare what it
+ * found in the tracker. The write-back is the point: a dependency between two
+ * tickets is domain information, its home is the tracker, and the next run
+ * reads it there and plans without an agent.
+ */
+async function inferDependencies(
   root: Root,
   remaining: Issue[],
   landed: string[],
   resumeBase: string,
-): Promise<Issue[][]> {
+): Promise<(Issue & Dependent)[]> {
+  const { id } = root.issue;
   phaseLog(
     "plan",
-    `[${root.issue.id}] planning ${remaining.length} issue(s) on ${resumeBase}`,
+    `[${id}] no relations declared among ${remaining.length} issues — asking an agent`,
   );
 
   const plan = await sandcastle.run({
     hooks,
     sandbox: docker(),
-    name: `planner-${root.issue.id}`,
+    name: `planner-${id}`,
     maxIterations: 1,
     agent: agentFor("plan"),
     promptFile: PROMPTS.plan,
@@ -470,26 +501,103 @@ async function planWaves(
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
     promptArgs: checkedPromptArgs(PROMPTS.plan, {
       BASE_BRANCH: resumeBase,
-      ROOT_ID: root.issue.id,
+      ROOT_ID: id,
       ROOT_TITLE: root.issue.title,
       REMAINING_ISSUES: JSON.stringify(
         remaining.map((leaf) => ({
           id: leaf.id,
           title: leaf.title,
           body: leaf.description,
-          branch: leafBranch(leaf.id),
         })),
         null,
         2,
       ),
       LANDED_ISSUES: landed.length
-        ? landed.map((id) => `- ${id}`).join("\n")
+        ? landed.map((leafId) => `- ${leafId}`).join("\n")
         : "_(none)_",
     }),
   });
 
   const planned: z.infer<typeof planSchema> = plan.output;
-  return normalizeWaves(planned.waves, remaining);
+  const dependents = normalizeDependencies(planned.dependencies, remaining);
+  const byId = new Map(remaining.map((leaf) => [leaf.id, leaf]));
+  const declared: string[] = [];
+
+  for (const leaf of dependents) {
+    for (const blockerId of leaf.blockedBy) {
+      try {
+        await createBlocksRelation(byId.get(blockerId)!, leaf);
+        declared.push(`${blockerId} → ${leaf.id}`);
+      } catch (cause) {
+        phaseError(
+          "plan",
+          `[${id}] could not declare ${blockerId} blocks ${leaf.id}: ${(cause as Error).message}`,
+        );
+      }
+    }
+    if (leaf.blockedBy.length > 0) {
+      await addComment(
+        leaf.id,
+        `Sandcastle inferred that this issue is blocked by ${leaf.blockedBy.join(", ")} ` +
+          "and declared it as a relation. Remove the relation if that is wrong.",
+      ).catch(() => {});
+    }
+  }
+
+  fileIncident({
+    kind: "relations-inferred",
+    rootId: id,
+    detail: declared.length
+      ? `declared ${declared.join("; ")}`
+      : "the agent found every remaining issue independent",
+  });
+  phaseLog("plan", `[${id}] declared ${declared.length} relation(s) in the tracker`);
+
+  return dependents;
+}
+
+/**
+ * Waves from the tracker's `blocks` relations. Exact where relations exist;
+ * where none do, an agent infers them once and they exist from then on.
+ * A single remaining leaf needs neither.
+ */
+async function planWaves(
+  root: Root,
+  remaining: Issue[],
+  landed: string[],
+  resumeBase: string,
+): Promise<Issue[][]> {
+  const { id } = root.issue;
+  if (remaining.length <= 1) return [remaining];
+
+  let dependents: (Issue & Dependent)[] = remaining.map((leaf) => ({
+    ...leaf,
+    blockedBy: leaf.blockers.map((blocker) => blocker.id),
+  }));
+
+  if (!hasDeclaredRelations(dependents)) {
+    dependents = await inferDependencies(root, remaining, landed, resumeBase);
+  }
+
+  try {
+    const waves = wavesFromRelations(dependents);
+    phaseLog(
+      "plan",
+      `[${id}] ${waves.length} wave(s): ${waves
+        .map((wave) => wave.map((leaf) => leaf.id).join("+"))
+        .join(" → ")}`,
+    );
+    return waves;
+  } catch (cause) {
+    if (!(cause instanceof DependencyCycleError)) throw cause;
+
+    // A cycle is a tracker error a human has to fix. Meanwhile the leaves in
+    // it still run — in one wave, each on the base alone — rather than the
+    // root stalling on a relation nobody will notice until morning.
+    fileIncident({ kind: "dependency-cycle", rootId: id, detail: cause.message });
+    phaseError("plan", `[${id}] ${cause.message} — running them side by side`);
+    return [remaining];
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -845,7 +953,10 @@ async function runRoot(root: Root): Promise<string | null> {
   const { id } = root.issue;
 
   for (const leaf of root.skippedLeaves) {
-    console.log(`[${id}] skipping ${leaf.id} — ${leaf.stateName}, not eligible`);
+    const why = isEligible(leaf)
+      ? `blocked by ${leaf.blockers.map((b) => b.id).join(", ")}`
+      : `${leaf.stateName}, not eligible`;
+    console.log(`[${id}] skipping ${leaf.id} — ${why}`);
   }
 
   if (root.eligibleLeaves.length === 0) {
@@ -886,6 +997,7 @@ async function runRoot(root: Root): Promise<string | null> {
 
     const waves = await planWaves(root, remaining, settledIds, resumeBase);
     const before = settledIds.length;
+
 
     const result = await runWaves(deps, {
       rootId: id,

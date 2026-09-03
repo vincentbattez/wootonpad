@@ -25,7 +25,11 @@ export type IncidentKind =
   /** An integration branch shipped unfinished, or without every leaf. */
   | "shipped-incomplete"
   /** A leaf spent its wall-clock budget without finishing. */
-  | "leaf-timeout";
+  | "leaf-timeout"
+  /** No relations declared — an agent inferred them and wrote them back. */
+  | "relations-inferred"
+  /** The declared (or inferred) relations contain a cycle. */
+  | "dependency-cycle";
 
 export interface Incident {
   kind: IncidentKind;
