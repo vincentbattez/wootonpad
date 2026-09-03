@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { hasUsage, usageRows, usageChips } from './usage.mjs';
+import { hasUsage, usageRows, usageChips, usageSeverity } from './usage.mjs';
 
 // The account-usage read model behind the panel bars and the dropdown chips, asserted against
 // fixed usage entries with no mounting and no DOM.
@@ -23,6 +23,15 @@ test('usageRows yields the present rows, each with its percentage and reset coun
   assert.deepEqual(both.map(r => r.key), ['session', 'weekAll']);
   assert.equal(both[1].pct, 12);
   assert.equal(both[1].resetIn, '3d');
+});
+
+test('usageSeverity is the panel caller\'s 70 / 90 rule, off the shared meter Primitive', () => {
+  assert.equal(usageSeverity(0), '');
+  assert.equal(usageSeverity(69), '');
+  assert.equal(usageSeverity(70), 'warn');
+  assert.equal(usageSeverity(89), 'warn');
+  assert.equal(usageSeverity(90), 'danger');
+  assert.equal(usageSeverity(150), 'danger');
 });
 
 test('usageChips shows the 5-hour figure only, and nothing when unusable', () => {

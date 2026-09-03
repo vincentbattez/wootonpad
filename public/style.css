@@ -843,22 +843,40 @@ body { display: flex; flex-direction: column; }
   flex-shrink: 0;
 }
 
-.account-usage-bar {
-  flex: 1;
+/* The shared SbMeter Primitive: track + fill. Its accent and the warn/danger
+   flips all come from the token layer, never a raw colour. */
+.sb-meter {
+  position: relative;
   height: 3px;
   background: var(--neutral-a4);
   border-radius: 2px;
   overflow: hidden;
 }
 
-.account-usage-bar-fill {
+.sb-meter-fill {
   height: 100%;
   background: var(--orange-500);
   border-radius: 2px;
 }
 
-.account-usage-bar-fill.warn { background: var(--amber-9); }
-.account-usage-bar-fill.danger { background: var(--red-9); }
+.sb-meter-fill.base { background: var(--blue-9); }
+.sb-meter-fill.warn { background: var(--amber-9); }
+.sb-meter-fill.high { background: var(--orange-9); }
+.sb-meter-fill.danger { background: var(--red-9); }
+
+/* The optional autocompact tick: a 1px marker across the track. Its colour comes from
+   the token layer like the rest of the Primitive. */
+.sb-meter-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--neutral-a8);
+}
+
+/* The account usage bar fills the row between its label and its figure — the
+   layout the SbMeter sits in, kept on the account side of the Primitive. */
+.account-usage-meter { flex: 1; }
 
 .account-usage-info {
   font-size: 10px;
@@ -1927,6 +1945,49 @@ body { display: flex; flex-direction: column; }
   font-size: 13px;
   color: var(--text-disabled);
   margin-top: 1px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.session-meta-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The context gauge slot. At full density it reserves its width whether or not a gauge is
+   showing, so the first assistant turn's arrival shifts nothing; on a Session row it is
+   compact and collapses to nothing until there is a context to show. */
+.session-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 96px;
+  flex-shrink: 0;
+}
+
+.session-context--compact {
+  width: auto;
+  gap: 4px;
+  margin-left: auto;
+}
+
+.session-context-meter {
+  flex: 1;
+}
+
+.session-context--compact .session-context-meter {
+  flex: none;
+  width: 32px;
+}
+
+.session-context-label {
+  font-size: 10px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  white-space: nowrap;
 }
 
 /* ---- Session action buttons ---- */
@@ -2520,6 +2581,7 @@ body { display: flex; flex-direction: column; }
   align-items: center;
   justify-content: center;
 }
+
 /* ─────────────────────────────────────────────────────────────── */
 
 #terminals {

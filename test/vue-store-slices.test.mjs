@@ -12,7 +12,7 @@ import { store, slices, sessionsStore, settingsStore, sidebarStore, areasStore, 
 const OWNERSHIP = {
   sessionsStore: [
     'projects', 'activePtyIds', 'activeSessionId', 'sessionBusyState',
-    'attentionSessions', 'responseReadySessions', 'lastActivityTime', 'pendingSessions',
+    'attentionSessions', 'responseReadySessions', 'lastActivityTime', 'pendingSessions', 'sessionContext',
   ],
   settingsStore: ['settingsOpen', 'settingsScope', 'settingsProjectPath'],
   sidebarStore: [

@@ -39,13 +39,12 @@
       <div v-if="hasUsage(usage)" class="account-usage-block">
         <div v-for="row in usageRows(usage)" :key="row.key" class="account-usage-row">
           <span class="account-usage-label">{{ row.label }}</span>
-          <div class="account-usage-bar">
-            <div
-              class="account-usage-bar-fill"
-              :class="{ danger: row.pct >= 90, warn: row.pct >= 70 && row.pct < 90 }"
-              :style="{ width: Math.min(row.pct, 100) + '%' }"
-            ></div>
-          </div>
+          <SbMeter
+            class="account-usage-meter"
+            :value="row.pct"
+            :max="100"
+            :severity="usageSeverity(row.pct)"
+          />
           <span class="account-usage-info">{{ row.pct }}%{{ row.resetIn ? `  · resets in ${row.resetIn}~` : '' }}</span>
         </div>
         <div v-if="usage?._cached" class="account-usage-cached-note">cached data</div>
@@ -61,8 +60,9 @@
 // so this file carries no store, no service and no window access. Class names are preserved
 // verbatim from the pre-migration row.
 import SbEditableLabel from '../../../shared/ui/SbEditableLabel.vue';
+import SbMeter from '../../../shared/ui/SbMeter.vue';
 import { useInlineRename } from '../../../shared/composables/use-inline-rename.js';
-import { hasUsage, usageRows } from '../usage.mjs';
+import { hasUsage, usageRows, usageSeverity } from '../usage.mjs';
 import { accountsIcons } from '../../../shared/lib/icons.js';
 
 const { editSvg, trashSvg } = accountsIcons;

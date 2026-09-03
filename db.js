@@ -57,7 +57,9 @@ db.exec(`
     modified TEXT,
     messageCount INTEGER DEFAULT 0,
     slug TEXT,
-    aiTitle TEXT
+    aiTitle TEXT,
+    contextUsage TEXT,
+    contextModel TEXT
   )
 `);
 
@@ -183,6 +185,15 @@ const migrations = [
       );
     `);
   },
+  // v9: Context gauge (VIN-143). Two additive columns on the Session cache row: the last
+  // assistant turn's usage breakdown (JSON of the four counters, for the tooltip) and its
+  // model (the gauge's denominator). Clear the cache so a re-index backfills them.
+  (db) => {
+    try { db.exec('ALTER TABLE session_cache ADD COLUMN contextUsage TEXT'); } catch {}
+    try { db.exec('ALTER TABLE session_cache ADD COLUMN contextModel TEXT'); } catch {}
+    try { db.exec('DELETE FROM session_cache'); } catch {}
+    try { db.exec('DELETE FROM cache_meta'); } catch {}
+  },
 ];
 
 const currentDbVersion = (() => {
@@ -236,14 +247,15 @@ const stmts = {
   cacheCountByAccount: db.prepare("SELECT COUNT(*) as cnt FROM session_cache WHERE accountId = ?"),
   cacheGetByAccount: db.prepare('SELECT * FROM session_cache WHERE accountId = ?'),
   cacheUpsert: db.prepare(`
-    INSERT INTO session_cache (sessionId, folder, projectPath, summary, firstPrompt, created, modified, messageCount, slug, aiTitle, accountId)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO session_cache (sessionId, folder, projectPath, summary, firstPrompt, created, modified, messageCount, slug, aiTitle, accountId, contextUsage, contextModel)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(sessionId) DO UPDATE SET
       folder = excluded.folder, projectPath = excluded.projectPath,
       summary = excluded.summary, firstPrompt = excluded.firstPrompt,
       created = excluded.created, modified = excluded.modified,
       messageCount = excluded.messageCount, slug = excluded.slug,
-      aiTitle = COALESCE(session_cache.aiTitle, excluded.aiTitle), accountId = excluded.accountId
+      aiTitle = COALESCE(session_cache.aiTitle, excluded.aiTitle), accountId = excluded.accountId,
+      contextUsage = excluded.contextUsage, contextModel = excluded.contextModel
   `),
   cacheGetByFolder: db.prepare('SELECT sessionId, modified FROM session_cache WHERE folder = ? AND accountId = ?'),
   cacheGetFolder: db.prepare('SELECT folder FROM session_cache WHERE sessionId = ?'),
@@ -330,7 +342,9 @@ const upsertCachedSessionsBatch = db.transaction((sessions, accountId) => {
     stmts.cacheUpsert.run(
       s.sessionId, s.folder, s.projectPath, s.summary,
       s.firstPrompt, s.created, s.modified, s.messageCount || 0,
-      s.slug || null, s.aiTitle || null, accountId
+      s.slug || null, s.aiTitle || null, accountId,
+      s.contextUsage ? JSON.stringify(s.contextUsage) : null,
+      s.contextModel || null
     );
   }
 });

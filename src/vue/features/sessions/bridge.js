@@ -3,10 +3,14 @@
 // Component. `public/app.js` is frozen, so these names and signatures are the contract;
 // they are composed into window.vueSidebar (with the navigation filters and search) so the
 // legacy surface is byte-identical while the sessions feature owns its own slice of it.
+import { applyStoredContext } from './context-gauge.mjs';
+
 export function createSessionsBridge(store) {
   return {
     // The Session/Project tree and the live PTY sets.
-    setProjects(projects) { store.projects = projects.map(p => ({ ...p })); },
+    setProjects(projects) {
+      store.projects = applyStoredContext(projects.map(p => ({ ...p })), store.sessionContext);
+    },
     setActivePtyIds(ids) { store.activePtyIds = new Set(ids); },
     setActiveSession(id) { store.activeSessionId = id; },
     setBusy(sessionId, busy) {
