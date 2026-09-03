@@ -80,14 +80,64 @@ const configSchema = z.object({
       .default({ plan: {}, implement: {}, review: {}, integrate: {} }),
     /** Retry rounds per feature before giving up. */
     retryRounds: z.number().int().positive().default(10),
+    /**
+     * How many times a leaf whose *run* throws — a dead sandbox, a prompt that
+     * would not expand — is re-run before the round gives up on it. Crashes are
+     * usually transient; a round that ends on one costs a whole re-plan.
+     */
+    leafAttempts: z.number().int().positive().default(2),
+    /**
+     * How many times a merge agent is put back on a branch it left conflicted
+     * or red — an integration branch, or a wave base the deterministic merge
+     * could not assemble.
+     */
+    integrateAttempts: z.number().int().positive().default(3),
+    /**
+     * Iteration budget for one integration attempt. A merge agent that gets a
+     * single pass has to resolve every conflict and fix the suite in one go,
+     * which is how a half-merged branch gets signed off.
+     */
+    integrateIterations: z.number().int().positive().default(10),
     /** Iteration budget for a single issue's implementer. */
     implementIterations: z.number().int().positive().default(100),
+    /**
+     * An implementer that exhausts its iterations faster than this, with no
+     * commit to show, was refused by the platform rather than beaten by the
+     * task. See `lib/interruption.mts`.
+     */
+    quotaFastFailMs: z.number().int().positive().default(120_000),
   }),
+  schedule: z
+    .object({
+      /**
+       * Wall-clock budget for one leaf, implementer and reviewer together. The
+       * real token sink is an agent looping on an impossible ticket; this is
+       * what stops it. The leaf commits what it has and is retried next round.
+       */
+      leafTimeoutMinutes: z.number().positive().default(45),
+      /**
+       * Wall-clock budget for the whole run, under the cron period so two runs
+       * never overlap. Reaching it is an interruption, not a failure.
+       */
+      runTimeoutMinutes: z.number().positive().default(240),
+      /**
+       * How long to stay away after an interruption that did not say when the
+       * window reopens.
+       */
+      pauseMinutes: z.number().positive().default(60),
+    })
+    .prefault({}),
   sandbox: z.object({
     /** Run inside the sandbox once it is ready. */
     installCommand: z.string().default("npm install"),
     /** Host paths copied into each worktree, to avoid a cold install. */
     copyToWorktree: z.array(z.string()).default(["node_modules"]),
+    /**
+     * Files the sandbox rewrites on its own — the lockfile after
+     * `installCommand`, typically. A worktree whose only changes are these
+     * is clean for the purpose of sweeping it.
+     */
+    ignoreChurn: z.array(z.string()).default(["package-lock.json"]),
   }),
   project: z.object({
     /** Commands the agents must run before committing, and after each merge. */
