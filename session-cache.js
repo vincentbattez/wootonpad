@@ -5,6 +5,7 @@ const { getFolderIndexMtimeMs } = require('./folder-index-state');
 const { deriveProjectPath } = require('./derive-project-path');
 const { readSessionFile } = require('./read-session-file');
 const { encodeProjectPath } = require('./encode-project-path');
+const { resolveSessionTitle, resolveSessionSearchTitle } = require('./session-title');
 
 /**
  * Session cache module.
@@ -118,15 +119,14 @@ function refreshFolder(folder) {
     const s = readSessionFile(filePath, folder, projectPath);
     if (s) {
       sessionsToUpsert.push(s);
-      // Title precedence: user rename (session_meta.name) > JSONL custom-title > JSONL ai-title.
-      // Only customTitle (Claude /title) promotes to session_meta.name — AI titles stay in
-      // session_cache.aiTitle and are preserved once written (COALESCE in the upsert).
+      // Title precedence lives in session-title.js. Only customTitle (Claude /title) promotes to
+      // session_meta.name — AI titles stay in session_cache.aiTitle and are preserved once written
+      // (COALESCE in the upsert).
       const existingName = getMeta(s.sessionId)?.name;
       if (!existingName && s.customTitle) namesToSet.push({ id: s.sessionId, name: s.customTitle });
-      const name = existingName || s.customTitle || s.aiTitle || '';
       searchEntriesToUpsert.push({
         id: s.sessionId, type: 'session', folder: s.folder,
-        title: (name ? name + ' ' : '') + s.summary, body: s.textContent,
+        title: resolveSessionSearchTitle({ ...s, name: existingName }), body: s.textContent,
       });
     }
     changed = true;
@@ -215,6 +215,7 @@ function buildProjectsFromCache() {
       contextUsage: parseContextUsage(row.contextUsage),
       contextModel: row.contextModel || null,
     };
+    s.title = resolveSessionTitle(s);
     if (!projectMap.has(row.projectPath)) {
       projectMap.set(row.projectPath, {
         folder: encodeProjectPath(row.projectPath),
@@ -266,13 +267,15 @@ function buildProjectsFromCache() {
     }
     const proj = projectMap.get(session.projectPath);
     if (!proj.sessions.some(s => s.sessionId === sessionId)) {
-      proj.sessions.push({
+      const synthetic = {
         sessionId, summary: 'Terminal', firstPrompt: '', projectPath: session.projectPath,
         name: null, starred: 0, archived: 0, messageCount: 0,
         modified: new Date(session._openedAt).toISOString(),
         created: new Date(session._openedAt).toISOString(),
         type: 'terminal',
-      });
+      };
+      synthetic.title = resolveSessionTitle(synthetic);
+      proj.sessions.push(synthetic);
     }
   }
 
@@ -358,15 +361,11 @@ function populateCacheViaWorker() {
           // AI titles must not — see refreshFolder for the rationale.
           if (s.customTitle) setName(s.sessionId, s.customTitle);
         }
-        upsertSearchEntries(sessions.map(s => {
-          // Search title precedence matches the sidebar: user rename > custom-title > ai-title.
-          const name = getMeta(s.sessionId)?.name || s.customTitle || s.aiTitle || '';
-          return {
-            id: s.sessionId, type: 'session', folder: s.folder,
-            title: (name ? name + ' ' : '') + s.summary,
-            body: s.textContent,
-          };
-        }));
+        upsertSearchEntries(sessions.map(s => ({
+          id: s.sessionId, type: 'session', folder: s.folder,
+          title: resolveSessionSearchTitle({ ...s, name: getMeta(s.sessionId)?.name }),
+          body: s.textContent,
+        })));
       }
       setFolderMeta(folder, projectPath, indexMtimeMs);
     }
