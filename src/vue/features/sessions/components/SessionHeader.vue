@@ -31,8 +31,8 @@
               <span class="vsh-session-id">{{ shortId }}</span>
             </template>
           </div>
-          <div v-if="aiTitle || ptyTitle" class="vsh-subtitle-row">
-            <span v-if="aiTitle" class="vsh-ai-title">{{ aiTitle }}</span>
+          <div v-if="firstPrompt || ptyTitle" class="vsh-subtitle-row">
+            <span v-if="firstPrompt" class="vsh-first-prompt">{{ firstPrompt }}</span>
             <span v-if="ptyTitle" class="vsh-pty-title">{{ ptyTitle }}</span>
           </div>
         </div>
@@ -52,12 +52,12 @@ import SbAvatar from '../../../shared/ui/SbAvatar.vue';
 import SessionStopIcon from '../icons/SessionStopIcon.vue';
 
 // The terminal header for the active Session. Dumb: it takes the Session plus its already-resolved
-// name, AI title, time and live status, and emits `stop`. The pure pieces — the shortened project
-// path, the short id, the status class and label — it derives itself from the props.
+// name, first prompt, time and live status, and emits `stop`. The pure pieces — the shortened
+// project path, the short id, the status class and label — it derives itself from the props.
 const props = defineProps({
   session: { type: Object, default: null },
   sessionName: { type: String, default: '' },
-  aiTitle: { type: String, default: null },
+  firstPrompt: { type: String, default: null },
   timeStr: { type: String, default: '' },
   isRunning: { type: Boolean, default: false },
   isBusy: { type: Boolean, default: false },

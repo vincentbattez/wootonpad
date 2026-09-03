@@ -20,3 +20,14 @@ export function sessionTimeStr(session) {
   const t = activity?.get(session.sessionId) || new Date(session.modified);
   return typeof window !== 'undefined' && window.formatDate ? window.formatDate(t) : '';
 }
+
+// The terminal header's subtitle (VIN-146). The first prompt lost the title to the aiTitle and
+// took this slot, where the aiTitle used to sit. It is dropped when it already *is* the resolved
+// title — the case of a Session with no aiTitle — so the header never says the same thing twice.
+// `title` is passed in rather than re-resolved here: the caller has already cleaned it, and the
+// precedence rule lives in session-title.js.
+export function sessionHeaderSubtitle(session, title) {
+  const firstPrompt = cleanDisplayName(session?.firstPrompt || '');
+  if (!firstPrompt || firstPrompt === title) return null;
+  return firstPrompt;
+}
