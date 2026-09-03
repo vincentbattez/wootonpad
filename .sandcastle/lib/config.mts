@@ -132,6 +132,12 @@ const configSchema = z.object({
     installCommand: z.string().default("npm install"),
     /** Host paths copied into each worktree, to avoid a cold install. */
     copyToWorktree: z.array(z.string()).default(["node_modules"]),
+    /**
+     * Files the sandbox rewrites on its own — the lockfile after
+     * `installCommand`, typically. A worktree whose only changes are these
+     * is clean for the purpose of sweeping it.
+     */
+    ignoreChurn: z.array(z.string()).default(["package-lock.json"]),
   }),
   project: z.object({
     /** Commands the agents must run before committing, and after each merge. */

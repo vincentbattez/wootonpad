@@ -29,7 +29,9 @@ export type IncidentKind =
   /** No relations declared — an agent inferred them and wrote them back. */
   | "relations-inferred"
   /** The declared (or inferred) relations contain a cycle. */
-  | "dependency-cycle";
+  | "dependency-cycle"
+  /** A worktree holds uncommitted changes and was kept rather than swept. */
+  | "worktree-dirty";
 
 export interface Incident {
   kind: IncidentKind;

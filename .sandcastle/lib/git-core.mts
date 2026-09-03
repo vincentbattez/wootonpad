@@ -12,7 +12,7 @@
 // work, which costs an agent round and nothing else.
 
 import { execFile } from "node:child_process";
-import { rm } from "node:fs/promises";
+import { realpath, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
@@ -33,9 +33,16 @@ export interface GitOptions {
   baseBranch: string;
   /** Directory the throwaway merge worktrees are created under. */
   worktreeRoot: string;
+  /** Paths whose modification does not make a worktree dirty. */
+  ignoreChurn?: string[];
 }
 
-export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
+export function createGit({
+  cwd,
+  baseBranch,
+  worktreeRoot,
+  ignoreChurn = [],
+}: GitOptions) {
   const run = async (dir: string, args: string[]): Promise<string> => {
     const { stdout } = await exec("git", args, {
       cwd: dir,
@@ -217,6 +224,80 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
     return true;
   };
 
+  interface Worktree {
+    path: string;
+    branch: string | null;
+  }
+
+  /** The worktrees under `worktreeRoot` — never the main checkout. */
+  const listWorktrees = async (): Promise<Worktree[]> => {
+    await git("worktree", "prune");
+    const out = await git("worktree", "list", "--porcelain");
+    // Symlinked temp dirs (`/var` → `/private/var`) make a plain prefix test lie.
+    const root = await realpath(worktreeRoot).catch(() => null);
+    if (root === null) return [];
+    const worktrees: Worktree[] = [];
+
+    for (const block of out.split("\n\n")) {
+      const path = block.match(/^worktree (.+)$/m)?.[1];
+      if (!path) continue;
+      const real = await realpath(path).catch(() => null);
+      if (real === null || !real.startsWith(root + "/")) continue;
+      const branch = block.match(/^branch refs\/heads\/(.+)$/m)?.[1] ?? null;
+      worktrees.push({ path, branch });
+    }
+
+    return worktrees;
+  };
+
+  /** Nothing uncommitted beyond the churn the sandbox itself produces. */
+  const isWorktreeClean = async (dir: string): Promise<boolean> => {
+    // Raw stdout: `run` trims it, and a porcelain line starts with a space.
+    const { stdout } = await exec("git", ["status", "--porcelain"], { cwd: dir });
+    return stdout
+      .split("\n")
+      .filter((line) => line !== "")
+      .every((line) => ignoreChurn.includes(line.slice(3).trim()));
+  };
+
+  /**
+   * Drop worktrees the run no longer needs. Everything committed is
+   * reconstructible from the branch, so a clean worktree goes as soon as it
+   * is old enough — or at once when `all` is set. A worktree holding
+   * uncommitted changes is never deleted here: it is reported back, because
+   * that is work nothing else knows about.
+   */
+  const sweepWorktrees = async (options: {
+    olderThanMs: number;
+    all?: boolean;
+    now?: number;
+  }): Promise<{ removed: Worktree[]; dirty: Worktree[]; kept: Worktree[] }> => {
+    const now = options.now ?? Date.now();
+    const result = { removed: [] as Worktree[], dirty: [] as Worktree[], kept: [] as Worktree[] };
+
+    for (const worktree of await listWorktrees()) {
+      if (!(await isWorktreeClean(worktree.path).catch(() => false))) {
+        result.dirty.push(worktree);
+        continue;
+      }
+
+      const age = now - (await stat(worktree.path)).mtimeMs;
+      if (!options.all && age < options.olderThanMs) {
+        result.kept.push(worktree);
+        continue;
+      }
+
+      // `remove` balks at directories it did not create (a copied
+      // node_modules, say). The ref is what matters; the directory just goes.
+      await git("worktree", "remove", "--force", worktree.path).catch(() => {});
+      await rm(worktree.path, { recursive: true, force: true });
+      await git("worktree", "prune");
+      result.removed.push(worktree);
+    }
+
+    return result;
+  };
+
   /** Every branch known locally, plus every branch known on the remote. */
   const listRefs = async (remote: string): Promise<string[]> => {
     const out = await git(
@@ -245,6 +326,8 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
     rebaseLeafOnto,
     resetBranchTo,
     commitAll,
+    listWorktrees,
+    sweepWorktrees,
   };
 }
 

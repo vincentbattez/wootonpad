@@ -19,8 +19,10 @@ export const {
   rebaseLeafOnto,
   resetBranchTo,
   commitAll,
+  sweepWorktrees,
 } = createGit({
   cwd: dirname(SANDCASTLE_DIR),
   baseBranch: config.git.baseBranch,
   worktreeRoot: join(SANDCASTLE_DIR, "worktrees"),
+  ignoreChurn: config.sandbox.ignoreChurn,
 });

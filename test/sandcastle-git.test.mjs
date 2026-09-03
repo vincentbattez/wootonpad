@@ -41,6 +41,7 @@ async function fixture() {
       cwd,
       baseBranch: "main",
       worktreeRoot: join(cwd, ".worktrees"),
+      ignoreChurn: ["README.md"],
     }),
     cleanup: () => rm(cwd, { recursive: true, force: true }),
   };
@@ -317,4 +318,28 @@ test("mergeBranches: stops at the first conflict and keeps what applied before i
   assert.equal(await ops.isAncestor("b", "integration"), true, "b stayed merged");
   assert.equal(await ops.isAncestor("c", "integration"), false);
   assert.equal(await ops.mergeBranches("integration", ["a", "b"]), null, "already merged is a no-op");
+});
+
+test("sweepWorktrees: drops old clean worktrees, keeps dirty ones whatever their age", async (t) => {
+  const { git, cwd, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  const root = join(cwd, ".worktrees");
+  await git("worktree", "add", "-b", "clean", join(root, "clean"), "main");
+  await git("worktree", "add", "-b", "dirty", join(root, "dirty"), "main");
+  await writeFile(join(root, "dirty", "wip.txt"), "uncommitted\n");
+  await writeFile(join(root, "clean", "README.md"), "churn\n"); // ignored, see fixture
+
+  const recent = await ops.sweepWorktrees({ olderThanMs: 60_000 });
+  assert.deepEqual(recent.removed, []);
+  assert.deepEqual(recent.dirty.map((w) => w.branch), ["dirty"]);
+  assert.deepEqual(recent.kept.map((w) => w.branch), ["clean"]);
+
+  const later = await ops.sweepWorktrees({ olderThanMs: 60_000, now: Date.now() + 120_000 });
+  assert.deepEqual(later.removed.map((w) => w.branch), ["clean"]);
+  assert.deepEqual(later.dirty.map((w) => w.branch), ["dirty"]);
+
+  const all = await ops.sweepWorktrees({ olderThanMs: 60_000, all: true });
+  assert.deepEqual(all.removed, [], "a dirty worktree is never swept, even with all");
+  assert.deepEqual((await ops.listWorktrees()).map((w) => w.branch), ["dirty"]);
 });

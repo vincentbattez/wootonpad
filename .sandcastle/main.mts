@@ -1,6 +1,7 @@
 // Feature-scoped orchestration — one Linear issue tree in, one pull request out.
 //
 //   npm run sandcastle ABC-1 ABC-9
+//   npm run sandcastle clean        — drop every worktree with nothing uncommitted
 //
 // Project-specific settings live in `.sandcastle/config.json`.
 //
@@ -56,6 +57,7 @@ import {
   mergeBranches,
   rebaseLeafOnto,
   resetBranchTo,
+  sweepWorktrees,
   tipOf,
 } from "./lib/git.mts";
 import { fileIncident } from "./lib/incidents.mts";
@@ -166,6 +168,42 @@ interface Root {
   issue: Issue;
   eligibleLeaves: Issue[];
   skippedLeaves: Issue[];
+}
+
+const DAY = 24 * 60 * MINUTE;
+
+/**
+ * Worktrees are cache: a settled leaf's is torn down with its sandbox, and the
+ * ones a killed run left behind are reconstructible from their branch. Only a
+ * worktree with uncommitted changes is worth anything, and that one is kept
+ * and reported — deleting it silently is how work disappears.
+ */
+async function sweep(all: boolean): Promise<void> {
+  let swept: Awaited<ReturnType<typeof sweepWorktrees>>;
+  try {
+    swept = await sweepWorktrees({ olderThanMs: 7 * DAY, all });
+  } catch (cause) {
+    // Housekeeping never takes the run down.
+    console.error(`worktree sweep failed: ${(cause as Error).message}`);
+    return;
+  }
+
+  for (const worktree of swept.removed) {
+    console.log(`swept ${worktree.path}`);
+  }
+  for (const worktree of swept.dirty) {
+    fileIncident({
+      kind: "worktree-dirty",
+      rootId: worktree.branch ?? worktree.path,
+      detail: `${worktree.path} holds uncommitted changes — kept, not swept`,
+    });
+    console.error(`kept ${worktree.path} — uncommitted changes`);
+  }
+  if (swept.removed.length + swept.dirty.length > 0) {
+    console.log(
+      `worktrees: ${swept.removed.length} swept, ${swept.dirty.length} dirty kept, ${swept.kept.length} recent kept`,
+    );
+  }
 }
 
 function parseArgs(): string[] {
@@ -1133,6 +1171,13 @@ if (pause) {
   console.log(`Paused until ${pause.until} — ${pause.reason}. Exiting.`);
   process.exit(0);
 }
+
+if (process.argv[2] === "clean") {
+  await sweep(true);
+  process.exit(0);
+}
+
+await sweep(false);
 
 const requested = parseArgs();
 const rootIds = requested.length > 0 ? requested : await discoverRootIds();
