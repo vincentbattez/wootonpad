@@ -194,6 +194,18 @@ const migrations = [
     try { db.exec('DELETE FROM session_cache'); } catch {}
     try { db.exec('DELETE FROM cache_meta'); } catch {}
   },
+  // v10: First-prompt sanitisation (VIN-146). Summaries were stored raw, so any harness markup a
+  // first prompt carried was indexed and displayed. The filter now widens at ingestion, which only
+  // helps a Session that gets re-read: purge the cache and the search index so every .jsonl — old
+  // and archived alike — is re-derived through it, rather than only Sessions touched from now on.
+  // session_meta is deliberately untouched: it holds the manual renames, which must all survive.
+  (db) => {
+    try { db.exec('DELETE FROM session_cache'); } catch {}
+    try { db.exec('DELETE FROM cache_meta'); } catch {}
+    try { db.exec('DELETE FROM search_map'); } catch {}
+    try { db.exec('DROP TABLE IF EXISTS search_fts'); } catch {}
+    searchFtsRecreated = true;
+  },
 ];
 
 const currentDbVersion = (() => {

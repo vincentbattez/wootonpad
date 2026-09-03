@@ -23,6 +23,30 @@ function extractContextUsage(entry) {
   };
 }
 
+/**
+ * The harness markup a user turn can carry that is not the user talking (VIN-146). The local
+ * command tags were already filtered here; the rest are the tags observed across the corpus.
+ * A first message that is one of these is a preamble, so the summary moves to the next real turn.
+ * Sanitising at ingestion rather than at display keeps one summary circulating through the whole
+ * system, the search index included.
+ */
+const HARNESS_NOISE = /<(?:bash-input|bash-stdout|bash-stderr|local-command-caveat|command-message|command-name|command-args|command-contents|teammate-message|system-reminder)[\s>]/;
+
+/**
+ * The title-worthy one-liner for a first prompt, or '' when there is nothing usable.
+ *
+ * A scheduled run is named by its task. Otherwise the summary is the first useful (non-blank)
+ * line, capped at 120 characters — a brute truncation of the raw text cut across newlines and
+ * turned a prompt that opens with a pasted log or a code block into an absurd title.
+ */
+function summariseFirstPrompt(text) {
+  if (!text) return '';
+  const taskMatch = text.match(/<scheduled-task\s+name="([^"]+)"/);
+  if (taskMatch) return 'Scheduled: ' + taskMatch[1];
+  const firstUsefulLine = text.split('\n').map(l => l.trim()).find(Boolean) || '';
+  return firstUsefulLine.slice(0, 120);
+}
+
 /** Parse a single .jsonl file into a session object (or null if invalid) */
 function readSessionFile(filePath, folder, projectPath) {
   const sessionId = path.basename(filePath, '.jsonl');
@@ -68,11 +92,9 @@ function readSessionFile(filePath, folder, projectPath) {
         (typeof msg?.content === 'string' ? msg.content :
         (msg?.content?.[0]?.text || ''));
       if (!summary && (entry.type === 'user' || (entry.type === 'message' && entry.role === 'user'))) {
-        // Skip local command messages (! prefix) — use the next real user message
-        if (text && !/<bash-input>|<bash-stdout>|<local-command-caveat>/.test(text)) {
-          // Use scheduled task name if present
-          const taskMatch = text.match(/<scheduled-task\s+name="([^"]+)"/);
-          summary = taskMatch ? 'Scheduled: ' + taskMatch[1] : text.slice(0, 120);
+        // Skip harness preambles — use the next real user message
+        if (text && !HARNESS_NOISE.test(text)) {
+          summary = summariseFirstPrompt(text);
         }
       }
       if (text && textContent.length < 8000) {
@@ -124,4 +146,4 @@ function readSessionContextTail(filePath, tailBytes = 262144) {
   }
 }
 
-module.exports = { readSessionFile, extractContextUsage, readSessionContextTail };
+module.exports = { readSessionFile, summariseFirstPrompt, extractContextUsage, readSessionContextTail };
