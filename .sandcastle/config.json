@@ -13,16 +13,39 @@
     "repo": "vincentbattez/wootonpad"
   },
   "agent": {
-    "model": "claude-opus-4-8",
+    "model": "claude-opus-5",
+    "effort": "medium",
+    "phases": {
+      "plan": {
+        "model": "claude-sonnet-5",
+        "effort": "high"
+      },
+      "implement": {
+        "model": "claude-opus-5",
+        "effort": "medium"
+      },
+      "review": {
+        "model": "claude-opus-5",
+        "effort": "high"
+      },
+      "integrate": {
+        "model": "claude-opus-5",
+        "effort": "medium"
+      }
+    },
     "retryRounds": 10,
     "implementIterations": 100
   },
   "sandbox": {
     "installCommand": "npm install",
-    "copyToWorktree": ["node_modules"]
+    "copyToWorktree": [
+      "node_modules"
+    ]
   },
   "project": {
-    "verifyCommands": ["npm test"],
+    "verifyCommands": [
+      "npm test"
+    ],
     "commitPrefix": "RALPH:",
     "codingStandardsFile": ".sandcastle/CODING_STANDARDS.md"
   }

@@ -16,6 +16,18 @@ import { z } from "zod";
 
 const SANDCASTLE_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
 
+const effortSchema = z.enum(["low", "medium", "high", "xhigh", "max"]);
+
+/** An unset field falls back to `agent.model` / `agent.effort`. */
+const phaseAgentSchema = z
+  .object({
+    model: z.string().optional(),
+    effort: effortSchema.optional(),
+  })
+  .default({});
+
+export type PhaseAgent = { model: string; effort: z.infer<typeof effortSchema> };
+
 const configSchema = z.object({
   linear: z.object({
     /** Linear project name. Omit to select on label + team alone. */
@@ -48,7 +60,24 @@ const configSchema = z.object({
     repo: z.string().nullable().default(null),
   }),
   agent: z.object({
-    model: z.string().default("claude-opus-4-8"),
+    /** Fallback for any phase that declares no model of its own. */
+    model: z.string().default("claude-opus-5"),
+    /** Fallback reasoning effort, same rule as `model`. */
+    effort: effortSchema.default("medium"),
+    /**
+     * Per-phase overrides. A phase reasons about different things: planning is
+     * cheap and benefits from a fast model thinking hard, implementing is long
+     * and benefits from the strongest model at a normal effort, reviewing is
+     * short and benefits from both.
+     */
+    phases: z
+      .object({
+        plan: phaseAgentSchema,
+        implement: phaseAgentSchema,
+        review: phaseAgentSchema,
+        integrate: phaseAgentSchema,
+      })
+      .default({ plan: {}, implement: {}, review: {}, integrate: {} }),
     /** Retry rounds per feature before giving up. */
     retryRounds: z.number().int().positive().default(10),
     /** Iteration budget for a single issue's implementer. */
@@ -70,7 +99,13 @@ const configSchema = z.object({
   }),
 });
 
-export type Config = z.infer<typeof configSchema>;
+type RawConfig = z.infer<typeof configSchema>;
+
+export type Config = Omit<RawConfig, "agent"> & {
+  agent: Omit<RawConfig["agent"], "phases"> & {
+    phases: Record<keyof RawConfig["agent"]["phases"], PhaseAgent>;
+  };
+};
 
 /** `git@github.com:owner/repo.git` and `https://github.com/owner/repo.git` alike. */
 function repoFromRemote(remote: string): string {
@@ -104,8 +139,18 @@ function load(): Config {
   }
 
   const config = parsed.data;
+  const { model, effort, phases } = config.agent;
+
+  const resolved = Object.fromEntries(
+    Object.entries(phases).map(([phase, override]) => [
+      phase,
+      { model: override.model ?? model, effort: override.effort ?? effort },
+    ]),
+  ) as Record<keyof typeof phases, PhaseAgent>;
+
   return {
     ...config,
+    agent: { ...config.agent, phases: resolved },
     git: {
       ...config.git,
       repo: config.git.repo ?? repoFromRemote(config.git.remote),

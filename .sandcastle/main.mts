@@ -26,6 +26,7 @@ import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
 import { z } from "zod";
 import { config, checkedPromptArgs } from "./lib/config.mts";
 import { clearPhase, markPhase, phaseDone } from "./lib/progress.mts";
+import { phaseError, phaseLog } from "./lib/log.mts";
 import {
   branchHasCommits,
   buildWaveBase,
@@ -72,8 +73,13 @@ const planSchema = z.object({
 // Configuration — everything project-specific lives in .sandcastle/config.json
 // ---------------------------------------------------------------------------
 
-const MODEL = config.agent.model;
 const BASE_BRANCH = config.git.baseBranch;
+
+/** Each phase runs on the model and effort its own config entry declares. */
+const agentFor = (phase: keyof typeof config.agent.phases) => {
+  const { model, effort } = config.agent.phases[phase];
+  return sandcastle.claudeCode(model, { effort });
+};
 
 const hooks = {
   sandbox: { onSandboxReady: [{ command: config.sandbox.installCommand }] },
@@ -175,14 +181,15 @@ async function verifyBranch(
   leafId: string,
 ): Promise<boolean> {
   for (const command of config.project.verifyCommands) {
-    console.log(`[${leafId}] verifying: ${command}`);
+    phaseLog("implement", `[${leafId}] verifying: ${command}`);
 
     const result = await sandbox.exec(command, {
-      onLine: (line) => console.log(`[${leafId}]   ${line}`),
+      onLine: (line) => phaseLog("implement", `[${leafId}]   ${line}`),
     });
 
     if (result.exitCode !== 0) {
-      console.error(
+      phaseError(
+        "implement",
         `[${leafId}] ✗ ${command} failed (exit ${result.exitCode})\n${result.stderr}`,
       );
       return false;
@@ -246,7 +253,7 @@ async function runLeaf(
       const implement = await sandbox.run({
         name: "implementer",
         maxIterations: config.agent.implementIterations,
-        agent: sandcastle.claudeCode(MODEL),
+        agent: agentFor("implement"),
         completionSignal: COMPLETION_SIGNALS,
         promptFile: PROMPTS.implement,
         promptArgs: checkedPromptArgs(PROMPTS.implement, {
@@ -262,7 +269,7 @@ async function runLeaf(
       const tip = await tipOf(branch);
       if (signal && tip) await markPhase("implemented", leaf.id, tip, baseTip);
     } else {
-      console.log(`[${leaf.id}] already implemented — reviewing only`);
+      phaseLog("review", `[${leaf.id}] already implemented — reviewing only`);
     }
 
     let outcome = classifyOutcome(
@@ -283,13 +290,17 @@ async function runLeaf(
       const review = await sandbox.run({
         name: "reviewer",
         maxIterations: 1,
-        agent: sandcastle.claudeCode(MODEL),
+        agent: agentFor("review"),
         completionSignal: COMPLETION_SIGNALS,
         promptFile: PROMPTS.review,
         promptArgs: checkedPromptArgs(PROMPTS.review, {
           ...projectPromptArgs,
           BRANCH: branch,
-          BASE_BRANCH: baseBranch,
+          // The prompt's `git diff` runs *inside* the sandbox, where a
+          // host-only branch name like the wave base may not resolve. The
+          // commit it points at is reachable from the leaf branch (the rebase
+          // above merged it in), so a sha always does.
+          BASE_REV: baseTip ?? baseBranch,
         }),
       });
 
@@ -328,12 +339,17 @@ async function planWaves(
   landed: string[],
   resumeBase: string,
 ): Promise<Issue[][]> {
+  phaseLog(
+    "plan",
+    `[${root.issue.id}] planning ${remaining.length} issue(s) on ${resumeBase}`,
+  );
+
   const plan = await sandcastle.run({
     hooks,
     sandbox: docker(),
     name: `planner-${root.issue.id}`,
     maxIterations: 1,
-    agent: sandcastle.claudeCode(MODEL),
+    agent: agentFor("plan"),
     promptFile: PROMPTS.plan,
     output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
     promptArgs: checkedPromptArgs(PROMPTS.plan, {
@@ -411,7 +427,7 @@ async function ship(
   resumeBase: string,
 ) {
   const branch = await nextIntegrationBranch(root.issue.id);
-  console.log(`[${root.issue.id}] assembling ${branch} from ${resumeBase}`);
+  phaseLog("integrate", `[${root.issue.id}] assembling ${branch} from ${resumeBase}`);
 
   // Cut from the resume base so the attempt keeps what earlier ones landed,
   // even when this run's leaves were all no-ops. The pull request still targets
@@ -428,7 +444,7 @@ async function ship(
     const integration = await sandbox.run({
       name: `integrator-${root.issue.id}`,
       maxIterations: 1,
-      agent: sandcastle.claudeCode(MODEL),
+      agent: agentFor("integrate"),
       promptFile: PROMPTS.integrate,
       promptArgs: checkedPromptArgs(PROMPTS.integrate, {
         ...projectPromptArgs,
