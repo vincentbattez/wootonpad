@@ -10,7 +10,6 @@ import {
   classifyOutcome,
   classifyReview,
   isSettled,
-  normalizeWaves,
   runWaves,
 } from "../.sandcastle/lib/pipeline.mts";
 
@@ -186,21 +185,104 @@ test("runWaves: landing order is merge order", async () => {
   ]);
 });
 
-test("normalizeWaves: drops invented entries and duplicates", () => {
-  const remaining = [leaf("A"), leaf("B")];
-  const waves = normalizeWaves(
-    [[{ id: "A" }, { id: "GHOST" }], [{ id: "A" }, { id: "B" }]],
-    remaining,
+test("runWaves: a leaf whose run crashes is retried before it counts as failed", async () => {
+  let attempts = 0;
+  const deps = {
+    branchOf: (id) => `b/${id}`,
+    baseFor: async () => "main",
+    runLeaf: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("docker died");
+      return "landed";
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  const result = await runWaves(deps, {
+    rootId: "R",
+    waves: [[leaf("A")]],
+    leafAttempts: 2,
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.outcomes.get("A"), "landed");
+  assert.deepEqual(result.landedBranches, ["b/A"]);
+});
+
+test("runWaves: a leaf that crashes every attempt still settles as failed", async () => {
+  let attempts = 0;
+  const deps = {
+    branchOf: (id) => `b/${id}`,
+    baseFor: async () => "main",
+    runLeaf: async () => {
+      attempts += 1;
+      throw new Error("docker died");
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  const result = await runWaves(deps, {
+    rootId: "R",
+    waves: [[leaf("A")]],
+    leafAttempts: 3,
+  });
+
+  assert.equal(attempts, 3);
+  assert.equal(result.outcomes.get("A"), "failed");
+});
+
+test("runWaves: an interrupted leaf is not retried and ends the run", async () => {
+  const { InterruptedError } = await import("../.sandcastle/lib/interruption.mts");
+  const attempts = [];
+  const deps = {
+    branchOf: (id) => id,
+    baseFor: async () => "main",
+    runLeaf: async (item) => {
+      attempts.push(item.id);
+      if (item.id === "A") throw new InterruptedError("quota");
+      return "landed";
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  await assert.rejects(
+    runWaves(deps, {
+      rootId: "VIN-1",
+      waves: [[leaf("A"), leaf("B")], [leaf("C")]],
+      leafAttempts: 3,
+    }),
+    InterruptedError,
   );
 
-  assert.deepEqual(waves, [[leaf("A")], [leaf("B")]]);
+  assert.deepEqual(attempts, ["A", "B"], "no retry of A, no wave 2");
 });
 
-test("normalizeWaves: appends what the planner forgot rather than dropping it", () => {
-  const waves = normalizeWaves([[{ id: "A" }]], [leaf("A"), leaf("B")]);
-  assert.deepEqual(waves, [[leaf("A")], [leaf("B")]]);
+test("runWaves: the quota error the runner throws is read as an interruption", async () => {
+  const { InterruptedError } = await import("../.sandcastle/lib/interruption.mts");
+  let calls = 0;
+  const deps = {
+    branchOf: (id) => id,
+    baseFor: async () => "main",
+    runLeaf: async () => {
+      calls++;
+      throw new Error(
+        "claude-code exited with code 1:\nYou've hit your session limit · resets 12:10am (UTC)",
+      );
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  await assert.rejects(
+    runWaves(deps, { rootId: "VIN-1", waves: [[leaf("A")]], leafAttempts: 2 }),
+    InterruptedError,
+  );
+  assert.equal(calls, 1);
 });
 
-test("normalizeWaves: an empty plan still works every remaining leaf", () => {
-  assert.deepEqual(normalizeWaves([], [leaf("A")]), [[leaf("A")]]);
+test("isSettled: interrupted is neither settled nor a failure of the leaf", () => {
+  assert.equal(isSettled("interrupted"), false);
 });

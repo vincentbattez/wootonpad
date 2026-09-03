@@ -13,8 +13,16 @@ const exec = promisify(execFile);
 
 const INELIGIBLE_STATE_TYPES = new Set(["completed", "canceled", "duplicate"]);
 
+export interface Blocker {
+  id: string;
+  /** Linear state type — `completed`/`canceled` means the block is lifted. */
+  stateType: string;
+}
+
 export interface Issue {
   id: string;
+  /** Linear's internal id — what mutations take. */
+  uuid: string;
   title: string;
   description: string;
   url: string;
@@ -23,7 +31,13 @@ export interface Issue {
   labels: string[];
   parent: string | null;
   children: Issue[];
+  /** Issues declared as blocking this one, via Linear's `blocks` relation. */
+  blockers: Blocker[];
 }
+
+/** A blocker still open holds the issue back. */
+export const isBlocked = (issue: Issue): boolean =>
+  issue.blockers.some((blocker) => !INELIGIBLE_STATE_TYPES.has(blocker.stateType));
 
 /** An issue is workable when it carries the agent label and isn't closed out. */
 export function isEligible(issue: Issue): boolean {
@@ -71,6 +85,7 @@ async function linearApi<T>(
 }
 
 interface RawIssue {
+  id: string;
   identifier: string;
   title: string;
   description: string | null;
@@ -79,9 +94,14 @@ interface RawIssue {
   labels: { nodes: { name: string }[] };
   parent: { identifier: string } | null;
   children: { nodes: { identifier: string }[] };
+  /** Relations where this issue is the target — `blocks` here means "blocked by". */
+  inverseRelations: {
+    nodes: { type: string; issue: { identifier: string; state: { type: string } } }[];
+  };
 }
 
 const ISSUE_FIELDS = `
+  id
   identifier
   title
   description
@@ -90,6 +110,7 @@ const ISSUE_FIELDS = `
   labels { nodes { name } }
   parent { identifier }
   children { nodes { identifier } }
+  inverseRelations { nodes { type issue { identifier state { type } } } }
 `;
 
 async function fetchIssue(id: string): Promise<RawIssue> {
@@ -105,6 +126,7 @@ async function fetchIssue(id: string): Promise<RawIssue> {
 function toIssue(raw: RawIssue, children: Issue[]): Issue {
   return {
     id: raw.identifier,
+    uuid: raw.id,
     title: raw.title,
     description: raw.description ?? "",
     url: raw.url,
@@ -113,6 +135,12 @@ function toIssue(raw: RawIssue, children: Issue[]): Issue {
     labels: raw.labels.nodes.map((l) => l.name),
     parent: raw.parent?.identifier ?? null,
     children,
+    blockers: raw.inverseRelations.nodes
+      .filter((relation) => relation.type === "blocks")
+      .map((relation) => ({
+        id: relation.issue.identifier,
+        stateType: relation.issue.state.type,
+      })),
   };
 }
 
@@ -183,4 +211,25 @@ export async function trySetState(id: string, state: string): Promise<void> {
       `[${id}] could not move to "${state}": ${(cause as Error).message}`,
     );
   }
+}
+
+/**
+ * Declare in the tracker that `blocker` blocks `blocked`. This is how an
+ * inferred dependency becomes a declared one: the next run reads it back and
+ * plans without an agent.
+ */
+export async function createBlocksRelation(
+  blocker: Issue,
+  blocked: Issue,
+): Promise<void> {
+  await linearApi(
+    `mutation($blocker:String!,$blocked:String!){
+      issueRelationCreate(input:{issueId:$blocker,relatedIssueId:$blocked,type:blocks}){success}
+    }`,
+    { blocker: blocker.uuid, blocked: blocked.uuid },
+  );
+}
+
+export async function addComment(id: string, body: string): Promise<void> {
+  await exec("linear", ["issue", "comment", "add", id, "--body", body]);
 }

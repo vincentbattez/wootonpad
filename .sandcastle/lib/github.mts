@@ -55,6 +55,8 @@ export async function createPullRequest(options: {
   branch: string;
   title: string;
   body: string;
+  /** Opened as a draft when the branch shipped incomplete or unverified. */
+  draft?: boolean;
 }): Promise<string> {
   return gh(
     "pr",
@@ -69,6 +71,7 @@ export async function createPullRequest(options: {
     options.title,
     "--body",
     options.body,
+    ...(options.draft ? ["--draft"] : []),
   );
 }
 

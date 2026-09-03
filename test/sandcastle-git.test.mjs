@@ -41,6 +41,7 @@ async function fixture() {
       cwd,
       baseBranch: "main",
       worktreeRoot: join(cwd, ".worktrees"),
+      ignoreChurn: ["README.md"],
     }),
     cleanup: () => rm(cwd, { recursive: true, force: true }),
   };
@@ -219,4 +220,126 @@ test("rebaseLeafOnto: a branch that does not exist yet is left to sandcastle", a
 
   await ops.rebaseLeafOnto("never-created", "main");
   assert.equal(await ops.tipOf("never-created"), null);
+});
+
+test("rebaseLeafOnto: a leaf whose work conflicts with the new base is recut from it", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("checkout", "-b", "leaf", "main");
+  await commit("shared.txt", "leaf version\n");
+  await git("checkout", "-b", "wave1", "main");
+  const tip = await commit("shared.txt", "wave1 version\n");
+  await git("checkout", "main");
+
+  assert.equal(await ops.rebaseLeafOnto("leaf", "wave1"), "restarted");
+  assert.equal(await ops.tipOf("leaf"), tip);
+});
+
+test("rebaseLeafOnto: a conflict leaves no worktree behind", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("checkout", "-b", "leaf", "main");
+  await commit("shared.txt", "leaf version\n");
+  await git("checkout", "-b", "wave1", "main");
+  await commit("shared.txt", "wave1 version\n");
+  await git("checkout", "main");
+
+  await ops.rebaseLeafOnto("leaf", "wave1");
+
+  const worktrees = await git("worktree", "list");
+  assert.equal(worktrees.split("\n").length, 1, worktrees);
+});
+
+test("buildWaveBase: a conflict between two landed leaves is still fatal", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("checkout", "-b", "leaf-a", "main");
+  await commit("shared.txt", "a\n");
+  await git("checkout", "-b", "leaf-b", "main");
+  await commit("shared.txt", "b\n");
+  await git("checkout", "main");
+
+  await assert.rejects(
+    () => ops.buildWaveBase("wave-base/R", "main", ["leaf-a", "leaf-b"]),
+    /Cannot assemble wave-base\/R: merging leaf-b conflicts/,
+  );
+});
+
+test("resetBranchTo: creates the branch when it does not exist", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  const tip = await commit("one.txt", "one\n");
+  await ops.resetBranchTo("wave-base/R", "main");
+
+  assert.equal(await ops.tipOf("wave-base/R"), tip);
+});
+
+test("resetBranchTo: moves a branch a killed run left checked out", async (t) => {
+  const { cwd, git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("branch", "wave-base/R", "main");
+  await git("worktree", "add", join(cwd, "stale"), "wave-base/R");
+  await git("checkout", "-b", "leaf", "main");
+  const tip = await commit("leaf.txt", "leaf\n");
+  await git("checkout", "main");
+
+  await ops.resetBranchTo("wave-base/R", "leaf");
+
+  assert.equal(await ops.tipOf("wave-base/R"), tip);
+});
+
+test("mergeBranches: stops at the first conflict and keeps what applied before it", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await commit("shared.txt", "base\n");
+
+  await git("checkout", "-b", "a");
+  await commit("a.txt", "a\n");
+
+  await git("checkout", "main");
+  await git("checkout", "-b", "b");
+  await commit("shared.txt", "from b\n");
+
+  await git("checkout", "main");
+  await git("checkout", "-b", "c");
+  await commit("shared.txt", "from c\n");
+  await git("checkout", "main");
+
+  await ops.resetBranchTo("integration", "main");
+
+  assert.equal(await ops.mergeBranches("integration", ["a", "b", "c"]), "c");
+  assert.equal(await ops.isAncestor("a", "integration"), true, "a stayed merged");
+  assert.equal(await ops.isAncestor("b", "integration"), true, "b stayed merged");
+  assert.equal(await ops.isAncestor("c", "integration"), false);
+  assert.equal(await ops.mergeBranches("integration", ["a", "b"]), null, "already merged is a no-op");
+});
+
+test("sweepWorktrees: drops old clean worktrees, keeps dirty ones whatever their age", async (t) => {
+  const { git, cwd, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  const root = join(cwd, ".worktrees");
+  await git("worktree", "add", "-b", "clean", join(root, "clean"), "main");
+  await git("worktree", "add", "-b", "dirty", join(root, "dirty"), "main");
+  await writeFile(join(root, "dirty", "wip.txt"), "uncommitted\n");
+  await writeFile(join(root, "clean", "README.md"), "churn\n"); // ignored, see fixture
+
+  const recent = await ops.sweepWorktrees({ olderThanMs: 60_000 });
+  assert.deepEqual(recent.removed, []);
+  assert.deepEqual(recent.dirty.map((w) => w.branch), ["dirty"]);
+  assert.deepEqual(recent.kept.map((w) => w.branch), ["clean"]);
+
+  const later = await ops.sweepWorktrees({ olderThanMs: 60_000, now: Date.now() + 120_000 });
+  assert.deepEqual(later.removed.map((w) => w.branch), ["clean"]);
+  assert.deepEqual(later.dirty.map((w) => w.branch), ["dirty"]);
+
+  const all = await ops.sweepWorktrees({ olderThanMs: 60_000, all: true });
+  assert.deepEqual(all.removed, [], "a dirty worktree is never swept, even with all");
+  assert.deepEqual((await ops.listWorktrees()).map((w) => w.branch), ["dirty"]);
 });
