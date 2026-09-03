@@ -34,8 +34,10 @@ import {
   isAncestor,
   listRefs,
   rebaseLeafOnto,
+  resetBranchTo,
   tipOf,
 } from "./lib/git.mts";
+import { fileIncident } from "./lib/incidents.mts";
 import { alreadyLanded, pickResumeBase } from "./lib/resume.mts";
 import {
   createPullRequest,
@@ -217,7 +219,22 @@ async function runLeaf(
     return "empty";
   }
 
-  await rebaseLeafOnto(branch, baseBranch);
+  // A leaf whose work no longer merges into its base has been recut from it:
+  // its markers describe a branch that no longer exists, so they go too.
+  if ((await rebaseLeafOnto(branch, baseBranch)) === "restarted") {
+    fileIncident({
+      kind: "leaf-restarted",
+      rootId: leaf.id,
+      leafId: leaf.id,
+      detail: `its work no longer merged into ${baseBranch} and was dropped`,
+    });
+    console.warn(
+      `[${leaf.id}] its base moved under it and the merge conflicts — ` +
+        `dropping the stale branch and re-implementing from ${baseBranch}`,
+    );
+    await clearPhase("implemented", leaf.id);
+    await clearPhase("reviewed", leaf.id);
+  }
 
   const baseTip = await tipOf(baseBranch);
   const existing = await tipOf(branch);
@@ -390,14 +407,41 @@ function issuesToClose(root: Root, worked: Issue[]): Issue[] {
   });
 }
 
-function pullRequestBody(root: Root, worked: Issue[]): string {
+/** A branch missing a leaf, or one the integrator never got green, ships as a draft. */
+const isDraft = (missing: Issue[], assembled: boolean): boolean =>
+  !assembled || missing.length > 0;
+
+function pullRequestBody(
+  root: Root,
+  worked: Issue[],
+  missing: Issue[],
+  assembled: boolean,
+): string {
   const sections = [root.issue.description.trim() || `See ${root.issue.url}.`];
+
+  if (!assembled) {
+    sections.push(
+      "> **The integration never finished.** The integrator was put back on this " +
+        "branch until its attempts ran out and still left conflicts or a red " +
+        "suite behind. Everything below landed; the branch itself is not green.",
+    );
+  }
 
   sections.push(
     ["## Issues", ...worked.map((leaf) => `- ${leaf.id}: ${leaf.title}`)].join(
       "\n",
     ),
   );
+
+  if (missing.length > 0) {
+    sections.push(
+      [
+        "## Still open",
+        "These sub-issues never landed, so this branch is a partial feature:",
+        ...missing.map((leaf) => `- ${leaf.id}: ${leaf.title}`),
+      ].join("\n"),
+    );
+  }
 
   if (root.skippedLeaves.length > 0) {
     sections.push(
@@ -411,13 +455,121 @@ function pullRequestBody(root: Root, worked: Issue[]): string {
     );
   }
 
-  sections.push(
-    issuesToClose(root, worked)
-      .map((issue) => `Closes ${issue.id}`)
-      .join("\n"),
-  );
+  // A draft closes the leaves it carries, never the root — whether the feature
+  // is incomplete or the branch is red, saying "Closes <epic>" on it is how
+  // work goes missing.
+  const closes = isDraft(missing, assembled)
+    ? worked
+    : issuesToClose(root, worked);
+  if (closes.length > 0) {
+    sections.push(closes.map((issue) => `Closes ${issue.id}`).join("\n"));
+  }
 
   return sections.join("\n\n");
+}
+
+/**
+ * Merge `branches` into `branch` with an agent, resolving whatever the
+ * deterministic merge could not. Returns whether it signalled it was done —
+ * every caller has its own fallback for a "no", none of them can afford to
+ * stop the run there.
+ */
+async function integrateWithAgent(options: {
+  name: string;
+  rootId: string;
+  rootTitle: string;
+  branch: string;
+  base: string;
+  branches: string[];
+}): Promise<boolean> {
+  const sandbox = await sandcastle.createSandbox({
+    branch: options.branch,
+    baseBranch: options.base,
+    sandbox: docker(),
+    hooks,
+    copyToWorktree,
+  });
+
+  try {
+    const run = await sandbox.run({
+      name: options.name,
+      maxIterations: config.agent.integrateIterations,
+      agent: agentFor("integrate"),
+      promptFile: PROMPTS.integrate,
+      promptArgs: checkedPromptArgs(PROMPTS.integrate, {
+        ...projectPromptArgs,
+        ROOT_ID: options.rootId,
+        ROOT_TITLE: options.rootTitle,
+        INTEGRATION_BRANCH: options.branch,
+        BASE_BRANCH: options.base,
+        BRANCHES: options.branches.map((b) => `- ${b}`).join("\n"),
+      }),
+    });
+
+    return run.completionSignal !== undefined;
+  } finally {
+    await sandbox.close();
+  }
+}
+
+/**
+ * The branch a wave is cut from. The deterministic merge is the answer for the
+ * case this run is designed around — leaves that touch different code — and a
+ * conflict means the plan was wrong. Being wrong is not a reason to stop: an
+ * agent gets the same merge, and if it cannot assemble one either the wave
+ * simply runs on the resume base. A wave with less context beats no wave.
+ */
+async function waveBaseFor(
+  root: Root,
+  resumeBase: string,
+  branches: string[],
+): Promise<string> {
+  const { id, title } = root.issue;
+  const branch = `${config.git.waveBasePrefix}${id}`;
+
+  try {
+    return await buildWaveBase(branch, resumeBase, branches);
+  } catch (cause) {
+    phaseError("integrate", `[${id}] ${(cause as Error).message}`);
+  }
+
+  phaseLog("integrate", `[${id}] handing ${branch} to an agent to assemble`);
+
+  for (let attempt = 1; attempt <= config.agent.integrateAttempts; attempt++) {
+    // Each attempt starts from the base again: a half-merged wave base is worse
+    // than an unmerged one, and unlike an integration branch nothing downstream
+    // has seen it yet.
+    await resetBranchTo(branch, resumeBase);
+
+    const assembled = await integrateWithAgent({
+      name: `wave-base-${id}`,
+      rootId: id,
+      rootTitle: title,
+      branch,
+      base: resumeBase,
+      branches,
+    });
+
+    if (assembled) return branch;
+
+    phaseError(
+      "integrate",
+      `[${id}] ${branch} unfinished — attempt ${attempt}/${config.agent.integrateAttempts}`,
+    );
+  }
+
+  fileIncident({
+    kind: "wave-base-escalated",
+    rootId: id,
+    detail: `no agent could assemble ${branch} from ${branches.join(", ")}; the wave ran on ${resumeBase}`,
+  });
+
+  phaseError(
+    "integrate",
+    `[${id}] ${branch} could not be assembled — the wave runs on ${resumeBase}, ` +
+      `without the code its earlier leaves landed`,
+  );
+  return resumeBase;
 }
 
 async function ship(
@@ -425,61 +577,77 @@ async function ship(
   branches: string[],
   worked: Issue[],
   resumeBase: string,
+  missing: Issue[],
 ) {
-  const branch = await nextIntegrationBranch(root.issue.id);
-  phaseLog("integrate", `[${root.issue.id}] assembling ${branch} from ${resumeBase}`);
+  const { id, title } = root.issue;
+  const branch = await nextIntegrationBranch(id);
+  phaseLog("integrate", `[${id}] assembling ${branch} from ${resumeBase}`);
 
   // Cut from the resume base so the attempt keeps what earlier ones landed,
   // even when this run's leaves were all no-ops. The pull request still targets
   // the project's base branch — that is what `baseBranch` means for a PR.
-  const sandbox = await sandcastle.createSandbox({
-    branch,
-    baseBranch: resumeBase,
-    sandbox: docker(),
-    hooks,
-    copyToWorktree,
-  });
-
-  try {
-    const integration = await sandbox.run({
-      name: `integrator-${root.issue.id}`,
-      maxIterations: 1,
-      agent: agentFor("integrate"),
-      promptFile: PROMPTS.integrate,
-      promptArgs: checkedPromptArgs(PROMPTS.integrate, {
-        ...projectPromptArgs,
-        ROOT_ID: root.issue.id,
-        ROOT_TITLE: root.issue.title,
-        INTEGRATION_BRANCH: branch,
-        BASE_BRANCH: resumeBase,
-        BRANCHES: branches.map((b) => `- ${b}`).join("\n"),
-      }),
-    });
-
-    if (integration.completionSignal === undefined) {
-      throw new Error(
-        `integration of ${branch} did not complete — conflicts or failing tests left behind. Nothing pushed.`,
+  //
+  // Each attempt resumes the same branch, so a second integrator picks up the
+  // merges the first one landed instead of redoing them.
+  let assembled = false;
+  for (
+    let attempt = 1;
+    attempt <= config.agent.integrateAttempts && !assembled;
+    attempt++
+  ) {
+    if (attempt > 1) {
+      phaseError(
+        "integrate",
+        `[${id}] integration of ${branch} unfinished — attempt ${attempt}/${config.agent.integrateAttempts}`,
       );
     }
-  } finally {
-    await sandbox.close();
+
+    assembled = await integrateWithAgent({
+      name: `integrator-${id}`,
+      rootId: id,
+      rootTitle: title,
+      branch,
+      base: resumeBase,
+      branches,
+    });
+  }
+
+  // An unfinished integration still ships: a draft PR carrying what landed is
+  // reviewable and fixable, and is the only outcome that does not need someone
+  // to notice the run and start it again.
+  const draft = isDraft(missing, assembled);
+
+  if (draft) {
+    fileIncident({
+      kind: "shipped-incomplete",
+      rootId: id,
+      detail: assembled
+        ? `${missing.map((leaf) => leaf.id).join(", ")} never landed`
+        : `the integrator left ${branch} conflicted or red after ${config.agent.integrateAttempts} attempts`,
+    });
   }
 
   await pushBranch(branch);
 
   const url = await createPullRequest({
     branch,
-    title: `${root.issue.id}: ${root.issue.title}`,
-    body: pullRequestBody(root, worked),
+    title: `${id}: ${title}`,
+    body: pullRequestBody(root, worked, missing, assembled),
+    draft,
   });
 
-  const superseded = await supersedePreviousPrs(root.issue.id, branch, url);
+  const superseded = await supersedePreviousPrs(id, branch, url);
   for (const number of superseded) {
-    console.log(`[${root.issue.id}] closed superseded PR #${number}`);
+    console.log(`[${id}] closed superseded PR #${number}`);
   }
 
-  for (const issue of issuesToClose(root, worked)) {
-    await setState(issue.id, config.linear.reviewState);
+  // A draft closes nothing: every leaf that landed was moved to `In Review` by
+  // its own run, and moving the root there would say the feature is done when
+  // it is not.
+  if (!draft) {
+    for (const issue of issuesToClose(root, worked)) {
+      await setState(issue.id, config.linear.reviewState);
+    }
   }
 
   return url;
@@ -537,8 +705,7 @@ async function runRoot(root: Root): Promise<string | null> {
   const deps = {
     runLeaf,
     branchOf: leafBranch,
-    baseFor: (branches: string[]) =>
-      buildWaveBase(`${config.git.waveBasePrefix}${id}`, resumeBase, branches),
+    baseFor: (branches: string[]) => waveBaseFor(root, resumeBase, branches),
     log: (message: string) => console.log(message),
     logError: (message: string) => console.error(message),
   };
@@ -567,6 +734,7 @@ async function runRoot(root: Root): Promise<string | null> {
       rootId: id,
       waves,
       landedBranches,
+      leafAttempts: config.agent.leafAttempts,
     });
 
     for (const [leafId, outcome] of result.outcomes) settled.set(leafId, outcome);
@@ -583,13 +751,27 @@ async function runRoot(root: Root): Promise<string | null> {
     (leaf) => !isSettled(settled.get(leaf.id) ?? "exhausted"),
   );
 
+  const worked = root.eligibleLeaves.filter((leaf) =>
+    isSettled(settled.get(leaf.id) ?? "exhausted"),
+  );
+
   if (missing.length > 0) {
     console.error(
       `[${id}] incomplete — ${missing
         .map((leaf) => `${leaf.id} (${settled.get(leaf.id) ?? "never ran"})`)
-        .join(", ")}. No branch pushed, no PR opened.`,
+        .join(", ")}.`,
     );
-    return null;
+
+    // What landed is worth shipping on its own: the next run resumes from the
+    // integration branch, so a draft PR is both the review surface and the base
+    // the missing leaves get re-attempted on.
+    if (landedBranches.length === 0) {
+      console.error(`[${id}] nothing landed either. No branch pushed.`);
+      return null;
+    }
+
+    console.error(`[${id}] shipping what landed as a draft pull request.`);
+    return ship(root, landedBranches, worked, resumeBase, missing);
   }
 
   if (landedBranches.length === 0) {
@@ -597,7 +779,7 @@ async function runRoot(root: Root): Promise<string | null> {
     return null;
   }
 
-  return ship(root, landedBranches, root.eligibleLeaves, resumeBase);
+  return ship(root, landedBranches, root.eligibleLeaves, resumeBase, []);
 }
 
 // ---------------------------------------------------------------------------

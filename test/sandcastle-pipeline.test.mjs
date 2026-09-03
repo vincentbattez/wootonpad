@@ -204,3 +204,51 @@ test("normalizeWaves: appends what the planner forgot rather than dropping it", 
 test("normalizeWaves: an empty plan still works every remaining leaf", () => {
   assert.deepEqual(normalizeWaves([], [leaf("A")]), [[leaf("A")]]);
 });
+
+test("runWaves: a leaf whose run crashes is retried before it counts as failed", async () => {
+  let attempts = 0;
+  const deps = {
+    branchOf: (id) => `b/${id}`,
+    baseFor: async () => "main",
+    runLeaf: async () => {
+      attempts += 1;
+      if (attempts === 1) throw new Error("docker died");
+      return "landed";
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  const result = await runWaves(deps, {
+    rootId: "R",
+    waves: [[leaf("A")]],
+    leafAttempts: 2,
+  });
+
+  assert.equal(attempts, 2);
+  assert.equal(result.outcomes.get("A"), "landed");
+  assert.deepEqual(result.landedBranches, ["b/A"]);
+});
+
+test("runWaves: a leaf that crashes every attempt still settles as failed", async () => {
+  let attempts = 0;
+  const deps = {
+    branchOf: (id) => `b/${id}`,
+    baseFor: async () => "main",
+    runLeaf: async () => {
+      attempts += 1;
+      throw new Error("docker died");
+    },
+    log: () => {},
+    logError: () => {},
+  };
+
+  const result = await runWaves(deps, {
+    rootId: "R",
+    waves: [[leaf("A")]],
+    leafAttempts: 3,
+  });
+
+  assert.equal(attempts, 3);
+  assert.equal(result.outcomes.get("A"), "failed");
+});

@@ -220,3 +220,74 @@ test("rebaseLeafOnto: a branch that does not exist yet is left to sandcastle", a
   await ops.rebaseLeafOnto("never-created", "main");
   assert.equal(await ops.tipOf("never-created"), null);
 });
+
+test("rebaseLeafOnto: a leaf whose work conflicts with the new base is recut from it", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("checkout", "-b", "leaf", "main");
+  await commit("shared.txt", "leaf version\n");
+  await git("checkout", "-b", "wave1", "main");
+  const tip = await commit("shared.txt", "wave1 version\n");
+  await git("checkout", "main");
+
+  assert.equal(await ops.rebaseLeafOnto("leaf", "wave1"), "restarted");
+  assert.equal(await ops.tipOf("leaf"), tip);
+});
+
+test("rebaseLeafOnto: a conflict leaves no worktree behind", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("checkout", "-b", "leaf", "main");
+  await commit("shared.txt", "leaf version\n");
+  await git("checkout", "-b", "wave1", "main");
+  await commit("shared.txt", "wave1 version\n");
+  await git("checkout", "main");
+
+  await ops.rebaseLeafOnto("leaf", "wave1");
+
+  const worktrees = await git("worktree", "list");
+  assert.equal(worktrees.split("\n").length, 1, worktrees);
+});
+
+test("buildWaveBase: a conflict between two landed leaves is still fatal", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("checkout", "-b", "leaf-a", "main");
+  await commit("shared.txt", "a\n");
+  await git("checkout", "-b", "leaf-b", "main");
+  await commit("shared.txt", "b\n");
+  await git("checkout", "main");
+
+  await assert.rejects(
+    () => ops.buildWaveBase("wave-base/R", "main", ["leaf-a", "leaf-b"]),
+    /Cannot assemble wave-base\/R: merging leaf-b conflicts/,
+  );
+});
+
+test("resetBranchTo: creates the branch when it does not exist", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  const tip = await commit("one.txt", "one\n");
+  await ops.resetBranchTo("wave-base/R", "main");
+
+  assert.equal(await ops.tipOf("wave-base/R"), tip);
+});
+
+test("resetBranchTo: moves a branch a killed run left checked out", async (t) => {
+  const { cwd, git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await git("branch", "wave-base/R", "main");
+  await git("worktree", "add", join(cwd, "stale"), "wave-base/R");
+  await git("checkout", "-b", "leaf", "main");
+  const tip = await commit("leaf.txt", "leaf\n");
+  await git("checkout", "main");
+
+  await ops.resetBranchTo("wave-base/R", "leaf");
+
+  assert.equal(await ops.tipOf("wave-base/R"), tip);
+});

@@ -102,6 +102,31 @@ export interface WaveDeps<T extends Leaf> {
   logError(message: string): void;
 }
 
+/**
+ * A leaf whose run *throws* did not fail the task — the machinery around it
+ * did: a sandbox that would not start, a prompt whose shell expansion hit a ref
+ * that had just moved. Those clear on a second go, and letting one end the
+ * round costs a whole re-plan, so the round retries before recording `failed`.
+ */
+async function runLeafWithRetries<T extends Leaf>(
+  deps: WaveDeps<T>,
+  leaf: T,
+  base: string,
+  attempts: number,
+  rootId: string,
+): Promise<Outcome> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await deps.runLeaf(leaf, deps.branchOf(leaf.id), base);
+    } catch (cause) {
+      if (attempt >= attempts) throw cause;
+      deps.logError(
+        `[${rootId}]   ↻ ${leaf.id} crashed (${cause}) — attempt ${attempt + 1}/${attempts}`,
+      );
+    }
+  }
+}
+
 export interface WaveResult {
   outcomes: Map<string, Outcome>;
   /** Landed branches, in landing order — the order `ship()` must merge them. */
@@ -116,9 +141,15 @@ export interface WaveResult {
  */
 export async function runWaves<T extends Leaf>(
   deps: WaveDeps<T>,
-  options: { rootId: string; waves: T[][]; landedBranches?: string[] },
+  options: {
+    rootId: string;
+    waves: T[][];
+    landedBranches?: string[];
+    /** Runs per leaf when the run itself throws. */
+    leafAttempts?: number;
+  },
 ): Promise<WaveResult> {
-  const { rootId, waves } = options;
+  const { rootId, waves, leafAttempts = 1 } = options;
   const landedBranches = [...(options.landedBranches ?? [])];
   const outcomes = new Map<string, Outcome>();
 
@@ -132,7 +163,9 @@ export async function runWaves<T extends Leaf>(
     );
 
     const settled = await Promise.allSettled(
-      wave.map((leaf) => deps.runLeaf(leaf, deps.branchOf(leaf.id), base)),
+      wave.map((leaf) =>
+        runLeafWithRetries(deps, leaf, base, leafAttempts, rootId),
+      ),
     );
 
     for (const [i, result] of settled.entries()) {

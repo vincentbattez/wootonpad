@@ -80,6 +80,24 @@ const configSchema = z.object({
       .default({ plan: {}, implement: {}, review: {}, integrate: {} }),
     /** Retry rounds per feature before giving up. */
     retryRounds: z.number().int().positive().default(10),
+    /**
+     * How many times a leaf whose *run* throws — a dead sandbox, a prompt that
+     * would not expand — is re-run before the round gives up on it. Crashes are
+     * usually transient; a round that ends on one costs a whole re-plan.
+     */
+    leafAttempts: z.number().int().positive().default(2),
+    /**
+     * How many times a merge agent is put back on a branch it left conflicted
+     * or red — an integration branch, or a wave base the deterministic merge
+     * could not assemble.
+     */
+    integrateAttempts: z.number().int().positive().default(3),
+    /**
+     * Iteration budget for one integration attempt. A merge agent that gets a
+     * single pass has to resolve every conflict and fix the suite in one go,
+     * which is how a half-merged branch gets signed off.
+     */
+    integrateIterations: z.number().int().positive().default(10),
     /** Iteration budget for a single issue's implementer. */
     implementIterations: z.number().int().positive().default(100),
   }),
