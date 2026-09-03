@@ -20,6 +20,8 @@ export type IncidentKind =
   | "leaf-restarted"
   /** A wave base needed judgement to assemble. */
   | "wave-base-escalated"
+  /** An integration branch conflicted or went red and needed an agent. */
+  | "integration-escalated"
   /** An integration branch shipped unfinished, or without every leaf. */
   | "shipped-incomplete"
   /** A leaf spent its wall-clock budget without finishing. */

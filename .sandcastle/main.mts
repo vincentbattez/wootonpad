@@ -51,6 +51,7 @@ import {
   fetchRemote,
   isAncestor,
   listRefs,
+  mergeBranches,
   rebaseLeafOnto,
   resetBranchTo,
   tipOf,
@@ -64,6 +65,7 @@ import {
   supersedePreviousPrs,
 } from "./lib/github.mts";
 import {
+  BLOCKED_SIGNAL,
   COMPLETION_SIGNALS,
   classifyOutcome,
   classifyReview,
@@ -216,19 +218,20 @@ async function resolveRoot(id: string): Promise<Root> {
  */
 async function verifyBranch(
   sandbox: sandcastle.Sandbox,
-  leafId: string,
+  id: string,
+  phase: "implement" | "integrate" = "implement",
 ): Promise<boolean> {
   for (const command of config.project.verifyCommands) {
-    phaseLog("implement", `[${leafId}] verifying: ${command}`);
+    phaseLog(phase, `[${id}] verifying: ${command}`);
 
     const result = await sandbox.exec(command, {
-      onLine: (line) => phaseLog("implement", `[${leafId}]   ${line}`),
+      onLine: (line) => phaseLog(phase, `[${id}]   ${line}`),
     });
 
     if (result.exitCode !== 0) {
       phaseError(
-        "implement",
-        `[${leafId}] ✗ ${command} failed (exit ${result.exitCode})\n${result.stderr}`,
+        phase,
+        `[${id}] ✗ ${command} failed (exit ${result.exitCode})\n${result.stderr}`,
       );
       return false;
     }
@@ -564,46 +567,71 @@ function pullRequestBody(
   return sections.join("\n\n");
 }
 
+const asList = (branches: string[]) =>
+  branches.length ? branches.map((b) => `- ${b}`).join("\n") : "_(none)_";
+
 /**
- * Merge `branches` into `branch` with an agent, resolving whatever the
- * deterministic merge could not. Returns whether it signalled it was done —
- * every caller has its own fallback for a "no", none of them can afford to
- * stop the run there.
+ * What a merge agent came back with. `blocked` is the agent saying the
+ * conflict is semantic — two leaves made incompatible decisions — which no
+ * further attempt will settle; only a human does.
  */
-async function integrateWithAgent(options: {
-  name: string;
-  rootId: string;
-  rootTitle: string;
-  branch: string;
-  base: string;
-  branches: string[];
-}): Promise<boolean> {
+type Integration = "done" | "blocked" | "exhausted";
+
+/**
+ * Finish an integration the deterministic merge could not: `merged` already
+ * applied cleanly, `pending` is what is left, starting with the one that
+ * conflicted — or nothing, when every merge applied and the suite is red.
+ * Every caller has its own fallback for anything but `done`; none of them
+ * can afford to stop the run there.
+ */
+async function integrateWithAgent(
+  sandbox: sandcastle.Sandbox,
+  options: {
+    name: string;
+    rootId: string;
+    rootTitle: string;
+    base: string;
+    merged: string[];
+    pending: string[];
+  },
+): Promise<Integration> {
+  const run = await sandbox.run({
+    name: options.name,
+    maxIterations: config.agent.integrateIterations,
+    agent: agentFor("integrate"),
+    completionSignal: COMPLETION_SIGNALS,
+    promptFile: PROMPTS.integrate,
+    signal: runController.signal,
+    promptArgs: checkedPromptArgs(PROMPTS.integrate, {
+      ...projectPromptArgs,
+      ROOT_ID: options.rootId,
+      ROOT_TITLE: options.rootTitle,
+      INTEGRATION_BRANCH: sandbox.branch,
+      BASE_BRANCH: options.base,
+      MERGED_BRANCHES: asList(options.merged),
+      BRANCHES: asList(options.pending),
+    }),
+  });
+
+  if (run.completionSignal === undefined) return "exhausted";
+  return run.completionSignal.includes(BLOCKED_SIGNAL) ? "blocked" : "done";
+}
+
+/** A sandbox on `branch` for the duration of `fn`, closed whatever happens. */
+async function withSandbox<T>(
+  branch: string,
+  base: string,
+  fn: (sandbox: sandcastle.Sandbox) => Promise<T>,
+): Promise<T> {
   const sandbox = await sandcastle.createSandbox({
-    branch: options.branch,
-    baseBranch: options.base,
+    branch,
+    baseBranch: base,
     sandbox: docker(),
     hooks,
     copyToWorktree,
   });
-
   try {
-    const run = await sandbox.run({
-      name: options.name,
-      maxIterations: config.agent.integrateIterations,
-      agent: agentFor("integrate"),
-      promptFile: PROMPTS.integrate,
-      signal: runController.signal,
-      promptArgs: checkedPromptArgs(PROMPTS.integrate, {
-        ...projectPromptArgs,
-        ROOT_ID: options.rootId,
-        ROOT_TITLE: options.rootTitle,
-        INTEGRATION_BRANCH: options.branch,
-        BASE_BRANCH: options.base,
-        BRANCHES: options.branches.map((b) => `- ${b}`).join("\n"),
-      }),
-    });
-
-    return run.completionSignal !== undefined;
+    return await fn(sandbox);
   } finally {
     await sandbox.close();
   }
@@ -638,16 +666,19 @@ async function waveBaseFor(
     // has seen it yet.
     await resetBranchTo(branch, resumeBase);
 
-    const assembled = await integrateWithAgent({
-      name: `wave-base-${id}`,
-      rootId: id,
-      rootTitle: title,
-      branch,
-      base: resumeBase,
-      branches,
-    });
+    const result = await withSandbox(branch, resumeBase, (sandbox) =>
+      integrateWithAgent(sandbox, {
+        name: `wave-base-${id}`,
+        rootId: id,
+        rootTitle: title,
+        base: resumeBase,
+        merged: [],
+        pending: branches,
+      }),
+    );
 
-    if (assembled) return branch;
+    if (result === "done") return branch;
+    if (result === "blocked") break;
 
     phaseError(
       "integrate",
@@ -684,30 +715,59 @@ async function ship(
   // even when this run's leaves were all no-ops. The pull request still targets
   // the project's base branch — that is what `baseBranch` means for a PR.
   //
-  // Each attempt resumes the same branch, so a second integrator picks up the
-  // merges the first one landed instead of redoing them.
-  let assembled = false;
-  for (
-    let attempt = 1;
-    attempt <= config.agent.integrateAttempts && !assembled;
-    attempt++
-  ) {
-    if (attempt > 1) {
-      phaseError(
-        "integrate",
-        `[${id}] integration of ${branch} unfinished — attempt ${attempt}/${config.agent.integrateAttempts}`,
-      );
+  // The merge itself is `git merge` in a loop: leaves that touch different
+  // code assemble without judgement and without tokens. An agent is called
+  // only for what the loop could not do — the merge that conflicted, or a
+  // suite that went red once everything applied — and each attempt resumes
+  // the same branch, so a second integrator picks up where the first stopped.
+  await resetBranchTo(branch, resumeBase);
+  const conflict = await mergeBranches(branch, branches);
+  const merged = conflict ? branches.slice(0, branches.indexOf(conflict)) : branches;
+  const pending = conflict ? branches.slice(branches.indexOf(conflict)) : [];
+
+  const assembled = await withSandbox(branch, resumeBase, async (sandbox) => {
+    if (!conflict && (await verifyBranch(sandbox, id, "integrate"))) return true;
+
+    fileIncident({
+      kind: "integration-escalated",
+      rootId: id,
+      detail: conflict
+        ? `merging ${conflict} into ${branch} conflicts`
+        : `${branch} merges cleanly but the suite is red`,
+    });
+    phaseError(
+      "integrate",
+      `[${id}] ${conflict ? `${conflict} conflicts` : "the suite is red"} — handing ${branch} to an agent`,
+    );
+
+    for (let attempt = 1; attempt <= config.agent.integrateAttempts; attempt++) {
+      if (attempt > 1) {
+        phaseError(
+          "integrate",
+          `[${id}] integration of ${branch} unfinished — attempt ${attempt}/${config.agent.integrateAttempts}`,
+        );
+      }
+
+      const result = await integrateWithAgent(sandbox, {
+        name: `integrator-${id}`,
+        rootId: id,
+        rootTitle: title,
+        base: resumeBase,
+        merged,
+        pending,
+      });
+      if (result === "done") return true;
+      if (result === "blocked") {
+        phaseError(
+          "integrate",
+          `[${id}] the agent reports a semantic conflict on ${branch} — a human call`,
+        );
+        return false;
+      }
     }
 
-    assembled = await integrateWithAgent({
-      name: `integrator-${id}`,
-      rootId: id,
-      rootTitle: title,
-      branch,
-      base: resumeBase,
-      branches,
-    });
-  }
+    return false;
+  });
 
   // An unfinished integration still ships: a draft PR carrying what landed is
   // reviewable and fixable, and is the only outcome that does not need someone

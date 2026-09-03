@@ -291,3 +291,30 @@ test("resetBranchTo: moves a branch a killed run left checked out", async (t) =>
 
   assert.equal(await ops.tipOf("wave-base/R"), tip);
 });
+
+test("mergeBranches: stops at the first conflict and keeps what applied before it", async (t) => {
+  const { git, commit, ops, cleanup } = await fixture();
+  t.after(cleanup);
+
+  await commit("shared.txt", "base\n");
+
+  await git("checkout", "-b", "a");
+  await commit("a.txt", "a\n");
+
+  await git("checkout", "main");
+  await git("checkout", "-b", "b");
+  await commit("shared.txt", "from b\n");
+
+  await git("checkout", "main");
+  await git("checkout", "-b", "c");
+  await commit("shared.txt", "from c\n");
+  await git("checkout", "main");
+
+  await ops.resetBranchTo("integration", "main");
+
+  assert.equal(await ops.mergeBranches("integration", ["a", "b", "c"]), "c");
+  assert.equal(await ops.isAncestor("a", "integration"), true, "a stayed merged");
+  assert.equal(await ops.isAncestor("b", "integration"), true, "b stayed merged");
+  assert.equal(await ops.isAncestor("c", "integration"), false);
+  assert.equal(await ops.mergeBranches("integration", ["a", "b"]), null, "already merged is a no-op");
+});

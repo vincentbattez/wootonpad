@@ -15,6 +15,7 @@ export const {
   isAncestor,
   branchHasCommits,
   buildWaveBase,
+  mergeBranches,
   rebaseLeafOnto,
   resetBranchTo,
   commitAll,

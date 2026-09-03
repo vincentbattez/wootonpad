@@ -149,6 +149,15 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
   };
 
   /**
+   * Merge `sources` into an existing `branch`, in order, and stop at the first
+   * conflict: the branch keeps every merge that applied, the conflicting one is
+   * aborted, and its name is returned so the caller can hand *that* merge to
+   * an agent rather than the whole assembly.
+   */
+  const mergeBranches = (branch: string, sources: string[]) =>
+    mergeInWorktree(branch, null, sources);
+
+  /**
    * Point `branch` at `base`, creating it if it does not exist yet. A run that
    * was killed leaves worktrees behind holding branches git then refuses to
    * move; those worktrees are disposable and the ref is what matters, so the
@@ -232,6 +241,7 @@ export function createGit({ cwd, baseBranch, worktreeRoot }: GitOptions) {
     isAncestor,
     branchHasCommits,
     buildWaveBase,
+    mergeBranches,
     rebaseLeafOnto,
     resetBranchTo,
     commitAll,
