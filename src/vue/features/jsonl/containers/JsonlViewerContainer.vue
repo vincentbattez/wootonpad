@@ -27,7 +27,7 @@ const bodyHtml = ref('');
 async function open(session) {
   const result = (await api.readSessionJsonl?.(session.sessionId)) || {};
 
-  title.value = session.name || session.aiTitle || session.summary || session.sessionId;
+  title.value = session.title || session.name || session.summary || session.sessionId;
   sessionId.value = session.sessionId;
 
   if (result.error) {

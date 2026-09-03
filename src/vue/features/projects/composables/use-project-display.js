@@ -17,7 +17,7 @@ export function slugMostRecent(sessions) {
 
 // The group's label: the most-recent Session's name or summary, cleaned, falling back to the slug.
 export function slugDisplayName(session, slug) {
-  const name = session.name || session.summary || slug;
+  const name = session.title || session.name || session.summary || slug;
   return typeof window !== 'undefined' && window.cleanDisplayName ? window.cleanDisplayName(name) : name;
 }
 
