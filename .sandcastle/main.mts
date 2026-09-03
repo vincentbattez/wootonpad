@@ -153,6 +153,7 @@ const projectPromptArgs = {
 const PROMPTS = {
   plan: "./.sandcastle/plan-prompt.md",
   implement: "./.sandcastle/implement-prompt.md",
+  resume: "./.sandcastle/resume-prompt.md",
   review: "./.sandcastle/review-prompt.md",
   integrate: "./.sandcastle/integrate-prompt.md",
 };
@@ -226,15 +227,6 @@ async function resolveRoot(id: string): Promise<Root> {
 // ---------------------------------------------------------------------------
 
 /**
- * Each phase runs only if its marker is stale, so a re-run picks up where the
- * last one stopped: implement what was never implemented, review what the
- * implementer changed since the last review, skip a leaf that is settled.
- *
- * `baseBranch` is the wave's cumulative base, not the project's base branch —
- * every judgement below (is there work? is the marker still valid?) is relative
- * to it.
- */
-/**
  * The reviewer gets a single pass and has to sign off on the branch it is
  * handed, so it must start from a green suite: a failure it did not cause
  * either eats that pass or gets signed off with the branch. Running the
@@ -264,11 +256,46 @@ async function verifyBranch(
   return true;
 }
 
+/**
+ * Each phase runs only if its marker is stale, so a re-run picks up where the
+ * last one stopped: implement what was never implemented, review what the
+ * implementer changed since the last review, skip a leaf that is settled.
+ *
+ * `baseBranch` is the wave's cumulative base, not the project's base branch —
+ * every judgement below (is there work? is the marker still valid?) is relative
+ * to it.
+ *
+ * What happened is written to the journal on the way out — outcome, duration,
+ * the implementer's last session. The session is the one thing worth caching:
+ * with it, an interrupted agent resumes its reasoning; without it, the cold
+ * re-prompt reads the branch and starts over.
+ */
 async function runLeaf(
   leaf: Issue,
   branch: string,
   baseBranch: string,
+  rootId: string,
 ): Promise<Outcome> {
+  const startedAt = Date.now();
+  let implement: sandcastle.SandboxRunResult | null = null;
+
+  const record = (outcome: Outcome): Outcome => {
+    const last = implement?.iterations.at(-1);
+    const keepSession = !isSettled(outcome) && last?.sessionId !== undefined;
+    journal.recordLeaf({
+      leafId: leaf.id,
+      rootId,
+      outcome,
+      at: new Date().toISOString(),
+      durationMs: Date.now() - startedAt,
+      ...(keepSession
+        ? { sessionId: last.sessionId, sessionFilePath: last.sessionFilePath }
+        : {}),
+      ...(last?.usage ? { usage: last.usage } : {}),
+    });
+    return outcome;
+  };
+
   // Work an earlier attempt already folded into the base needs no agent. A
   // branch that exists but never produced anything is not that — it is the
   // work this run is here to finish.
@@ -338,7 +365,36 @@ async function runLeaf(
 
     if (needsImplement) {
       const started = Date.now();
-      const implement = await sandbox.run({
+
+      // An earlier attempt's session, when its JSONL is still on the host:
+      // the agent keeps its train of thought, not just its diff. One pass;
+      // if it does not finish, the cold prompt below takes over.
+      const session = existing ? journal.resumableSession(leaf.id) : null;
+      if (session) {
+        phaseLog("implement", `[${leaf.id}] resuming session ${session}`);
+        implement = await sandbox.run({
+          name: "implementer",
+          maxIterations: 1,
+          resumeSession: session,
+          agent: agentFor("implement"),
+          completionSignal: COMPLETION_SIGNALS,
+          promptFile: PROMPTS.resume,
+          signal,
+          promptArgs: checkedPromptArgs(PROMPTS.resume, {
+            ...projectPromptArgs,
+            TASK_ID: leaf.id,
+            BRANCH: branch,
+            BASE_BRANCH: baseBranch,
+          }),
+        });
+        if (!implement.completionSignal) {
+          phaseLog("implement", `[${leaf.id}] resumed session did not finish — fresh start`);
+          journal.forgetSession(leaf.id);
+          implement = null;
+        }
+      }
+
+      implement ??= await sandbox.run({
         name: "implementer",
         maxIterations: config.agent.implementIterations,
         agent: agentFor("implement"),
@@ -430,7 +486,7 @@ async function runLeaf(
         : config.linear.unstartedState,
     );
 
-    return outcome;
+    return record(outcome);
   } catch (cause) {
     // Whatever stopped the agent, its uncommitted work goes on the branch
     // first: resumption reads git, and a killed sandbox is the one place work
@@ -456,15 +512,19 @@ async function runLeaf(
       console.error(
         `[${leaf.id}] stopped after ${config.schedule.leafTimeoutMinutes} minutes — retried next round`,
       );
-      return "exhausted";
+      return record("exhausted");
     }
 
     // An interruption leaves the issue `In Progress`. That is true — the work
     // is on a branch and will resume — and dropping it to `Todo` here would
     // erase the only visible trace that something is in flight.
     const interruption = asInterruption(cause);
-    if (interruption) throw interruption;
+    if (interruption) {
+      record("interrupted");
+      throw interruption;
+    }
 
+    record("failed");
     await trySetState(leaf.id, config.linear.unstartedState);
     throw cause;
   } finally {
@@ -971,7 +1031,8 @@ async function runRoot(root: Root): Promise<string | null> {
   const resumeBase = await resumeBaseOf(id);
 
   const deps = {
-    runLeaf,
+    runLeaf: (leaf: Issue, branch: string, base: string) =>
+      runLeaf(leaf, branch, base, id),
     branchOf: leafBranch,
     baseFor: (branches: string[]) => waveBaseFor(root, resumeBase, branches),
     log: (message: string) => console.log(message),
