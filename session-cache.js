@@ -41,6 +41,12 @@ function init(ctx) {
 
 // readSessionFile is imported from read-session-file.js (shared with worker)
 
+/** Parse the cached contextUsage JSON blob back into the four-counter object, or null. */
+function parseContextUsage(raw) {
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch { return null; }
+}
+
 /** Read one folder from filesystem by scanning .jsonl files directly */
 function readFolderFromFilesystem(folder) {
   const folderPath = path.join(PROJECTS_DIR, folder);
@@ -204,6 +210,10 @@ function buildProjectsFromCache() {
       starred: meta?.starred || 0,
       archived: meta?.archived || 0,
       accountId: row.accountId || 'default',
+      // Context gauge (VIN-143): the last assistant turn's usage breakdown and model,
+      // a property of the Session so every row carries it, running or not.
+      contextUsage: parseContextUsage(row.contextUsage),
+      contextModel: row.contextModel || null,
     };
     if (!projectMap.has(row.projectPath)) {
       projectMap.set(row.projectPath, {

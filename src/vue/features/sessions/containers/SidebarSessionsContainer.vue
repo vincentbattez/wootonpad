@@ -18,18 +18,23 @@
 </template>
 
 <script setup>
-import { computed } from 'vue';
+import { computed, onMounted } from 'vue';
 import { store } from '../../../store.js';
 import { sb } from '../../../shared/services/sb.js';
 import { buildSidebarTree, subtreeAreaIds } from '../../../area-tree.mjs';
 import { filterSessions } from '../../../session-list.mjs';
 import { useDropTarget } from '../../../shared/composables/use-drop-target.js';
 import AreaContainer from '../../areas/containers/AreaContainer.vue';
+import { subscribeSessionContext } from '../context-service.js';
 
 // The sessions sidebar tree — the Session/Project/Area/Slug rows filed under the
 // Sessions tab. It reads the store, builds the tree through the pure modules and
 // turns every row emit into a service call directly, so the callbacks prop object the
 // shell used to hand down is gone (VIN-124, user story 25).
+
+// The context gauge's live push (VIN-143): subscribed here because the sidebar is the tree
+// that owns the Session rows the gauge sits on, and it is mounted for the app's lifetime.
+onMounted(subscribeSessionContext);
 
 const worktreePattern = /^(.+?)\/\.claude\/worktrees\/([^/]+)\/?$/;
 

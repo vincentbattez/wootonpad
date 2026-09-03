@@ -1,6 +1,28 @@
 const path = require('path');
 const fs = require('fs');
 
+/**
+ * The context gauge's usage breakdown for one .jsonl entry, or null if the entry is not
+ * an assistant turn carrying a `message.usage`. Single-sourced so the folder parser and
+ * the live tail reader agree on what the four counters and the model are (VIN-143).
+ */
+function extractContextUsage(entry) {
+  const isAssistant = entry.type === 'assistant' ||
+    (entry.type === 'message' && entry.role === 'assistant');
+  const usage = isAssistant && entry.message && typeof entry.message === 'object'
+    ? entry.message.usage : null;
+  if (!usage) return null;
+  return {
+    contextUsage: {
+      inputTokens: usage.input_tokens || 0,
+      cacheCreationTokens: usage.cache_creation_input_tokens || 0,
+      cacheReadTokens: usage.cache_read_input_tokens || 0,
+      outputTokens: usage.output_tokens || 0,
+    },
+    contextModel: entry.message.model || null,
+  };
+}
+
 /** Parse a single .jsonl file into a session object (or null if invalid) */
 function readSessionFile(filePath, folder, projectPath) {
   const sessionId = path.basename(filePath, '.jsonl');
@@ -14,8 +36,17 @@ function readSessionFile(filePath, folder, projectPath) {
     let slug = null;
     let customTitle = null;
     let aiTitle = null;
+    // Context gauge (VIN-143): the live context size is the usage of the LAST assistant
+    // entry, its four counters kept apart for the tooltip, plus that entry's model. A
+    // compaction writes a fresh, smaller assistant turn after it, so "last assistant"
+    // already yields the post-compaction value, not a cumulative total.
+    let contextUsage = null;
+    let contextModel = null;
     for (const line of lines) {
-      const entry = JSON.parse(line);
+      let entry;
+      // One malformed line must not blank an otherwise valid session (AC: files with
+      // invalid JSON lines). Skip it and keep reading.
+      try { entry = JSON.parse(line); } catch { continue; }
       if (entry.slug && !slug) slug = entry.slug;
       if (entry.type === 'custom-title' && entry.customTitle) {
         customTitle = entry.customTitle;
@@ -26,6 +57,11 @@ function readSessionFile(filePath, folder, projectPath) {
       if (entry.type === 'user' || entry.type === 'assistant' ||
           (entry.type === 'message' && (entry.role === 'user' || entry.role === 'assistant'))) {
         messageCount++;
+      }
+      const ctx = extractContextUsage(entry);
+      if (ctx) {
+        contextUsage = ctx.contextUsage;
+        contextModel = ctx.contextModel;
       }
       const msg = entry.message;
       const text = typeof msg === 'string' ? msg :
@@ -50,10 +86,42 @@ function readSessionFile(filePath, folder, projectPath) {
       created: stat.birthtime.toISOString(),
       modified: stat.mtime.toISOString(),
       messageCount, textContent, slug, customTitle, aiTitle,
+      contextUsage, contextModel,
     };
   } catch {
     return null;
   }
 }
 
-module.exports = { readSessionFile };
+/**
+ * The live fast path (VIN-143): read only the tail of a Session's .jsonl (default 256KB)
+ * and return { contextUsage, contextModel } of its last assistant turn, or null. Called on
+ * the busy→idle transition, so the gauge moves within a second of a turn without a full
+ * re-parse. A possibly-truncated first line and any invalid line are skipped.
+ */
+function readSessionContextTail(filePath, tailBytes = 262144) {
+  try {
+    const stat = fs.statSync(filePath);
+    const size = stat.size;
+    const readSize = Math.min(size, tailBytes);
+    const buf = Buffer.alloc(readSize);
+    const fd = fs.openSync(filePath, 'r');
+    fs.readSync(fd, buf, 0, readSize, size - readSize);
+    fs.closeSync(fd);
+    let lines = buf.toString('utf8').split('\n').filter(Boolean);
+    // If we started mid-file, the first line is likely a fragment — drop it.
+    if (size > readSize && lines.length) lines = lines.slice(1);
+    let result = null;
+    for (const line of lines) {
+      let entry;
+      try { entry = JSON.parse(line); } catch { continue; }
+      const ctx = extractContextUsage(entry);
+      if (ctx) result = ctx;
+    }
+    return result;
+  } catch {
+    return null;
+  }
+}
+
+module.exports = { readSessionFile, extractContextUsage, readSessionContextTail };

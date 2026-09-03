@@ -21,7 +21,14 @@
             @cancel="cancel"
           >{{ displayName }}</SbEditableLabel>
         </div>
-        <div class="session-meta">{{ timeStr }}{{ msgSuffix }}</div>
+        <div class="session-meta">
+          <span class="session-meta-text">{{ timeStr }}{{ msgSuffix }}</span>
+          <SessionContextGauge
+            compact
+            :usage="session.contextUsage"
+            :model="session.contextModel"
+          />
+        </div>
       </div>
 
       <SessionActions
@@ -46,6 +53,7 @@ import SbEditableLabel from '../../../shared/ui/SbEditableLabel.vue';
 import { useInlineRename } from '../../../shared/composables/use-inline-rename.js';
 import { sessionDisplayName, sessionTimeStr } from '../composables/use-session-display.js';
 import SessionActions from './SessionActions.vue';
+import SessionContextGauge from './SessionContextGauge.vue';
 import SessionRunBadgeIcon from '../icons/SessionRunBadgeIcon.vue';
 import SessionTerminalBadgeIcon from '../icons/SessionTerminalBadgeIcon.vue';
 
