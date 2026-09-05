@@ -6,11 +6,11 @@ Review the code changes on branch `{{BRANCH}}` and improve code clarity, consist
 
 ## Branch diff
 
-!`git diff {{BASE_REV}}...HEAD`
+!`git diff {{TARGET_BRANCH}}...{{BRANCH}}`
 
 ## Commits on this branch
 
-!`git log {{BASE_REV}}..HEAD --oneline`
+!`git log {{TARGET_BRANCH}}..{{BRANCH}} --oneline`
 
 # REVIEW PROCESS
 
@@ -38,7 +38,7 @@ Review the code changes on branch `{{BRANCH}}` and improve code clarity, consist
    - Remove helpful abstractions that improve code organization
    - Make the code harder to debug or extend
 
-5. **Apply project standards**: Follow the coding standards defined in @{{CODING_STANDARDS}}
+5. **Apply project standards**: Follow the coding standards defined in @.sandcastle/CODING_STANDARDS.md
 
 6. **Preserve functionality**: Never change what the code does - only how it does it. All original features, outputs, and behaviors must remain intact.
 
@@ -47,24 +47,9 @@ Review the code changes on branch `{{BRANCH}}` and improve code clarity, consist
 If you find improvements to make:
 
 1. Make the changes directly on this branch
-2. Run each of these to make sure nothing is broken:
-
-{{VERIFY_COMMANDS}}
-
-3. Commit describing the refinements, prefixed with `{{COMMIT_PREFIX}}`
+2. Run tests and type checking to ensure nothing is broken
+3. Commit describing the refinements
 
 If the code is already clean and well-structured, do nothing.
 
-# HOW TO FINISH
-
-You are the only review pass. Nothing runs after you and nothing re-reviews your
-work, so finish what you start: every problem you report, you fix here.
-
-- You reviewed the branch, fixed what you found, and the feedback loops pass:
-  output <promise>COMPLETE</promise>.
-- You found a problem you cannot fix — the implementation is wrong in a way that
-  needs the issue re-worked, or the feedback loops fail and you cannot make them
-  pass: output <promise>BLOCKED</promise>.
-
-Listing findings and signing off without applying them is the one outcome that
-must not happen. Either the fix is committed, or the branch is BLOCKED.
+Once complete, output <promise>COMPLETE</promise>.

@@ -1,61 +1,37 @@
-# CONTEXT
+# ISSUES
 
-You are planning the work for a single feature: **{{ROOT_ID}} — {{ROOT_TITLE}}**.
-
-The set of issues to work has already been decided, and none of them declares a
-dependency on another in the tracker. Your job is **not** to choose what gets
-worked on — it is to say **which issues depend on which**, so that the
-orchestrator can order them and concurrent agents don't collide.
-
-What you output is written back into the tracker as `blocks` relations. It is
-read by a human afterwards and used by every future run, so declare only
-dependencies you can justify.
-
-## Issues remaining for this feature
+Here are the open issues in the repo:
 
 <issues-json>
-{{REMAINING_ISSUES}}
+
+!`issues=$(linear api 'query{issues(first:250,filter:{project:{name:{eq:"Wooton"}},labels:{name:{eq:"ready-for-agent"}},state:{type:{nin:["completed","canceled","duplicate"]}}}){nodes{identifier title description state{name} parent{identifier} children{nodes{identifier}} inverseRelations{nodes{type issue{identifier state{type}}}}}}}') && printf '%s' "$issues" | jq '[.data.issues.nodes[] | {id:.identifier,title,body:(.description//""),state:.state.name,parent:(.parent.identifier//null),children:[.children.nodes[].identifier],blockedBy:[.inverseRelations.nodes[]|select(.type=="blocks" and ((.issue.state.type|IN("completed","canceled","duplicate"))|not))|.issue.identifier]}]'`
+
 </issues-json>
 
-Each entry carries `id`, `title` and `body`.
-
-The bodies are not the whole story. When an issue's ordering is unclear, read its
-place in the tree with:
-
-```
-linear issue view <id> --json --no-pager | jq '{parent, children}'
-```
-
-Read **only** those two fields — the full record is far too much to carry for
-every issue, and nothing else in it changes the ordering.
-
-## Already landed in an earlier iteration
-
-{{LANDED_ISSUES}}
-
-These are done and in `{{BASE_BRANCH}}`. Nothing needs to be declared against them.
+The list above has already been filtered to issues ready for work. `blockedBy` lists the still-open issues the tracker declares as blocking that one — always honour it. `parent`/`children` show the spec tree: work the leaves, not a parent that still has open children.
 
 # TASK
 
-For each remaining issue, list the remaining issues that must land **before** it.
-Issue B is blocked by issue A when:
+Analyze the open issues and build a dependency graph. For each issue, determine whether it **blocks** or **is blocked by** any other open issue.
 
-- B's body has a `## Blocked by` section naming A
+An issue B is **blocked by** issue A if:
+
 - B requires code or infrastructure that A introduces
-- B's requirements depend on an API shape or a decision A establishes
-- A and B modify overlapping files, so working them concurrently would produce
-  merge conflicts — pick the more foundational one as the blocker
+- B and A modify overlapping files or modules, making concurrent work likely to produce merge conflicts
+- B's requirements depend on a decision or API shape that A will establish
 
-Independent issues get an empty list — do not serialize work that has no reason
-to be serialized, and never declare a cycle.
+An issue is **unblocked** if it has zero blocking dependencies on other open issues.
+
+For each unblocked issue, assign a branch name using the exact format `sandcastle/issue-{id}` (no slug or other suffix). This must be deterministic so that re-planning the same issue always produces the same branch name and accumulated progress is preserved.
 
 # OUTPUT
 
-Output your answer as a JSON object wrapped in `<plan>` tags:
+Output your plan as a JSON object wrapped in `<plan>` tags:
 
 <plan>
-{"dependencies": [{"id": "ABC-1", "blockedBy": []}, {"id": "ABC-9", "blockedBy": ["ABC-1"]}]}
+{"issues": [{"id": "42", "title": "Fix auth bug", "branch": "sandcastle/issue-42"}]}
 </plan>
 
-Always emit the `<plan>` tags. Every remaining issue appears exactly once. Never
-invent issues that are not in the list above.
+Include only unblocked issues. If every issue is blocked, include the single highest-priority candidate (the one with the fewest or weakest dependencies).
+
+Always emit the `<plan>` tags, even when there is nothing to do. If there are no issues to work on at all, output `<plan>{"issues": []}</plan>` so the run can exit cleanly.
