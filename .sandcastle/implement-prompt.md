@@ -40,14 +40,34 @@ The branch may carry work from an earlier run. Before writing code:
 
 # EXECUTION
 
-Explore first: read the modules and tests the issue touches until you can name every file you will change.
+Explore first: read the modules and tests the issue touches until you can name every file you will change. Read `CONTEXT.md` so names and interface vocabulary match the project's domain language, and respect the ADRs in `docs/adr/` for the area you touch.
 
-Test-first where it applies — RED (one failing test), GREEN, repeat, then refactor. `npm test` before every commit. Commit small and often, conventional format with the issue id: `type(scope): subject (VIN-XXX)`.
+## Seams
+
+A **seam** is the public boundary you test at: the interface where behavior is observed without reaching inside. Tests live at seams, never against internals.
+
+No user is available to confirm seams here. So: before writing any test, list the seams under test in the run, derive them from the acceptance criteria, and report them in the completion comment. You can't test everything — the seams land on critical paths and complex logic, not every edge case.
+
+## TDD loop
+
+Use TDD wherever it applies, at those seams: RED (one failing test), GREEN (only enough code to pass it), repeat.
+
+- **Red before green.** Failing test first. No speculative code for tests not yet written.
+- **One vertical slice at a time.** One seam, one test, one minimal implementation per cycle — each test a tracer bullet that responds to what the last cycle taught you.
+- **No refactor inside the loop.** Refactoring belongs to the review stage that runs after this one.
+
+Avoid: **implementation-coupled** tests (mocking internal collaborators, asserting through a side channel — the tell is a test that breaks on a refactor with unchanged behavior); **tautological** tests (expected value recomputed the way the code does it — it must come from an independent source: a known-good literal, a worked example, the spec); **horizontal slicing** (all tests first, then all implementation).
+
+## Rhythm
+
+Run the single test files you're touching often (`node --test <file>`). Run the full suite (`npm test`) before every commit and once at the end — it must be green.
+
+Commit small and often, conventional format with the issue id: `type(scope): subject ({{TASK_ID}})`.
 
 A user-facing feature also updates the `## What this fork adds` section of `README.md`, in the same run — only that section.
 
 # COMPLETION
 
-Complete when every acceptance criterion holds, `npm test` is green and the tree is clean. Then `linear issue comment add {{TASK_ID}} --body "<what landed, key decisions, what the reviewer should look at>"` and output <promise>COMPLETE</promise>.
+Complete when every acceptance criterion holds, `npm test` is green and the tree is clean. Then `linear issue comment add {{TASK_ID}} --body "<what landed, the seams tested, key decisions, what the reviewer should look at>"` and output <promise>COMPLETE</promise>.
 
 Blocked or out of budget: commit what holds, comment the remaining work and the blocker, and output <promise>COMPLETE</promise> as well. The issue state is set by the merger, never here.
