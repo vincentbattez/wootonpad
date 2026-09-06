@@ -1,6 +1,6 @@
 # TASK
 
-Review branch `{{BRANCH}}` for {{TASK_ID}} against `{{TARGET_BRANCH}}` and return a verdict. Read-only: a fixer applies your notes.
+Review branch `{{BRANCH}}` for {{TASK_ID}} against `{{INTEGRATION_BRANCH}}` and return a verdict. Read-only: a fixer applies your notes.
 
 # CONTEXT
 
@@ -10,11 +10,11 @@ Review branch `{{BRANCH}}` for {{TASK_ID}} against `{{TARGET_BRANCH}}` and retur
 
 ## Diff
 
-!`git diff {{TARGET_BRANCH}}...{{BRANCH}}`
+!`git diff {{INTEGRATION_BRANCH}}...{{BRANCH}}`
 
 ## Commits
 
-!`git log {{TARGET_BRANCH}}..{{BRANCH}} --oneline`
+!`git log {{INTEGRATION_BRANCH}}..{{BRANCH}} --oneline`
 
 # REVIEW
 

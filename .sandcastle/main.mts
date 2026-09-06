@@ -150,11 +150,12 @@ function formatRunLog(): string {
             [
               `- Iteration ${iteration} (${merged ? "merged" : "not merged"}):`,
               ...issues.map((i) => {
-                const detail =
-                  i.outcome === "failed"
-                    ? ` — ${i.error}`
-                    : ` — ${i.ahead} commit(s) ahead, reviews: ${i.reviews.join(", ") || "none"}`;
-                return `  - ${i.id} (${i.branch}) [${i.outcome}] ${i.title}${detail}`;
+                const detail = [
+                  `${i.ahead} commit(s) ahead`,
+                  `reviews: ${i.reviews.join(", ") || "none"}`,
+                  ...(i.error ? [`error: ${i.error}`] : []),
+                ].join(", ");
+                return `  - ${i.id} (${i.branch}) [${i.outcome}] ${i.title} — ${detail}`;
               }),
             ].join("\n"),
           )
@@ -238,11 +239,15 @@ console.log(`PR: ${prUrl}`);
 // Per-issue pipeline: implement → (review → fix)* on its own branch/sandbox
 // ---------------------------------------------------------------------------
 
+type IssueResult = { reviews: string[]; error?: string };
+
+// A step that crashes (PromptError, agent abort…) is logged and skipped; it never throws
+// away what an earlier step committed. A review that could not run is recorded as "skipped".
 async function runIssue(issue: {
   id: string;
   title: string;
   branch: string;
-}): Promise<{ reviews: string[] }> {
+}): Promise<IssueResult> {
   const sandbox = await sandcastle.createSandbox({
     branch: issue.branch,
     baseBranch: integration,
@@ -251,49 +256,75 @@ async function runIssue(issue: {
     copyToWorktree,
   });
   const reviews: string[] = [];
+  const errors: string[] = [];
+  const attempt = async <T,>(step: string, fn: () => Promise<T>): Promise<T | undefined> => {
+    try {
+      return await fn();
+    } catch (error) {
+      console.error(`  ✗ ${issue.id} ${step} failed: ${error}`);
+      errors.push(`${step}: ${error}`);
+      return undefined;
+    }
+  };
+  const result = (): IssueResult => ({
+    reviews,
+    ...(errors.length > 0 ? { error: errors.join(" | ") } : {}),
+  });
+
   try {
-    await sandbox.run({
-      name: "implementer",
-      agent,
-      maxIterations: IMPLEMENT_ITERATIONS,
-      promptFile: promptFile("implement"),
-      promptArgs: {
-        TASK_ID: issue.id,
-        ISSUE_TITLE: issue.title,
-        BRANCH: issue.branch,
-        INTEGRATION_BRANCH: integration,
-        ROOT_ID: root.id,
-      },
-    });
-    if (commitsAhead(integration, issue.branch) === 0) return { reviews };
+    await attempt("implementer", () =>
+      sandbox.run({
+        name: "implementer",
+        agent,
+        maxIterations: IMPLEMENT_ITERATIONS,
+        promptFile: promptFile("implement"),
+        promptArgs: {
+          TASK_ID: issue.id,
+          ISSUE_TITLE: issue.title,
+          BRANCH: issue.branch,
+          INTEGRATION_BRANCH: integration,
+          ROOT_ID: root.id,
+        },
+      }),
+    );
+    if (commitsAhead(integration, issue.branch) === 0) return result();
 
     for (let round = 1; round <= MAX_REVIEW_ROUNDS; round++) {
-      const result = await sandbox.run({
-        name: "reviewer",
-        agent,
-        promptFile: promptFile("review"),
-        promptArgs: {
-          TASK_ID: issue.id,
-          BRANCH: issue.branch,
-          TARGET_BRANCH: integration,
-        },
+      const review = await attempt("reviewer", async () => {
+        const run = await sandbox.run({
+          name: "reviewer",
+          agent,
+          promptFile: promptFile("review"),
+          promptArgs: {
+            TASK_ID: issue.id,
+            BRANCH: issue.branch,
+            INTEGRATION_BRANCH: integration,
+          },
+        });
+        return parseTag(run.stdout, "review", reviewSchema);
       });
-      const review = parseTag(result.stdout, "review", reviewSchema);
+      if (!review) {
+        reviews.push("skipped");
+        break;
+      }
       reviews.push(review.verdict);
       if (review.verdict === "approve") break;
-      await sandbox.run({
-        name: "fixer",
-        agent,
-        maxIterations: FIX_ITERATIONS,
-        promptFile: promptFile("fix-review"),
-        promptArgs: {
-          TASK_ID: issue.id,
-          BRANCH: issue.branch,
-          NOTES: review.notes,
-        },
-      });
+      const fixed = await attempt("fixer", () =>
+        sandbox.run({
+          name: "fixer",
+          agent,
+          maxIterations: FIX_ITERATIONS,
+          promptFile: promptFile("fix-review"),
+          promptArgs: {
+            TASK_ID: issue.id,
+            BRANCH: issue.branch,
+            NOTES: review.notes,
+          },
+        }),
+      );
+      if (fixed === undefined) break;
     }
-    return { reviews };
+    return result();
   } finally {
     await sandbox.close();
   }
@@ -333,29 +364,27 @@ try {
       issues: settled.map((outcome, i) => {
         const issue = plan.issues[i]!;
         const ahead = commitsAhead(integration, issue.branch);
-        const base = { ...issue, ahead, reviews: [] as string[] };
-        if (outcome.status === "rejected") {
-          console.error(`  ✗ ${issue.id} failed: ${outcome.reason}`);
-          return { ...base, outcome: "failed", error: String(outcome.reason) };
-        }
+        const failed = outcome.status === "rejected";
+        const error = failed ? String(outcome.reason) : outcome.value.error;
+        const reviews = failed ? [] : outcome.value.reviews;
+        if (failed) console.error(`  ✗ ${issue.id} failed: ${outcome.reason}`);
         return {
-          ...base,
-          reviews: outcome.value.reviews,
-          outcome: ahead > 0 ? "progress" : "no-progress",
+          ...issue,
+          ahead,
+          reviews,
+          outcome: ahead > 0 ? "progress" : error ? "failed" : "no-progress",
+          ...(error ? { error } : {}),
         };
       }),
     };
     runLog.push(record);
 
-    if (settled.every((s) => s.status === "rejected")) {
-      stopReason = "every pipeline failed (credits exhausted?)";
-      break;
-    }
-
     // Progress = commits on the branch not yet in integration, whatever run produced them.
     const mergeable = record.issues.filter((i) => i.ahead > 0);
     if (mergeable.length === 0) {
-      stopReason = "no branch progressed this iteration";
+      stopReason = record.issues.every((i) => i.outcome === "failed")
+        ? "every pipeline failed (credits exhausted? see errors in the run log)"
+        : "no branch progressed this iteration";
       break;
     }
 
