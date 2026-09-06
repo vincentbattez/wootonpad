@@ -13,6 +13,7 @@ This repo forks [fortael/wootonpad](https://github.com/fortael/wootonpad). On to
 - **Open in External IDE** — One click from the sidebar opens a project in your own editor, via a command you configure.
 - **Open Project Folder** — One click opens a project — or a worktree — in Finder, Explorer, or your Linux file manager. Nothing to configure.
 - **Run Project** — One click starts your dev server in a Run Terminal beside your Claude sessions, on a command you configure per project. Clicking again reveals it rather than restarting it; Ctrl+C then the up arrow is the restart.
+- **Descriptive session titles** — A session is titled by its goal, not its first prompt. The `ai-title` Claude Code writes is promoted to the displayed title; sessions without one keep a first prompt that is sanitised at ingestion — harness markup stripped, the first useful line kept instead of a raw 120-character cut. The first prompt drops to the terminal header subtitle. Applies to old and archived sessions alike; no LLM is called.
 - **Agent tooling** — Linear as the issue tracker, a mise task runner, ADRs and a project glossary.
 
 ---
