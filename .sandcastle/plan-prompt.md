@@ -1,61 +1,39 @@
-# CONTEXT
-
-You are planning the work for a single feature: **{{ROOT_ID}} — {{ROOT_TITLE}}**.
-
-The set of issues to work has already been decided, and none of them declares a
-dependency on another in the tracker. Your job is **not** to choose what gets
-worked on — it is to say **which issues depend on which**, so that the
-orchestrator can order them and concurrent agents don't collide.
-
-What you output is written back into the tracker as `blocks` relations. It is
-read by a human afterwards and used by every future run, so declare only
-dependencies you can justify.
-
-## Issues remaining for this feature
-
-<issues-json>
-{{REMAINING_ISSUES}}
-</issues-json>
-
-Each entry carries `id`, `title` and `body`.
-
-The bodies are not the whole story. When an issue's ordering is unclear, read its
-place in the tree with:
-
-```
-linear issue view <id> --json --no-pager | jq '{parent, children}'
-```
-
-Read **only** those two fields — the full record is far too much to carry for
-every issue, and nothing else in it changes the ordering.
-
-## Already landed in an earlier iteration
-
-{{LANDED_ISSUES}}
-
-These are done and in `{{BASE_BRANCH}}`. Nothing needs to be declared against them.
-
 # TASK
 
-For each remaining issue, list the remaining issues that must land **before** it.
-Issue B is blocked by issue A when:
+Decide which children of {{ROOT_ID}} the orchestrator works next, in parallel, on top of `{{INTEGRATION_BRANCH}}` (the current branch).
 
-- B's body has a `## Blocked by` section naming A
-- B requires code or infrastructure that A introduces
-- B's requirements depend on an API shape or a decision A establishes
-- A and B modify overlapping files, so working them concurrently would produce
-  merge conflicts — pick the more foundational one as the blocker
+# CONTEXT
 
-Independent issues get an empty list — do not serialize work that has no reason
-to be serialized, and never declare a cycle.
+## Root and children
+
+<root-json>
+
+!`linear api 'query{issue(id:"{{ROOT_ID}}"){identifier title description state{name} children{nodes{identifier title description state{name type} labels{nodes{name}} inverseRelations{nodes{type issue{identifier state{type}}}}}}}}' | jq '.data.issue | {id:.identifier,title,body:(.description//""),state:.state.name,children:[.children.nodes[]|{id:.identifier,title,body:(.description//""),state:.state.name,done:(.state.type|IN("completed","canceled","duplicate")),labels:[.labels.nodes[].name],blockedBy:[.inverseRelations.nodes[]|select(.type=="blocks" and ((.issue.state.type|IN("completed","canceled","duplicate"))|not))|.issue.identifier]}]}'`
+
+</root-json>
+
+## Landed on `{{INTEGRATION_BRANCH}}`
+
+!`git log --oneline origin/main..{{INTEGRATION_BRANCH}}`
+
+## Issue branches and their unmerged commits
+
+!`for b in $(git for-each-ref --format='%(refname:short)' 'refs/heads/sandcastle/issue-*'); do echo "$b: $(git rev-list --count {{INTEGRATION_BRANCH}}..$b) unmerged commit(s)"; done`
+
+# PLAN
+
+Scope is the children listed above (a root without children is worked as a single issue, id = root). Branch name is always `sandcastle/issue-<ID>` so a resumed issue lands on its previous branch.
+
+Include a child when it is not done and none of its `blockedBy` is still open. Then split the remainder so branches merge cleanly: two children touching the same modules run serially — keep the one the other depends on. `blockedBy` from the tracker is always honoured; the file-overlap rule is your judgement.
+
+Resume: an issue whose branch carries unmerged commits is picked up where it stopped — include it, the implementer inspects the branch. An issue whose branch has no unmerged commits but whose work is already in the landed log (a merge that closed no ticket) is closed here — `linear issue update <ID> --state Done` plus a one-line comment — and left out. That is the only write this step makes.
+
+`done` is true when every child is done and nothing is left to plan; `issues` is then empty. An empty `issues` with `done: false` means everything left is blocked or needs a human — say why in `notes`.
 
 # OUTPUT
 
-Output your answer as a JSON object wrapped in `<plan>` tags:
-
 <plan>
-{"dependencies": [{"id": "ABC-1", "blockedBy": []}, {"id": "ABC-9", "blockedBy": ["ABC-1"]}]}
+{"issues":[{"id":"VIN-145","title":"…","branch":"sandcastle/issue-VIN-145"}],"done":false,"notes":"one line"}
 </plan>
 
-Always emit the `<plan>` tags. Every remaining issue appears exactly once. Never
-invent issues that are not in the list above.
+Always emit the `<plan>` tag.

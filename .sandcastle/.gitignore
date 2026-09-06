@@ -1,6 +1,4 @@
 .env
 logs/
 worktrees/
-incidents.jsonl
-state/
-lock
+run.lock

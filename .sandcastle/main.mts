@@ -1,1263 +1,451 @@
-// Feature-scoped orchestration — one Linear issue tree in, one pull request out.
+// Epic orchestrator: `npm run sandcastle [VIN-XXX]` drives one Linear epic to a single draft PR.
+// Every decision (root, plan, code, verdicts, merge, summary) is made by an agent through a
+// prompt in this folder; this file only sequences them and does host-side git/gh transport.
 //
-//   npm run sandcastle ABC-1 ABC-9
-//   npm run sandcastle clean        — drop every worktree with nothing uncommitted
-//
-// Project-specific settings live in `.sandcastle/config.json`.
-//
-// Each argument is a *root* issue. Its leaves (recursively) are the work items;
-// intermediate nodes are specs, not tasks. A root with no children is its own
-// leaf. With no arguments, every eligible root in the project is worked.
-//
-// Per root, independently of the others:
-//   1. Plan     — the remaining leaves are sorted into waves from the tracker's
-//                 `blocks` relations. An agent infers them only when none is
-//                 declared, and writes what it inferred back into the tracker.
-//   2. Execute  — one sandbox per leaf. Waves run in order, leaves inside a
-//                 wave run concurrently. Wave N is cut from the base branch
-//                 plus everything landed in waves 1..N-1, so a leaf can build
-//                 on the code its wave order says it depends on.
-//                 Implementer, then reviewer if the implementer committed.
-//   3. Retry    — up to `agent.retryRounds` rounds, re-planning what is left.
-//   4. Ship     — only when every eligible leaf landed: an agent assembles the
-//                 integration branch, then the host pushes it and opens a PR.
-//
-// A root that never completes ships what it has as a draft; the other roots
-// are unaffected. Roots run one after another: they share one token quota, so
-// running them side by side buys nothing and hides a closed window behind a
-// burst of identical failures.
-//
-// Built to run from a cron with nobody watching. A run holds a lock, stops
-// itself before the next tick, and when the platform cuts it off — the 5-hour
-// window closing, a timeout — it records when to come back and leaves every
-// issue exactly where it was (see lib/interruption.mts).
+// Flow: select-root → bootstrap integration branch + draft PR → loop { plan → issues in
+// parallel (implement → review/fix) → merge } → epic review/fix → summary → PR body.
+// Idempotent: branches, worktrees and Linear state survive a crash, the next run resumes.
 
 import * as sandcastle from "@ai-hero/sandcastle";
 import { docker } from "@ai-hero/sandcastle/sandboxes/docker";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { execFileSync } from "node:child_process";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { z } from "zod";
-import { config, checkedPromptArgs } from "./lib/config.mts";
-import {
-  InterruptedError,
-  asInterruption,
-  looksLikeQuotaWall,
-} from "./lib/interruption.mts";
-import { createJournal } from "./lib/journal.mts";
-import { createLock } from "./lib/lock.mts";
-import { clearPhase, markPhase, phaseDone } from "./lib/progress.mts";
-import { phaseError, phaseLog } from "./lib/log.mts";
-import {
-  branchHasCommits,
-  buildWaveBase,
-  commitAll,
-  fetchRemote,
-  isAncestor,
-  listRefs,
-  mergeBranches,
-  rebaseLeafOnto,
-  resetBranchTo,
-  sweepWorktrees,
-  tipOf,
-} from "./lib/git.mts";
-import { fileIncident } from "./lib/incidents.mts";
-import { alreadyLanded, pickResumeBase } from "./lib/resume.mts";
-import {
-  createPullRequest,
-  nextIntegrationBranch,
-  pushBranch,
-  supersedePreviousPrs,
-} from "./lib/github.mts";
-import {
-  BLOCKED_SIGNAL,
-  COMPLETION_SIGNALS,
-  classifyOutcome,
-  classifyReview,
-  isSettled,
-  runWaves,
-  type Outcome,
-} from "./lib/pipeline.mts";
-import {
-  addComment,
-  createBlocksRelation,
-  discoverRootIds,
-  fetchIssueTree,
-  descendantIds,
-  isBlocked,
-  isEligible,
-  leavesOf,
-  setState,
-  trySetState,
-  type Issue,
-} from "./lib/linear.mts";
-import {
-  DependencyCycleError,
-  hasDeclaredRelations,
-  normalizeDependencies,
-  wavesFromRelations,
-  type Dependent,
-} from "./lib/plan.mts";
 
+const MODEL = "claude-opus-4-8";
+const MAX_ITERATIONS = 10;
+const MAX_REVIEW_ROUNDS = 3;
+const IMPLEMENT_ITERATIONS = 100;
+const FIX_ITERATIONS = 20;
+const DIR = ".sandcastle";
+const LOCK = `${DIR}/run.lock`;
+
+const agent = sandcastle.claudeCode(MODEL);
+const hooks = { sandbox: { onSandboxReady: [{ command: "npm install" }] } };
+const copyToWorktree = ["node_modules"];
+const promptFile = (name: string) => `${DIR}/${name}-prompt.md`;
+
+const rootSchema = z.object({
+  id: z.string(),
+  title: z.string(),
+  branch: z.string(),
+  prTitle: z.string(),
+  prBody: z.string(),
+}).nullable();
 const planSchema = z.object({
-  dependencies: z.array(
-    z.object({ id: z.string(), blockedBy: z.array(z.string()) }),
+  issues: z.array(
+    z.object({ id: z.string(), title: z.string(), branch: z.string() }),
   ),
+  done: z.boolean(),
+  notes: z.string().optional(),
+});
+const reviewSchema = z.object({
+  verdict: z.enum(["approve", "changes"]),
+  notes: z.string(),
 });
 
 // ---------------------------------------------------------------------------
-// Configuration — everything project-specific lives in .sandcastle/config.json
+// Host helpers
 // ---------------------------------------------------------------------------
 
-const BASE_BRANCH = config.git.baseBranch;
-const SANDCASTLE_DIR = dirname(fileURLToPath(import.meta.url));
-const MINUTE = 60_000;
-
-const journal = createJournal(join(SANDCASTLE_DIR, "state"));
-
-/**
- * Aborted when the run must stop as a whole — the global timeout, a SIGTERM
- * from the scheduler. Every agent run listens to it. The reason is always an
- * `InterruptedError`, so a leaf killed this way is reported as interrupted
- * and not as failed.
- */
-const runController = new AbortController();
-
-for (const signal of ["SIGTERM", "SIGINT"] as const) {
-  process.once(signal, () =>
-    runController.abort(new InterruptedError(`${signal} received`)),
-  );
+function run(cmd: string, args: string[], input?: string): string {
+  return execFileSync(cmd, args, {
+    encoding: "utf8",
+    input,
+    stdio: ["pipe", "pipe", "inherit"],
+  }).trim();
 }
 
-/** Each phase runs on the model and effort its own config entry declares. */
-const agentFor = (phase: keyof typeof config.agent.phases) => {
-  const { model, effort } = config.agent.phases[phase];
-  return sandcastle.claudeCode(model, { effort });
-};
-
-const hooks = {
-  sandbox: { onSandboxReady: [{ command: config.sandbox.installCommand }] },
-};
-
-const copyToWorktree = config.sandbox.copyToWorktree;
-
-/** Deterministic, so a re-run resumes the branch instead of starting over. */
-const leafBranch = (id: string) => `${config.git.branchPrefix}${id}`;
-
-/** Shared by every prompt that tells an agent how to check its own work. */
-const projectPromptArgs = {
-  VERIFY_COMMANDS: config.project.verifyCommands
-    .map((command) => `- \`${command}\``)
-    .join("\n"),
-  COMMIT_PREFIX: config.project.commitPrefix,
-  CODING_STANDARDS: config.project.codingStandardsFile,
-};
-
-const PROMPTS = {
-  plan: "./.sandcastle/plan-prompt.md",
-  implement: "./.sandcastle/implement-prompt.md",
-  resume: "./.sandcastle/resume-prompt.md",
-  review: "./.sandcastle/review-prompt.md",
-  integrate: "./.sandcastle/integrate-prompt.md",
-};
-
-// ---------------------------------------------------------------------------
-// Root resolution
-// ---------------------------------------------------------------------------
-
-interface Root {
-  issue: Issue;
-  eligibleLeaves: Issue[];
-  skippedLeaves: Issue[];
-}
-
-const DAY = 24 * 60 * MINUTE;
-
-/**
- * Worktrees are cache: a settled leaf's is torn down with its sandbox, and the
- * ones a killed run left behind are reconstructible from their branch. Only a
- * worktree with uncommitted changes is worth anything, and that one is kept
- * and reported — deleting it silently is how work disappears.
- */
-async function sweep(all: boolean): Promise<void> {
-  let swept: Awaited<ReturnType<typeof sweepWorktrees>>;
+function ok(cmd: string, args: string[]): boolean {
   try {
-    swept = await sweepWorktrees({ olderThanMs: 7 * DAY, all });
-  } catch (cause) {
-    // Housekeeping never takes the run down.
-    console.error(`worktree sweep failed: ${(cause as Error).message}`);
-    return;
-  }
-
-  for (const worktree of swept.removed) {
-    console.log(`swept ${worktree.path}`);
-  }
-  for (const worktree of swept.dirty) {
-    fileIncident({
-      kind: "worktree-dirty",
-      rootId: worktree.branch ?? worktree.path,
-      detail: `${worktree.path} holds uncommitted changes — kept, not swept`,
-    });
-    console.error(`kept ${worktree.path} — uncommitted changes`);
-  }
-  if (swept.removed.length + swept.dirty.length > 0) {
-    console.log(
-      `worktrees: ${swept.removed.length} swept, ${swept.dirty.length} dirty kept, ${swept.kept.length} recent kept`,
-    );
-  }
-}
-
-function parseArgs(): string[] {
-  const ids = process.argv.slice(2);
-  const malformed = ids.filter((id) => !/^[A-Za-z]+-\d+$/.test(id));
-
-  if (malformed.length > 0) {
-    throw new Error(
-      `Not a Linear issue identifier: ${malformed.join(", ")}. Expected e.g. ABC-1.`,
-    );
-  }
-
-  return ids.map((id) => id.toUpperCase());
-}
-
-/**
- * Passing both a parent and one of its descendants would put two agents on the
- * same issue. It is almost always a typo, so refuse rather than guess.
- */
-function assertNoNesting(roots: Root[]): void {
-  for (const root of roots) {
-    const descendants = descendantIds(root.issue);
-    for (const other of roots) {
-      if (other !== root && descendants.has(other.issue.id)) {
-        throw new Error(
-          `${other.issue.id} is a descendant of ${root.issue.id} — pick one or the other.`,
-        );
-      }
-    }
-  }
-}
-
-/**
- * A leaf blocked by an open issue *outside* this root is not workable yet —
- * its blocker is nobody's job in this run. A blocker inside the root is only
- * an ordering constraint, and the planner honours it.
- */
-async function resolveRoot(id: string): Promise<Root> {
-  const issue = await fetchIssueTree(id);
-  const leaves = leavesOf(issue);
-  const inside = descendantIds(issue).add(issue.id);
-
-  const workable = (leaf: Issue) =>
-    isEligible(leaf) &&
-    !isBlocked({
-      ...leaf,
-      blockers: leaf.blockers.filter((blocker) => !inside.has(blocker.id)),
-    });
-
-  return {
-    issue,
-    eligibleLeaves: leaves.filter(workable),
-    skippedLeaves: leaves.filter((leaf) => !workable(leaf)),
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Execution
-// ---------------------------------------------------------------------------
-
-/**
- * The reviewer gets a single pass and has to sign off on the branch it is
- * handed, so it must start from a green suite: a failure it did not cause
- * either eats that pass or gets signed off with the branch. Running the
- * project's own feedback loops here keeps that from ever reaching it.
- */
-async function verifyBranch(
-  sandbox: sandcastle.Sandbox,
-  id: string,
-  phase: "implement" | "integrate" = "implement",
-): Promise<boolean> {
-  for (const command of config.project.verifyCommands) {
-    phaseLog(phase, `[${id}] verifying: ${command}`);
-
-    const result = await sandbox.exec(command, {
-      onLine: (line) => phaseLog(phase, `[${id}]   ${line}`),
-    });
-
-    if (result.exitCode !== 0) {
-      phaseError(
-        phase,
-        `[${id}] ✗ ${command} failed (exit ${result.exitCode})\n${result.stderr}`,
-      );
-      return false;
-    }
-  }
-
-  return true;
-}
-
-/**
- * Each phase runs only if its marker is stale, so a re-run picks up where the
- * last one stopped: implement what was never implemented, review what the
- * implementer changed since the last review, skip a leaf that is settled.
- *
- * `baseBranch` is the wave's cumulative base, not the project's base branch —
- * every judgement below (is there work? is the marker still valid?) is relative
- * to it.
- *
- * What happened is written to the journal on the way out — outcome, duration,
- * the implementer's last session. The session is the one thing worth caching:
- * with it, an interrupted agent resumes its reasoning; without it, the cold
- * re-prompt reads the branch and starts over.
- */
-async function runLeaf(
-  leaf: Issue,
-  branch: string,
-  baseBranch: string,
-  rootId: string,
-): Promise<Outcome> {
-  const startedAt = Date.now();
-  let implement: sandcastle.SandboxRunResult | null = null;
-
-  const record = (outcome: Outcome): Outcome => {
-    const last = implement?.iterations.at(-1);
-    const keepSession = !isSettled(outcome) && last?.sessionId !== undefined;
-    journal.recordLeaf({
-      leafId: leaf.id,
-      rootId,
-      outcome,
-      at: new Date().toISOString(),
-      durationMs: Date.now() - startedAt,
-      ...(keepSession
-        ? { sessionId: last.sessionId, sessionFilePath: last.sessionFilePath }
-        : {}),
-      ...(last?.usage ? { usage: last.usage } : {}),
-    });
-    return outcome;
-  };
-
-  // Work an earlier attempt already folded into the base needs no agent. A
-  // branch that exists but never produced anything is not that — it is the
-  // work this run is here to finish.
-  const landedEarlier = await alreadyLanded(branch, {
-    hasOwnWork: () => branchHasCommits(branch, BASE_BRANCH),
-    isContainedInResumeBase: () => isAncestor(branch, baseBranch),
-  });
-
-  if (landedEarlier) {
-    console.log(`[${leaf.id}] already in ${baseBranch} — skipping`);
-    return "empty";
-  }
-
-  // A leaf whose work no longer merges into its base has been recut from it:
-  // its markers describe a branch that no longer exists, so they go too.
-  if ((await rebaseLeafOnto(branch, baseBranch)) === "restarted") {
-    fileIncident({
-      kind: "leaf-restarted",
-      rootId: leaf.id,
-      leafId: leaf.id,
-      detail: `its work no longer merged into ${baseBranch} and was dropped`,
-    });
-    console.warn(
-      `[${leaf.id}] its base moved under it and the merge conflicts — ` +
-        `dropping the stale branch and re-implementing from ${baseBranch}`,
-    );
-    await clearPhase("implemented", leaf.id);
-    await clearPhase("reviewed", leaf.id);
-  }
-
-  const baseTip = await tipOf(baseBranch);
-  const existing = await tipOf(branch);
-  const needsImplement =
-    existing === null ||
-    !(await phaseDone("implemented", leaf.id, existing, baseTip));
-  const needsReview =
-    needsImplement ||
-    (existing !== null &&
-      !(await phaseDone("reviewed", leaf.id, existing, baseTip)));
-
-  if (!needsImplement && !needsReview) {
-    console.log(`[${leaf.id}] implemented and reviewed already — skipping`);
-    return (await branchHasCommits(branch, baseBranch)) ? "landed" : "empty";
-  }
-
-  await trySetState(leaf.id, config.linear.inProgressState);
-
-  // The leaf's own budget, on top of the run's. Its expiry is a leaf timeout
-  // (retried next round); the run's is an interruption (ends the run).
-  const leafTimeout = AbortSignal.timeout(
-    config.schedule.leafTimeoutMinutes * MINUTE,
-  );
-  const signal = AbortSignal.any([runController.signal, leafTimeout]);
-
-  const sandbox = await sandcastle.createSandbox({
-    branch,
-    baseBranch,
-    sandbox: docker(),
-    hooks,
-    copyToWorktree,
-  });
-
-  try {
-    let completion: string | undefined = needsImplement
-      ? undefined
-      : COMPLETION_SIGNALS[0];
-
-    if (needsImplement) {
-      const started = Date.now();
-
-      // An earlier attempt's session, when its JSONL is still on the host:
-      // the agent keeps its train of thought, not just its diff. One pass;
-      // if it does not finish, the cold prompt below takes over.
-      const session = existing ? journal.resumableSession(leaf.id) : null;
-      if (session) {
-        phaseLog("implement", `[${leaf.id}] resuming session ${session}`);
-        implement = await sandbox.run({
-          name: "implementer",
-          maxIterations: 1,
-          resumeSession: session,
-          agent: agentFor("implement"),
-          completionSignal: COMPLETION_SIGNALS,
-          promptFile: PROMPTS.resume,
-          signal,
-          promptArgs: checkedPromptArgs(PROMPTS.resume, {
-            ...projectPromptArgs,
-            TASK_ID: leaf.id,
-            BRANCH: branch,
-            BASE_BRANCH: baseBranch,
-          }),
-        });
-        if (!implement.completionSignal) {
-          phaseLog("implement", `[${leaf.id}] resumed session did not finish — fresh start`);
-          journal.forgetSession(leaf.id);
-          implement = null;
-        }
-      }
-
-      implement ??= await sandbox.run({
-        name: "implementer",
-        maxIterations: config.agent.implementIterations,
-        agent: agentFor("implement"),
-        completionSignal: COMPLETION_SIGNALS,
-        promptFile: PROMPTS.implement,
-        signal,
-        promptArgs: checkedPromptArgs(PROMPTS.implement, {
-          ...projectPromptArgs,
-          TASK_ID: leaf.id,
-          ISSUE_TITLE: leaf.title,
-          BRANCH: branch,
-          BASE_BRANCH: baseBranch,
-        }),
-      });
-
-      completion = implement.completionSignal;
-      const durationMs = Date.now() - started;
-
-      if (
-        looksLikeQuotaWall({
-          outcome: classifyOutcome(completion, implement.commits.length > 0),
-          durationMs,
-          committed: implement.commits.length > 0,
-          fastFailMs: config.agent.quotaFastFailMs,
-        })
-      ) {
-        throw new InterruptedError(
-          `${leaf.id} exhausted ${config.agent.implementIterations} iterations in ` +
-            `${Math.round(durationMs / 1000)}s with no commit — the platform is refusing us`,
-        );
-      }
-
-      const tip = await tipOf(branch);
-      if (completion && tip) await markPhase("implemented", leaf.id, tip, baseTip);
-    } else {
-      phaseLog("review", `[${leaf.id}] already implemented — reviewing only`);
-    }
-
-    let outcome = classifyOutcome(
-      completion,
-      await branchHasCommits(branch, baseBranch),
-    );
-
-    // A branch whose feedback loops fail is not review material — it goes back
-    // for another implement round, which means dropping the markers a resume
-    // would otherwise read as "implemented, review only".
-    if (outcome === "landed" && !(await verifyBranch(sandbox, leaf.id))) {
-      await clearPhase("implemented", leaf.id);
-      await clearPhase("reviewed", leaf.id);
-      outcome = "blocked";
-    }
-
-    if (outcome === "landed") {
-      const review = await sandbox.run({
-        name: "reviewer",
-        maxIterations: 1,
-        agent: agentFor("review"),
-        completionSignal: COMPLETION_SIGNALS,
-        promptFile: PROMPTS.review,
-        signal,
-        promptArgs: checkedPromptArgs(PROMPTS.review, {
-          ...projectPromptArgs,
-          BRANCH: branch,
-          // The prompt's `git diff` runs *inside* the sandbox, where a
-          // host-only branch name like the wave base may not resolve. The
-          // commit it points at is reachable from the leaf branch (the rebase
-          // above merged it in), so a sha always does.
-          BASE_REV: baseTip ?? baseBranch,
-        }),
-      });
-
-      outcome = classifyReview(review.completionSignal);
-
-      // The reviewer commits too, which moves the tip. Both markers advance
-      // together, or the next run would see a stale `implemented` and put an
-      // agent back on work the reviewer just signed off. Only a reviewer that
-      // signed off gets to advance them.
-      const tip = await tipOf(branch);
-      if (outcome === "landed" && tip) {
-        await markPhase("implemented", leaf.id, tip, baseTip);
-        await markPhase("reviewed", leaf.id, tip, baseTip);
-      }
-    }
-
-    await trySetState(
-      leaf.id,
-      outcome === "landed"
-        ? config.linear.reviewState
-        : config.linear.unstartedState,
-    );
-
-    return record(outcome);
-  } catch (cause) {
-    // Whatever stopped the agent, its uncommitted work goes on the branch
-    // first: resumption reads git, and a killed sandbox is the one place work
-    // gets lost otherwise.
-    if (signal.aborted) {
-      const committed = await commitAll(
-        sandbox.worktreePath,
-        `${config.project.commitPrefix} checkpoint — agent stopped by the orchestrator`,
-      ).catch(() => false);
-      if (committed) console.log(`[${leaf.id}] committed what the agent had`);
-    }
-
-    // The leaf's own timeout is a retry, not a verdict: an agent looping on a
-    // ticket for 45 minutes is the token sink this budget exists to cap, and
-    // the next round gets it with whatever it committed.
-    if (leafTimeout.aborted && !runController.signal.aborted) {
-      fileIncident({
-        kind: "leaf-timeout",
-        rootId: leaf.id,
-        leafId: leaf.id,
-        detail: `stopped after ${config.schedule.leafTimeoutMinutes} minutes`,
-      });
-      console.error(
-        `[${leaf.id}] stopped after ${config.schedule.leafTimeoutMinutes} minutes — retried next round`,
-      );
-      return record("exhausted");
-    }
-
-    // An interruption leaves the issue `In Progress`. That is true — the work
-    // is on a branch and will resume — and dropping it to `Todo` here would
-    // erase the only visible trace that something is in flight.
-    const interruption = asInterruption(cause);
-    if (interruption) {
-      record("interrupted");
-      throw interruption;
-    }
-
-    record("failed");
-    await trySetState(leaf.id, config.linear.unstartedState);
-    throw cause;
-  } finally {
-    await sandbox.close();
-  }
-}
-
-/**
- * Ask an agent which remaining leaves depend on which, and declare what it
- * found in the tracker. The write-back is the point: a dependency between two
- * tickets is domain information, its home is the tracker, and the next run
- * reads it there and plans without an agent.
- */
-async function inferDependencies(
-  root: Root,
-  remaining: Issue[],
-  landed: string[],
-  resumeBase: string,
-): Promise<(Issue & Dependent)[]> {
-  const { id } = root.issue;
-  phaseLog(
-    "plan",
-    `[${id}] no relations declared among ${remaining.length} issues — asking an agent`,
-  );
-
-  const plan = await sandcastle.run({
-    hooks,
-    sandbox: docker(),
-    name: `planner-${id}`,
-    maxIterations: 1,
-    agent: agentFor("plan"),
-    promptFile: PROMPTS.plan,
-    signal: runController.signal,
-    output: sandcastle.Output.object({ tag: "plan", schema: planSchema }),
-    promptArgs: checkedPromptArgs(PROMPTS.plan, {
-      BASE_BRANCH: resumeBase,
-      ROOT_ID: id,
-      ROOT_TITLE: root.issue.title,
-      REMAINING_ISSUES: JSON.stringify(
-        remaining.map((leaf) => ({
-          id: leaf.id,
-          title: leaf.title,
-          body: leaf.description,
-        })),
-        null,
-        2,
-      ),
-      LANDED_ISSUES: landed.length
-        ? landed.map((leafId) => `- ${leafId}`).join("\n")
-        : "_(none)_",
-    }),
-  });
-
-  const planned: z.infer<typeof planSchema> = plan.output;
-  const dependents = normalizeDependencies(planned.dependencies, remaining);
-  const byId = new Map(remaining.map((leaf) => [leaf.id, leaf]));
-  const declared: string[] = [];
-
-  for (const leaf of dependents) {
-    for (const blockerId of leaf.blockedBy) {
-      try {
-        await createBlocksRelation(byId.get(blockerId)!, leaf);
-        declared.push(`${blockerId} → ${leaf.id}`);
-      } catch (cause) {
-        phaseError(
-          "plan",
-          `[${id}] could not declare ${blockerId} blocks ${leaf.id}: ${(cause as Error).message}`,
-        );
-      }
-    }
-    if (leaf.blockedBy.length > 0) {
-      await addComment(
-        leaf.id,
-        `Sandcastle inferred that this issue is blocked by ${leaf.blockedBy.join(", ")} ` +
-          "and declared it as a relation. Remove the relation if that is wrong.",
-      ).catch(() => {});
-    }
-  }
-
-  fileIncident({
-    kind: "relations-inferred",
-    rootId: id,
-    detail: declared.length
-      ? `declared ${declared.join("; ")}`
-      : "the agent found every remaining issue independent",
-  });
-  phaseLog("plan", `[${id}] declared ${declared.length} relation(s) in the tracker`);
-
-  return dependents;
-}
-
-/**
- * Waves from the tracker's `blocks` relations. Exact where relations exist;
- * where none do, an agent infers them once and they exist from then on.
- * A single remaining leaf needs neither.
- */
-async function planWaves(
-  root: Root,
-  remaining: Issue[],
-  landed: string[],
-  resumeBase: string,
-): Promise<Issue[][]> {
-  const { id } = root.issue;
-  if (remaining.length <= 1) return [remaining];
-
-  let dependents: (Issue & Dependent)[] = remaining.map((leaf) => ({
-    ...leaf,
-    blockedBy: leaf.blockers.map((blocker) => blocker.id),
-  }));
-
-  if (!hasDeclaredRelations(dependents)) {
-    dependents = await inferDependencies(root, remaining, landed, resumeBase);
-  }
-
-  try {
-    const waves = wavesFromRelations(dependents);
-    phaseLog(
-      "plan",
-      `[${id}] ${waves.length} wave(s): ${waves
-        .map((wave) => wave.map((leaf) => leaf.id).join("+"))
-        .join(" → ")}`,
-    );
-    return waves;
-  } catch (cause) {
-    if (!(cause instanceof DependencyCycleError)) throw cause;
-
-    // A cycle is a tracker error a human has to fix. Meanwhile the leaves in
-    // it still run — in one wave, each on the base alone — rather than the
-    // root stalling on a relation nobody will notice until morning.
-    fileIncident({ kind: "dependency-cycle", rootId: id, detail: cause.message });
-    phaseError("plan", `[${id}] ${cause.message} — running them side by side`);
-    return [remaining];
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Shipping
-// ---------------------------------------------------------------------------
-
-/** Root first, then the leaves — deduped, since a childless root is its own leaf. */
-function issuesToClose(root: Root, worked: Issue[]): Issue[] {
-  const seen = new Set<string>();
-  return [root.issue, ...worked].filter((issue) => {
-    if (seen.has(issue.id)) return false;
-    seen.add(issue.id);
+    execFileSync(cmd, args, { stdio: "ignore" });
     return true;
-  });
+  } catch {
+    return false;
+  }
 }
 
-/** A branch missing a leaf, or one the integrator never got green, ships as a draft. */
-const isDraft = (missing: Issue[], assembled: boolean): boolean =>
-  !assembled || missing.length > 0;
+const git = (...args: string[]) => run("git", args);
+const gitOk = (...args: string[]) => ok("git", args);
 
-function pullRequestBody(
-  root: Root,
-  worked: Issue[],
-  missing: Issue[],
-  assembled: boolean,
-): string {
-  const sections = [root.issue.description.trim() || `See ${root.issue.url}.`];
-
-  if (!assembled) {
-    sections.push(
-      "> **The integration never finished.** The integrator was put back on this " +
-        "branch until its attempts ran out and still left conflicts or a red " +
-        "suite behind. Everything below landed; the branch itself is not green.",
-    );
+function commitsAhead(base: string, branch: string): number {
+  try {
+    return Number(git("rev-list", "--count", `${base}..${branch}`));
+  } catch {
+    return 0;
   }
+}
 
-  sections.push(
-    ["## Issues", ...worked.map((leaf) => `- ${leaf.id}: ${leaf.title}`)].join(
-      "\n",
-    ),
+// Same rules as sandcastle's Output helpers: last tag wins, code fences unwrapped.
+function lastTag(stdout: string, tag: string): string {
+  const matches = [
+    ...stdout.matchAll(new RegExp(`<${tag}>([\\s\\S]*?)</${tag}>`, "g")),
+  ];
+  const raw = matches.at(-1)?.[1];
+  if (raw === undefined) throw new Error(`<${tag}> missing in agent output`);
+  return raw.trim().replace(/^```\w*\n?/, "").replace(/\n?```$/, "").trim();
+}
+
+function parseTag<T>(stdout: string, tag: string, schema: z.ZodType<T>): T {
+  return schema.parse(JSON.parse(lastTag(stdout, tag)));
+}
+
+const list = (items: string[]) => items.map((i) => `- ${i}`).join("\n");
+
+// launchd fires hourly; a run can outlast that, so refuse to overlap.
+function acquireLock(): void {
+  if (existsSync(LOCK)) {
+    const pid = Number(readFileSync(LOCK, "utf8"));
+    let alive = false;
+    try {
+      process.kill(pid, 0);
+      alive = true;
+    } catch {}
+    if (alive) {
+      console.log(`Another run is active (pid ${pid}). Exiting.`);
+      process.exit(0);
+    }
+  }
+  writeFileSync(LOCK, String(process.pid));
+  process.on("exit", () => rmSync(LOCK, { force: true }));
+}
+
+// ---------------------------------------------------------------------------
+// Run log — fed to the summary agent
+// ---------------------------------------------------------------------------
+
+type IssueRecord = {
+  id: string;
+  title: string;
+  branch: string;
+  outcome: "progress" | "no-progress" | "failed";
+  ahead: number;
+  reviews: string[];
+  error?: string;
+};
+type IterationRecord = {
+  iteration: number;
+  issues: IssueRecord[];
+  merged: boolean;
+};
+
+const runLog: IterationRecord[] = [];
+let stopReason = `reached MAX_ITERATIONS (${MAX_ITERATIONS})`;
+let childrenDone = false;
+let epicVerdict: "approve" | "changes" | "skipped" = "skipped";
+let epicNotes = "";
+
+function formatRunLog(): string {
+  const iterations =
+    runLog.length === 0
+      ? "_No iteration ran any issue._"
+      : runLog
+          .map(({ iteration, issues, merged }) =>
+            [
+              `- Iteration ${iteration} (${merged ? "merged" : "not merged"}):`,
+              ...issues.map((i) => {
+                const detail =
+                  i.outcome === "failed"
+                    ? ` — ${i.error}`
+                    : ` — ${i.ahead} commit(s) ahead, reviews: ${i.reviews.join(", ") || "none"}`;
+                return `  - ${i.id} (${i.branch}) [${i.outcome}] ${i.title}${detail}`;
+              }),
+            ].join("\n"),
+          )
+          .join("\n");
+  return [
+    `Stop reason: ${stopReason}`,
+    `All children done: ${childrenDone}`,
+    `Epic review: ${epicVerdict}${epicNotes ? ` — ${epicNotes}` : ""}`,
+    "",
+    iterations,
+  ].join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// Phase 0: select root + bootstrap integration branch and draft PR (host)
+// ---------------------------------------------------------------------------
+
+acquireLock();
+const rootArg = process.argv[2] ?? "";
+console.log(`\n=== select-root ${rootArg || "(discover)"} ===\n`);
+
+const rootRun = await sandcastle.run({
+  sandbox: docker(),
+  agent,
+  name: "select-root",
+  promptFile: promptFile("select-root"),
+  promptArgs: { ROOT_ARG: rootArg },
+  output: sandcastle.Output.object({
+    tag: "root",
+    schema: rootSchema,
+    maxRetries: 1,
+  }),
+});
+if (rootRun.output === null) {
+  console.log("Nothing workable in the tracker. Exiting.");
+  process.exit(0);
+}
+const root = rootRun.output;
+const integration = root.branch;
+console.log(`Root ${root.id}: ${root.title} → ${integration}`);
+
+git("fetch", "origin", "--prune");
+const localExists = gitOk("show-ref", "--verify", "--quiet", `refs/heads/${integration}`);
+const remoteExists = gitOk("show-ref", "--verify", "--quiet", `refs/remotes/origin/${integration}`);
+if (!localExists && remoteExists) {
+  git("branch", "--track", integration, `origin/${integration}`);
+} else if (!localExists) {
+  // Empty seed commit without checkout: gh refuses a PR with zero commits over main.
+  const sha = git(
+    "commit-tree", "origin/main^{tree}", "-p", "origin/main",
+    "-m", `chore(${root.id.toLowerCase()}): open integration branch ${integration}`,
   );
-
-  if (missing.length > 0) {
-    sections.push(
-      [
-        "## Still open",
-        "These sub-issues never landed, so this branch is a partial feature:",
-        ...missing.map((leaf) => `- ${leaf.id}: ${leaf.title}`),
-      ].join("\n"),
-    );
-  }
-
-  if (root.skippedLeaves.length > 0) {
-    sections.push(
-      [
-        "## Not included",
-        "These sub-issues were not eligible when this run started, so their work is not in this PR:",
-        ...root.skippedLeaves.map(
-          (leaf) => `- ${leaf.id}: ${leaf.title} (${leaf.stateName})`,
-        ),
-      ].join("\n"),
-    );
-  }
-
-  // A draft closes the leaves it carries, never the root — whether the feature
-  // is incomplete or the branch is red, saying "Closes <epic>" on it is how
-  // work goes missing.
-  const closes = isDraft(missing, assembled)
-    ? worked
-    : issuesToClose(root, worked);
-  if (closes.length > 0) {
-    sections.push(closes.map((issue) => `Closes ${issue.id}`).join("\n"));
-  }
-
-  return sections.join("\n\n");
+  git("update-ref", `refs/heads/${integration}`, sha);
+} else if (remoteExists && gitOk("merge-base", "--is-ancestor", integration, `origin/${integration}`)) {
+  // Refused when checked out in a stale worktree; createSandbox fast-forwards that case.
+  gitOk("branch", "-f", integration, `origin/${integration}`);
 }
 
-const asList = (branches: string[]) =>
-  branches.length ? branches.map((b) => `- ${b}`).join("\n") : "_(none)_";
+const integ = await sandcastle.createSandbox({
+  branch: integration,
+  baseBranch: "origin/main",
+  sandbox: docker(),
+  hooks,
+  copyToWorktree,
+});
+const pushIntegration = () => git("push", "-u", "origin", integration);
+pushIntegration();
 
-/**
- * What a merge agent came back with. `blocked` is the agent saying the
- * conflict is semantic — two leaves made incompatible decisions — which no
- * further attempt will settle; only a human does.
- */
-type Integration = "done" | "blocked" | "exhausted";
-
-/**
- * Finish an integration the deterministic merge could not: `merged` already
- * applied cleanly, `pending` is what is left, starting with the one that
- * conflicted — or nothing, when every merge applied and the suite is red.
- * Every caller has its own fallback for anything but `done`; none of them
- * can afford to stop the run there.
- */
-async function integrateWithAgent(
-  sandbox: sandcastle.Sandbox,
-  options: {
-    name: string;
-    rootId: string;
-    rootTitle: string;
-    base: string;
-    merged: string[];
-    pending: string[];
-  },
-): Promise<Integration> {
-  const run = await sandbox.run({
-    name: options.name,
-    maxIterations: config.agent.integrateIterations,
-    agent: agentFor("integrate"),
-    completionSignal: COMPLETION_SIGNALS,
-    promptFile: PROMPTS.integrate,
-    signal: runController.signal,
-    promptArgs: checkedPromptArgs(PROMPTS.integrate, {
-      ...projectPromptArgs,
-      ROOT_ID: options.rootId,
-      ROOT_TITLE: options.rootTitle,
-      INTEGRATION_BRANCH: sandbox.branch,
-      BASE_BRANCH: options.base,
-      MERGED_BRANCHES: asList(options.merged),
-      BRANCHES: asList(options.pending),
-    }),
-  });
-
-  if (run.completionSignal === undefined) return "exhausted";
-  return run.completionSignal.includes(BLOCKED_SIGNAL) ? "blocked" : "done";
+if (!ok("gh", ["pr", "view", integration, "--json", "number"])) {
+  run(
+    "gh",
+    ["pr", "create", "--draft", "--base", "main", "--head", integration,
+      "--title", root.prTitle, "--body-file", "-"],
+    root.prBody,
+  );
 }
+const prUrl = run("gh", ["pr", "view", integration, "--json", "url", "--jq", ".url"]);
+console.log(`PR: ${prUrl}`);
 
-/** A sandbox on `branch` for the duration of `fn`, closed whatever happens. */
-async function withSandbox<T>(
-  branch: string,
-  base: string,
-  fn: (sandbox: sandcastle.Sandbox) => Promise<T>,
-): Promise<T> {
+// ---------------------------------------------------------------------------
+// Per-issue pipeline: implement → (review → fix)* on its own branch/sandbox
+// ---------------------------------------------------------------------------
+
+async function runIssue(issue: {
+  id: string;
+  title: string;
+  branch: string;
+}): Promise<{ reviews: string[] }> {
   const sandbox = await sandcastle.createSandbox({
-    branch,
-    baseBranch: base,
+    branch: issue.branch,
+    baseBranch: integration,
     sandbox: docker(),
     hooks,
     copyToWorktree,
   });
+  const reviews: string[] = [];
   try {
-    return await fn(sandbox);
+    await sandbox.run({
+      name: "implementer",
+      agent,
+      maxIterations: IMPLEMENT_ITERATIONS,
+      promptFile: promptFile("implement"),
+      promptArgs: {
+        TASK_ID: issue.id,
+        ISSUE_TITLE: issue.title,
+        BRANCH: issue.branch,
+        INTEGRATION_BRANCH: integration,
+        ROOT_ID: root.id,
+      },
+    });
+    if (commitsAhead(integration, issue.branch) === 0) return { reviews };
+
+    for (let round = 1; round <= MAX_REVIEW_ROUNDS; round++) {
+      const result = await sandbox.run({
+        name: "reviewer",
+        agent,
+        promptFile: promptFile("review"),
+        promptArgs: {
+          TASK_ID: issue.id,
+          BRANCH: issue.branch,
+          TARGET_BRANCH: integration,
+        },
+      });
+      const review = parseTag(result.stdout, "review", reviewSchema);
+      reviews.push(review.verdict);
+      if (review.verdict === "approve") break;
+      await sandbox.run({
+        name: "fixer",
+        agent,
+        maxIterations: FIX_ITERATIONS,
+        promptFile: promptFile("fix-review"),
+        promptArgs: {
+          TASK_ID: issue.id,
+          BRANCH: issue.branch,
+          NOTES: review.notes,
+        },
+      });
+    }
+    return { reviews };
   } finally {
     await sandbox.close();
   }
 }
 
-/**
- * The branch a wave is cut from. The deterministic merge is the answer for the
- * case this run is designed around — leaves that touch different code — and a
- * conflict means the plan was wrong. Being wrong is not a reason to stop: an
- * agent gets the same merge, and if it cannot assemble one either the wave
- * simply runs on the resume base. A wave with less context beats no wave.
- */
-async function waveBaseFor(
-  root: Root,
-  resumeBase: string,
-  branches: string[],
-): Promise<string> {
-  const { id, title } = root.issue;
-  const branch = `${config.git.waveBasePrefix}${id}`;
+// ---------------------------------------------------------------------------
+// Main loop: plan → issues → merge
+// ---------------------------------------------------------------------------
 
-  try {
-    return await buildWaveBase(branch, resumeBase, branches);
-  } catch (cause) {
-    phaseError("integrate", `[${id}] ${(cause as Error).message}`);
-  }
+try {
+  for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
+    console.log(`\n=== Iteration ${iteration}/${MAX_ITERATIONS} ===\n`);
 
-  phaseLog("integrate", `[${id}] handing ${branch} to an agent to assemble`);
+    const planRun = await integ.run({
+      name: "planner",
+      agent,
+      promptFile: promptFile("plan"),
+      promptArgs: { ROOT_ID: root.id, INTEGRATION_BRANCH: integration },
+    });
+    const plan = parseTag(planRun.stdout, "plan", planSchema);
+    if (plan.notes) console.log(`Planner: ${plan.notes}`);
 
-  for (let attempt = 1; attempt <= config.agent.integrateAttempts; attempt++) {
-    // Each attempt starts from the base again: a half-merged wave base is worse
-    // than an unmerged one, and unlike an integration branch nothing downstream
-    // has seen it yet.
-    await resetBranchTo(branch, resumeBase);
+    if (plan.done || plan.issues.length === 0) {
+      childrenDone = plan.done;
+      stopReason = plan.done ? "all children done" : "no workable issue";
+      break;
+    }
+    for (const issue of plan.issues) {
+      console.log(`  ${issue.id}: ${issue.title} → ${issue.branch}`);
+    }
 
-    const result = await withSandbox(branch, resumeBase, (sandbox) =>
-      integrateWithAgent(sandbox, {
-        name: `wave-base-${id}`,
-        rootId: id,
-        rootTitle: title,
-        base: resumeBase,
-        merged: [],
-        pending: branches,
+    const settled = await Promise.allSettled(plan.issues.map(runIssue));
+
+    const record: IterationRecord = {
+      iteration,
+      merged: false,
+      issues: settled.map((outcome, i) => {
+        const issue = plan.issues[i]!;
+        const ahead = commitsAhead(integration, issue.branch);
+        const base = { ...issue, ahead, reviews: [] as string[] };
+        if (outcome.status === "rejected") {
+          console.error(`  ✗ ${issue.id} failed: ${outcome.reason}`);
+          return { ...base, outcome: "failed", error: String(outcome.reason) };
+        }
+        return {
+          ...base,
+          reviews: outcome.value.reviews,
+          outcome: ahead > 0 ? "progress" : "no-progress",
+        };
       }),
-    );
+    };
+    runLog.push(record);
 
-    if (result === "done") return branch;
-    if (result === "blocked") break;
+    if (settled.every((s) => s.status === "rejected")) {
+      stopReason = "every pipeline failed (credits exhausted?)";
+      break;
+    }
 
-    phaseError(
-      "integrate",
-      `[${id}] ${branch} unfinished — attempt ${attempt}/${config.agent.integrateAttempts}`,
-    );
+    // Progress = commits on the branch not yet in integration, whatever run produced them.
+    const mergeable = record.issues.filter((i) => i.ahead > 0);
+    if (mergeable.length === 0) {
+      stopReason = "no branch progressed this iteration";
+      break;
+    }
+
+    await integ.run({
+      name: "merger",
+      agent,
+      promptFile: promptFile("merge"),
+      promptArgs: {
+        ROOT_ID: root.id,
+        INTEGRATION_BRANCH: integration,
+        BRANCHES: list(mergeable.map((i) => i.branch)),
+        ISSUES: list(mergeable.map((i) => `${i.id}: ${i.title}`)),
+      },
+    });
+    pushIntegration();
+    record.merged = true;
   }
 
-  fileIncident({
-    kind: "wave-base-escalated",
-    rootId: id,
-    detail: `no agent could assemble ${branch} from ${branches.join(", ")}; the wave ran on ${resumeBase}`,
-  });
-
-  phaseError(
-    "integrate",
-    `[${id}] ${branch} could not be assembled — the wave runs on ${resumeBase}, ` +
-      `without the code its earlier leaves landed`,
-  );
-  return resumeBase;
-}
-
-async function ship(
-  root: Root,
-  branches: string[],
-  worked: Issue[],
-  resumeBase: string,
-  missing: Issue[],
-) {
-  const { id, title } = root.issue;
-  const branch = await nextIntegrationBranch(id);
-  phaseLog("integrate", `[${id}] assembling ${branch} from ${resumeBase}`);
-
-  // Cut from the resume base so the attempt keeps what earlier ones landed,
-  // even when this run's leaves were all no-ops. The pull request still targets
-  // the project's base branch — that is what `baseBranch` means for a PR.
-  //
-  // The merge itself is `git merge` in a loop: leaves that touch different
-  // code assemble without judgement and without tokens. An agent is called
-  // only for what the loop could not do — the merge that conflicted, or a
-  // suite that went red once everything applied — and each attempt resumes
-  // the same branch, so a second integrator picks up where the first stopped.
-  await resetBranchTo(branch, resumeBase);
-  const conflict = await mergeBranches(branch, branches);
-  const merged = conflict ? branches.slice(0, branches.indexOf(conflict)) : branches;
-  const pending = conflict ? branches.slice(branches.indexOf(conflict)) : [];
-
-  const assembled = await withSandbox(branch, resumeBase, async (sandbox) => {
-    if (!conflict && (await verifyBranch(sandbox, id, "integrate"))) return true;
-
-    fileIncident({
-      kind: "integration-escalated",
-      rootId: id,
-      detail: conflict
-        ? `merging ${conflict} into ${branch} conflicts`
-        : `${branch} merges cleanly but the suite is red`,
-    });
-    phaseError(
-      "integrate",
-      `[${id}] ${conflict ? `${conflict} conflicts` : "the suite is red"} — handing ${branch} to an agent`,
-    );
-
-    for (let attempt = 1; attempt <= config.agent.integrateAttempts; attempt++) {
-      if (attempt > 1) {
-        phaseError(
-          "integrate",
-          `[${id}] integration of ${branch} unfinished — attempt ${attempt}/${config.agent.integrateAttempts}`,
-        );
-      }
-
-      const result = await integrateWithAgent(sandbox, {
-        name: `integrator-${id}`,
-        rootId: id,
-        rootTitle: title,
-        base: resumeBase,
-        merged,
-        pending,
+  // -------------------------------------------------------------------------
+  // Epic review: only once every child landed; fixes go straight on integration.
+  // -------------------------------------------------------------------------
+  if (childrenDone) {
+    for (let round = 1; round <= MAX_REVIEW_ROUNDS; round++) {
+      console.log(`\n=== Epic review ${round}/${MAX_REVIEW_ROUNDS} ===\n`);
+      const result = await integ.run({
+        name: "epic-reviewer",
+        agent,
+        promptFile: promptFile("epic-review"),
+        promptArgs: { ROOT_ID: root.id, INTEGRATION_BRANCH: integration },
       });
-      if (result === "done") return true;
-      if (result === "blocked") {
-        phaseError(
-          "integrate",
-          `[${id}] the agent reports a semantic conflict on ${branch} — a human call`,
-        );
-        return false;
-      }
+      const review = parseTag(result.stdout, "review", reviewSchema);
+      epicVerdict = review.verdict;
+      epicNotes = review.notes;
+      if (review.verdict === "approve") break;
+      await integ.run({
+        name: "epic-fixer",
+        agent,
+        maxIterations: FIX_ITERATIONS,
+        promptFile: promptFile("fix-review"),
+        promptArgs: {
+          TASK_ID: root.id,
+          BRANCH: integration,
+          NOTES: review.notes,
+        },
+      });
+      pushIntegration();
     }
+  }
+} catch (error) {
+  stopReason = `aborted: ${error}`;
+  console.error(`\nRun aborted: ${error}`);
+}
 
-    return false;
+// ---------------------------------------------------------------------------
+// Summary → PR body, Linear comment on the root, log file
+// ---------------------------------------------------------------------------
+
+const rawRunLog = formatRunLog();
+let summaryText: string | undefined;
+try {
+  const result = await integ.run({
+    name: "summarizer",
+    agent,
+    promptFile: promptFile("summary"),
+    promptArgs: {
+      ROOT_ID: root.id,
+      INTEGRATION_BRANCH: integration,
+      PR_URL: prUrl,
+      EPIC_VERDICT: epicVerdict,
+      RUN_LOG: rawRunLog,
+    },
   });
-
-  // An unfinished integration still ships: a draft PR carrying what landed is
-  // reviewable and fixable, and is the only outcome that does not need someone
-  // to notice the run and start it again.
-  const draft = isDraft(missing, assembled);
-
-  if (draft) {
-    fileIncident({
-      kind: "shipped-incomplete",
-      rootId: id,
-      detail: assembled
-        ? `${missing.map((leaf) => leaf.id).join(", ")} never landed`
-        : `the integrator left ${branch} conflicted or red after ${config.agent.integrateAttempts} attempts`,
-    });
-  }
-
-  await pushBranch(branch);
-
-  const url = await createPullRequest({
-    branch,
-    title: `${id}: ${title}`,
-    body: pullRequestBody(root, worked, missing, assembled),
-    draft,
-  });
-
-  const superseded = await supersedePreviousPrs(id, branch, url);
-  for (const number of superseded) {
-    console.log(`[${id}] closed superseded PR #${number}`);
-  }
-
-  // A draft closes nothing: every leaf that landed was moved to `In Review` by
-  // its own run, and moving the root there would say the feature is done when
-  // it is not.
-  if (!draft) {
-    for (const issue of issuesToClose(root, worked)) {
-      await setState(issue.id, config.linear.reviewState);
-    }
-  }
-
-  return url;
+  summaryText = lastTag(result.stdout, "summary");
+} catch (error) {
+  console.error(`\nSummarizer failed: ${error}`);
+} finally {
+  await integ.close();
 }
 
-// ---------------------------------------------------------------------------
-// Per-root pipeline
-// ---------------------------------------------------------------------------
-
-/**
- * Where this root picks up. An unmerged integration branch from a previous
- * attempt holds everything that already landed; starting from the project's
- * base branch instead would hide it from every agent — which is how the last
- * three issues of an epic came back empty, each reporting that the code they
- * depended on did not exist.
- */
-async function resumeBaseOf(rootId: string): Promise<string> {
-  const { remote } = config.git;
-  await fetchRemote(remote);
-
-  const base = await pickResumeBase(rootId, {
-    baseBranch: BASE_BRANCH,
-    remote,
-    refs: await listRefs(remote),
-    isMergedIntoBase: (ref) => isAncestor(ref, BASE_BRANCH),
-  });
-
-  console.log(
-    base === BASE_BRANCH
-      ? `[${rootId}] starting from ${BASE_BRANCH}`
-      : `[${rootId}] resuming from ${base} — a previous attempt's work`,
-  );
-
-  return base;
-}
-
-async function runRoot(root: Root): Promise<string | null> {
-  const { id } = root.issue;
-
-  for (const leaf of root.skippedLeaves) {
-    const why = isEligible(leaf)
-      ? `blocked by ${leaf.blockers.map((b) => b.id).join(", ")}`
-      : `${leaf.stateName}, not eligible`;
-    console.log(`[${id}] skipping ${leaf.id} — ${why}`);
-  }
-
-  if (root.eligibleLeaves.length === 0) {
-    console.log(
-      `[${id}] 0 eligible issue (${root.skippedLeaves.length} leaf/leaves filtered out). Nothing to do.`,
-    );
-    return null;
-  }
-
-  await trySetState(id, config.linear.inProgressState);
-
-  const resumeBase = await resumeBaseOf(id);
-
-  const deps = {
-    runLeaf: (leaf: Issue, branch: string, base: string) =>
-      runLeaf(leaf, branch, base, id),
-    branchOf: leafBranch,
-    baseFor: (branches: string[]) => waveBaseFor(root, resumeBase, branches),
-    log: (message: string) => console.log(message),
-    logError: (message: string) => console.error(message),
-  };
-
-  const settled = new Map<string, Outcome>();
-  let landedBranches: string[] = [];
-
-  for (let iteration = 1; iteration <= config.agent.retryRounds; iteration++) {
-    const remaining = root.eligibleLeaves.filter(
-      (leaf) => !isSettled(settled.get(leaf.id) ?? "exhausted"),
-    );
-    if (remaining.length === 0) break;
-
-    console.log(
-      `\n[${id}] iteration ${iteration}/${config.agent.retryRounds} — ${remaining.length} issue(s) left`,
-    );
-
-    const settledIds = [...settled]
-      .filter(([, outcome]) => isSettled(outcome))
-      .map(([leafId]) => leafId);
-
-    const waves = await planWaves(root, remaining, settledIds, resumeBase);
-    const before = settledIds.length;
-
-
-    const result = await runWaves(deps, {
-      rootId: id,
-      waves,
-      landedBranches,
-      leafAttempts: config.agent.leafAttempts,
-    });
-
-    for (const [leafId, outcome] of result.outcomes) settled.set(leafId, outcome);
-    landedBranches = result.landedBranches;
-
-    const settledNow = [...settled.values()].filter(isSettled).length;
-    if (settledNow === before) {
-      console.log(`[${id}] no progress this iteration — giving up.`);
-      break;
-    }
-  }
-
-  const missing = root.eligibleLeaves.filter(
-    (leaf) => !isSettled(settled.get(leaf.id) ?? "exhausted"),
-  );
-
-  const worked = root.eligibleLeaves.filter((leaf) =>
-    isSettled(settled.get(leaf.id) ?? "exhausted"),
-  );
-
-  if (missing.length > 0) {
-    console.error(
-      `[${id}] incomplete — ${missing
-        .map((leaf) => `${leaf.id} (${settled.get(leaf.id) ?? "never ran"})`)
-        .join(", ")}.`,
-    );
-
-    // What landed is worth shipping on its own: the next run resumes from the
-    // integration branch, so a draft PR is both the review surface and the base
-    // the missing leaves get re-attempted on.
-    if (landedBranches.length === 0) {
-      console.error(`[${id}] nothing landed either. No branch pushed.`);
-      return null;
-    }
-
-    console.error(`[${id}] shipping what landed as a draft pull request.`);
-    return ship(root, landedBranches, worked, resumeBase, missing);
-  }
-
-  if (landedBranches.length === 0) {
-    console.log(`[${id}] every issue completed without producing commits.`);
-    return null;
-  }
-
-  return ship(root, landedBranches, root.eligibleLeaves, resumeBase, []);
-}
-
-// ---------------------------------------------------------------------------
-// Entry point
-// ---------------------------------------------------------------------------
-
-const startedAt = new Date();
-
-const lock = createLock({ path: join(SANDCASTLE_DIR, "lock") });
-const holder = lock.acquire();
-if (holder) {
-  console.log(
-    `Another run holds the lock (pid ${holder.pid}, since ${holder.startedAt}). Exiting.`,
-  );
-  process.exit(0);
-}
-process.on("exit", () => lock.release());
-
-const pause = journal.activePause(startedAt);
-if (pause) {
-  console.log(`Paused until ${pause.until} — ${pause.reason}. Exiting.`);
-  process.exit(0);
-}
-
-if (process.argv[2] === "clean") {
-  await sweep(true);
-  process.exit(0);
-}
-
-await sweep(false);
-
-const requested = parseArgs();
-const rootIds = requested.length > 0 ? requested : await discoverRootIds();
-
-if (rootIds.length === 0) {
-  console.log("No eligible root issue. Nothing to do.");
-  process.exit(0);
-}
-
-const roots = await Promise.all(rootIds.map(resolveRoot));
-assertNoNesting(roots);
-
-console.log(`Working ${roots.length} feature(s):`);
-for (const root of roots) {
-  console.log(
-    `  ${root.issue.id}: ${root.issue.title} — ${root.eligibleLeaves.length} eligible, ${root.skippedLeaves.length} skipped`,
-  );
-}
-
-const runTimer = setTimeout(
-  () =>
-    runController.abort(
-      new InterruptedError(
-        `run budget of ${config.schedule.runTimeoutMinutes} minutes spent`,
-      ),
-    ),
-  config.schedule.runTimeoutMinutes * MINUTE,
+const summaryPath = `${DIR}/logs/summary-${new Date().toISOString().replace(/[:.]/g, "-")}.md`;
+mkdirSync(`${DIR}/logs`, { recursive: true });
+writeFileSync(
+  summaryPath,
+  summaryText ?? `# Run log (summarizer failed)\n\n${rawRunLog}`,
 );
-runTimer.unref();
 
-type RootReport = { id: string; pullRequest: string | null; outcome: string };
-const reports: RootReport[] = [];
-let interruption: InterruptedError | null = null;
-
-for (const root of roots) {
-  const { id } = root.issue;
-  try {
-    const url = await runRoot(root);
-    reports.push({ id, pullRequest: url, outcome: url ? "shipped" : "nothing" });
-  } catch (cause) {
-    interruption = asInterruption(cause);
-    if (interruption) {
-      reports.push({ id, pullRequest: null, outcome: "interrupted" });
-      break;
-    }
-    reports.push({ id, pullRequest: null, outcome: `failed: ${cause}` });
-  }
+if (summaryText) {
+  run("gh", ["pr", "edit", integration, "--body-file", "-"], summaryText);
+  if (epicVerdict === "approve") ok("gh", ["pr", "ready", integration]);
 }
 
-clearTimeout(runTimer);
-
-if (interruption) {
-  const until =
-    interruption.resumeAfter ??
-    new Date(Date.now() + config.schedule.pauseMinutes * MINUTE);
-  journal.pauseUntil(until, interruption.reason);
-  console.error(
-    `\nInterrupted — ${interruption.reason}. Back after ${until.toISOString()}.`,
-  );
-}
-
-journal.recordRun({
-  startedAt: startedAt.toISOString(),
-  endedAt: new Date().toISOString(),
-  roots: reports,
-  ...(interruption ? { interrupted: interruption.reason } : {}),
-});
-
-console.log("\n=== Summary ===");
-for (const report of reports) {
-  if (report.pullRequest) {
-    console.log(`  ✓ ${report.id}: ${report.pullRequest}`);
-  } else if (report.outcome.startsWith("failed")) {
-    console.error(`  ✗ ${report.id}: ${report.outcome}`);
-  } else {
-    console.log(`  – ${report.id}: ${report.outcome}`);
-  }
-}
-for (const root of roots.slice(reports.length)) {
-  console.log(`  – ${root.issue.id}: not started`);
-}
-
-process.exit(reports.some((r) => r.outcome.startsWith("failed")) ? 1 : 0);
+console.log(`\n=== Run summary ===\n\n${summaryText ?? rawRunLog}\n\nSaved to ${summaryPath}`);
+console.log(`PR (${epicVerdict === "approve" ? "ready for review" : "draft"}): ${prUrl}`);
