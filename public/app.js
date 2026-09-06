@@ -1794,9 +1794,12 @@ window.__sb = {
   },
 
   renameSession: async (id, name) => {
-    await window.api.renameSession(id, name);
+    // `title` is the display title every view reads, so the cached copy has to move with the
+    // rename or the old one keeps winning until the next projects push. The main process resolves
+    // it and hands it back rather than the renderer re-deriving the precedence rule.
+    const { title } = (await window.api.renameSession(id, name)) || {};
     const s = sessionMap.get(id);
-    if (s) s.name = name;
+    if (s) { s.name = name; s.title = title; }
     // Replace the session object in Vue's reactive array via splice — this is the
     // only reliable way to force ProjectGroup.allItems to recompute, because simple
     // property mutation on the nested object is not always detected by Vue's watcher.
@@ -1805,7 +1808,7 @@ window.__sb = {
         if (!p.sessions) continue;
         for (let i = 0; i < p.sessions.length; i++) {
           if (p.sessions[i]?.sessionId === id) {
-            p.sessions.splice(i, 1, { ...p.sessions[i], name });
+            p.sessions.splice(i, 1, { ...p.sessions[i], name, title });
             break outer;
           }
         }

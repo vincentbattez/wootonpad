@@ -34,7 +34,7 @@ const sessionId = computed(() => session.value?.sessionId);
 const sessionName = computed(() => {
   const s = session.value;
   if (!s) return '';
-  return cleanDisplayName(s.name || s.summary || 'Session');
+  return cleanDisplayName(s.title || s.name || s.summary || 'Session');
 });
 
 const aiTitle = computed(() => {

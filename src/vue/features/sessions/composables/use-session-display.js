@@ -10,7 +10,9 @@ export function cleanDisplayName(name) {
 }
 
 export function sessionDisplayName(session) {
-  return cleanDisplayName(session.name || session.summary);
+  // `title` is the resolved display title the Session cache lays down (session-title.js); the
+  // name/summary tail only covers renderer-built synthetic Sessions that never pass the cache.
+  return cleanDisplayName(session.title || session.name || session.summary);
 }
 
 export function sessionTimeStr(session) {
