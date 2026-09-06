@@ -357,9 +357,11 @@ function populateCacheViaWorker() {
         sessionCount += sessions.length;
         upsertCachedSessions(sessions, currentAccountId);
         for (const s of sessions) {
-          // Only JSONL custom-title (genuine user title) promotes to the DB name column.
-          // AI titles must not — see refreshFolder for the rationale.
-          if (s.customTitle) setName(s.sessionId, s.customTitle);
+          // Only JSONL custom-title (genuine user title) promotes to the DB name column,
+          // and only when no manual sidebar rename already exists — a manual rename must
+          // survive the v10 migration re-index. Matches the refreshFolder guard above.
+          // AI titles must not promote — see refreshFolder for the rationale.
+          if (!getMeta(s.sessionId)?.name && s.customTitle) setName(s.sessionId, s.customTitle);
         }
         upsertSearchEntries(sessions.map(s => ({
           id: s.sessionId, type: 'session', folder: s.folder,
