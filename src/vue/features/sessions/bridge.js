@@ -7,9 +7,14 @@ import { applyStoredContext } from './context-gauge.mjs';
 
 export function createSessionsBridge(store) {
   return {
-    // The Session/Project tree and the live PTY sets.
+    // The Session/Project tree and the live PTY sets. Session rows are copied too: the legacy
+    // renderer's dedup() re-uses one object per Session across refreshes and Object.assign()s
+    // the fresh row onto it, so passing it through would hand SessionItem the same prop
+    // identity every time — Vue skips the row, and a running Session's gauge and message count
+    // stay frozen until an unrelated prop (running, active) flips.
     setProjects(projects) {
-      store.projects = applyStoredContext(projects.map(p => ({ ...p })), store.sessionContext);
+      const copies = projects.map(p => ({ ...p, sessions: (p.sessions || []).map(s => ({ ...s })) }));
+      store.projects = applyStoredContext(copies, store.sessionContext);
     },
     setActivePtyIds(ids) { store.activePtyIds = new Set(ids); },
     setActiveSession(id) { store.activeSessionId = id; },
