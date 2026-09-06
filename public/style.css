@@ -2540,7 +2540,7 @@ body { display: flex; flex-direction: column; }
   gap: 1px;
 }
 
-.vsh-ai-title {
+.vsh-first-prompt {
   font-size: 11px;
   color: var(--text-secondary);
   white-space: nowrap;

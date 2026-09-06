@@ -224,3 +224,116 @@ test('skips invalid JSON lines while still reading usage', () => {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- First-prompt sanitisation (VIN-146) ---
+// 35% of Sessions carry no ai-title, so the first prompt IS the title for one Session in three.
+// The preamble filter that already skipped local-command messages widens to the harness tags seen
+// in the corpus, and the retained summary becomes the first useful line rather than a brute
+// 120-char truncation that could cut across newlines or land mid-paste.
+
+const { summariseFirstPrompt } = require('../read-session-file');
+
+test('skips a <command-message> preamble for the summary', () => {
+  const { file, dir } = makeTmpSession([
+    { type: 'user', message: '<command-message>init is analyzing your codebase</command-message>' },
+    { type: 'user', message: 'Real first message' },
+    { type: 'assistant', message: 'Response' },
+  ]);
+  try {
+    assert.equal(readSessionFile(file, 'folder', '/path').summary, 'Real first message');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('skips a <teammate-message> preamble carrying attributes', () => {
+  const { file, dir } = makeTmpSession([
+    { type: 'user', message: '<teammate-message from="alice" id="7">ping</teammate-message>' },
+    { type: 'user', message: 'Actual request' },
+    { type: 'assistant', message: 'Response' },
+  ]);
+  try {
+    assert.equal(readSessionFile(file, 'folder', '/path').summary, 'Actual request');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('skips the remaining harness tags observed in the corpus', () => {
+  for (const noise of [
+    '<command-name>/review</command-name>',
+    '<command-args>--fix</command-args>',
+    '<command-contents>{"x":1}</command-contents>',
+    '<bash-stderr>command not found</bash-stderr>',
+    '<system-reminder>Your context is running low</system-reminder>',
+  ]) {
+    const { file, dir } = makeTmpSession([
+      { type: 'user', message: noise },
+      { type: 'user', message: 'The real one' },
+      { type: 'assistant', message: 'Response' },
+    ]);
+    try {
+      assert.equal(readSessionFile(file, 'folder', '/path').summary, 'The real one', noise);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+});
+
+test('no harness tag survives as a title when every user turn is noise', () => {
+  const { file, dir } = makeTmpSession([
+    { type: 'user', message: '<system-reminder>nothing to see</system-reminder>' },
+    { type: 'assistant', message: 'Response' },
+  ]);
+  try {
+    // No usable prompt at all is the existing "unusable session" case: null, never a tag.
+    assert.equal(readSessionFile(file, 'folder', '/path'), null);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('retains the first useful line rather than truncating across newlines', () => {
+  const { file, dir } = makeTmpSession([
+    { type: 'user', message: 'Fix the login redirect\n\nHere is the stack trace:\n  at foo (a.js:1)' },
+    { type: 'assistant', message: 'Response' },
+  ]);
+  try {
+    assert.equal(readSessionFile(file, 'folder', '/path').summary, 'Fix the login redirect');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a first prompt that is only a paste yields one sane line, not an absurd title', () => {
+  const paste = '\n\n  2026-09-03 07:12:44 ERROR  worker crashed with signal 9\n' +
+    '2026-09-03 07:12:45 ERROR  worker crashed with signal 9\n'.repeat(50);
+  const { file, dir } = makeTmpSession([
+    { type: 'user', message: paste },
+    { type: 'assistant', message: 'Response' },
+  ]);
+  try {
+    const summary = readSessionFile(file, 'folder', '/path').summary;
+    assert.equal(summary, '2026-09-03 07:12:44 ERROR  worker crashed with signal 9');
+    assert.ok(!summary.includes('\n'), 'a title is a single line');
+    assert.ok(summary.length <= 120);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('summariseFirstPrompt caps a long single line at 120 characters', () => {
+  assert.equal(summariseFirstPrompt('x'.repeat(500)).length, 120);
+});
+
+test('summariseFirstPrompt keeps the scheduled-task name', () => {
+  assert.equal(
+    summariseFirstPrompt('<scheduled-task name="Daily Digest">run it</scheduled-task>'),
+    'Scheduled: Daily Digest',
+  );
+});
+
+test('summariseFirstPrompt returns empty for a blank prompt', () => {
+  assert.equal(summariseFirstPrompt('   \n\n  \n'), '');
+  assert.equal(summariseFirstPrompt(''), '');
+});

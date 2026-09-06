@@ -1,6 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { cleanDisplayName, sessionDisplayName, sessionTimeStr } from './use-session-display.js';
+import {
+  cleanDisplayName,
+  sessionDisplayName,
+  sessionHeaderSubtitle,
+  sessionTimeStr,
+} from './use-session-display.js';
 
 // The Session display helpers read the frozen renderer's globals when installed and degrade to a
 // plain value otherwise. These assert both paths, toggling window.* around each case.
@@ -21,6 +26,45 @@ test('cleanDisplayName runs the name through window.cleanDisplayName when presen
 test('sessionDisplayName falls back from name to summary', () => {
   assert.equal(sessionDisplayName({ name: 'A', summary: 'B' }), 'A');
   assert.equal(sessionDisplayName({ summary: 'B' }), 'B');
+});
+
+// VIN-146 — the first prompt moved down one rung: the aiTitle is the title now, and the first
+// prompt takes the terminal header's subtitle slot the aiTitle used to hold.
+
+test('sessionDisplayName shows the resolved title over the first prompt', () => {
+  const s = { title: 'Promote the AI title', name: null, summary: 'First prompt' };
+  assert.equal(sessionDisplayName(s), 'Promote the AI title');
+});
+
+test('sessionHeaderSubtitle is the first prompt', () => {
+  const s = { title: 'Promote the AI title', firstPrompt: 'First prompt' };
+  assert.equal(sessionHeaderSubtitle(s, 'Promote the AI title'), 'First prompt');
+});
+
+test('sessionHeaderSubtitle is masked when it is already the title', () => {
+  // The 35% of Sessions with no aiTitle: their title *is* the sanitised first prompt, and the
+  // header must not print the same string twice.
+  assert.equal(sessionHeaderSubtitle({ firstPrompt: 'First prompt' }, 'First prompt'), null);
+});
+
+test('sessionHeaderSubtitle is absent for a Session with no first prompt', () => {
+  // A Plain Terminal or a Run Terminal: synthetic, no prompt, and its label stays the title.
+  assert.equal(sessionHeaderSubtitle({ summary: 'Terminal', firstPrompt: '' }, 'Terminal'), null);
+  assert.equal(sessionHeaderSubtitle(null, ''), null);
+});
+
+test('sessionHeaderSubtitle survives a rename that hides the first prompt', () => {
+  const s = { name: 'My rename', title: 'My rename', firstPrompt: 'First prompt' };
+  assert.equal(sessionHeaderSubtitle(s, 'My rename'), 'First prompt');
+});
+
+test('sessionHeaderSubtitle runs the first prompt through the installed cleaner', () => {
+  globalThis.window = { cleanDisplayName: (n) => `[${n}]` };
+  try {
+    assert.equal(sessionHeaderSubtitle({ firstPrompt: 'p' }, 'Title'), '[p]');
+  } finally {
+    delete globalThis.window;
+  }
 });
 
 test('sessionTimeStr uses lastActivityTime when available, else the modified date', () => {

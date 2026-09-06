@@ -21,6 +21,26 @@ test('setProjects copies each project into the sessions slice', () => {
   bridge.setProjects([]);
 });
 
+test('setProjects copies each Session row so an in-place legacy update reaches the next render', () => {
+  const bridge = createSidebarBridge(store);
+  // app.js dedup() keeps one object per Session and Object.assign()s fresh rows onto it.
+  const row = { sessionId: 's1', contextUsage: null, messageCount: 1 };
+  const input = [{ projectPath: '/a', sessions: [row] }];
+  bridge.setProjects(input);
+  const first = sessionsStore.projects[0].sessions[0];
+  assert.notEqual(first, row);
+  assert.equal(first.contextUsage, null);
+
+  Object.assign(row, { contextUsage: { inputTokens: 5 }, messageCount: 2 });
+  bridge.setProjects(input);
+  const second = sessionsStore.projects[0].sessions[0];
+  // A new identity per refresh is what makes SessionItem re-render with the fresh row.
+  assert.notEqual(second, first);
+  assert.deepEqual(second.contextUsage, { inputTokens: 5 });
+  assert.equal(second.messageCount, 2);
+  bridge.setProjects([]);
+});
+
 test('setActivePtyIds replaces the running set', () => {
   const bridge = createSidebarBridge(store);
   bridge.setActivePtyIds(['p1', 'p2']);

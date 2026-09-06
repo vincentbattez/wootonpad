@@ -52,7 +52,7 @@ const { mode, danger, chrome, preLaunch, addDirs, seed, toOptions } = useSession
 
 const sessionName = computed(() => {
   const s = request.value?.session;
-  return s ? (s.name || s.aiTitle || s.summary || s.sessionId?.slice(0, 8) || '') : '';
+  return s ? (s.title || s.name || s.summary || s.sessionId?.slice(0, 8) || '') : '';
 });
 
 watch(request, (r) => {

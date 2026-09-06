@@ -2,7 +2,7 @@
   <SessionHeader
     :session="session"
     :session-name="sessionName"
-    :ai-title="aiTitle"
+    :first-prompt="firstPrompt"
     :time-str="timeStr"
     :is-running="isRunning"
     :is-busy="isBusy"
@@ -20,7 +20,7 @@ import { computed } from 'vue';
 import { sb } from '../../../shared/services/sb.js';
 import { sessionsStore, headerStore } from '../store.js';
 import { useProjectAvatar } from '../../../shared/composables/use-avatar.js';
-import { cleanDisplayName, sessionTimeStr } from '../composables/use-session-display.js';
+import { cleanDisplayName, sessionHeaderSubtitle, sessionTimeStr } from '../composables/use-session-display.js';
 import SessionHeader from '../components/SessionHeader.vue';
 
 // The sessions Feature's edge Container for the terminal header: it reads the feature store and
@@ -34,15 +34,13 @@ const sessionId = computed(() => session.value?.sessionId);
 const sessionName = computed(() => {
   const s = session.value;
   if (!s) return '';
-  return cleanDisplayName(s.name || s.summary || 'Session');
+  return cleanDisplayName(s.title || s.name || s.summary || 'Session');
 });
 
-const aiTitle = computed(() => {
-  const s = session.value;
-  if (!s?.aiTitle) return null;
-  const cleaned = cleanDisplayName(s.aiTitle);
-  return cleaned !== sessionName.value ? cleaned : null;
-});
+// The subtitle carries the first prompt (VIN-146): the aiTitle it used to show is now the title
+// itself, one line up. Masked by equality with that title, which covers the Sessions with no
+// aiTitle where the two would be the same string.
+const firstPrompt = computed(() => sessionHeaderSubtitle(session.value, sessionName.value));
 
 const timeStr = computed(() => (session.value ? sessionTimeStr(session.value) : ''));
 
