@@ -102,6 +102,9 @@ const visibleProjects = computed(() => {
     const now = Date.now();
     projects = projects.filter(p => filterSessions(p.sessions, {
       activePtyIds: store.activePtyIds,
+      busySessions: store.sessionBusyState,
+      attentionSessions: store.attentionSessions,
+      responseReadySessions: store.responseReadySessions,
       showStarredOnly: store.showStarredOnly,
       showRunningOnly: store.showRunningOnly,
       showTodayOnly: store.showTodayOnly,

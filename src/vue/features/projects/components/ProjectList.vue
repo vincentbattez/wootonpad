@@ -12,6 +12,15 @@
       v-on="rowListeners"
       @archive-all="(sessions) => $emit('archive-sessions', sessions)"
     />
+    <SessionTerminalItem
+      v-else-if="isTerminalLike(item.session)"
+      :session="item.session"
+      :is-active="activeSessionId === item.session.sessionId"
+      :is-running="activePtyIds.has(item.session.sessionId)"
+      @open="$emit('open', item.session)"
+      @stop="(id) => $emit('stop', id)"
+      @rename="(id, name) => $emit('rename', id, name)"
+    />
     <SessionItem
       v-else
       :session="item.session"
@@ -47,6 +56,15 @@
         :response-ready-sessions="responseReadySessions"
         v-on="rowListeners"
         @archive-all="(sessions) => $emit('archive-sessions', sessions)"
+      />
+      <SessionTerminalItem
+        v-else-if="isTerminalLike(item.session)"
+        :session="item.session"
+        :is-active="activeSessionId === item.session.sessionId"
+        :is-running="activePtyIds.has(item.session.sessionId)"
+        @open="$emit('open', item.session)"
+        @stop="(id) => $emit('stop', id)"
+        @rename="(id, name) => $emit('rename', id, name)"
       />
       <SessionItem
         v-else
@@ -102,7 +120,13 @@
 <script setup>
 import { computed, ref, watchEffect } from 'vue';
 import SessionItem from '../../sessions/components/SessionItem.vue';
+import SessionTerminalItem from '../../sessions/components/SessionTerminalItem.vue';
 import SlugGroup from './SlugGroup.vue';
+
+// A Plain Terminal or a Run Terminal renders on the compact line, not as a full Session row.
+function isTerminalLike(session) {
+  return session.type === 'terminal' || session.type === 'run-terminal';
+}
 
 // The list of a Project's Sessions and Slug groups: the visible run, an older toggle, and this
 // Project's own archive with its own older toggle. The item (SessionItem / SlugGroup) and the list

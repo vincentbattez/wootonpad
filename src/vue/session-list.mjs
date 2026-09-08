@@ -1,16 +1,34 @@
 // Ordering and visibility of a Project's Session list: main list vs archive, shown vs older.
 // Pure: no Vue, no DOM, no I/O. `now` is injected so the age cutoff is testable.
 
+import { sessionStateFor } from './features/sessions/session-state.mjs';
+
 function localDayKey(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
 
+// The "running" filter answers the same question the State Dot does: is this row active? A
+// Session is active when its Session State is `working` or `needsInput` — a live PTY that is
+// merely idle is not (VIN-148). A Terminal has no Session State, so it is kept only when its
+// PTY is alive, so the filter never surprisingly hides an open Terminal.
+function isActiveRow(session, { activePtyIds, busySessions, attentionSessions, responseReadySessions }) {
+  const state = sessionStateFor({
+    type: session.type,
+    done: session.done,
+    isBusy: busySessions.has(session.sessionId),
+    isAttention: attentionSessions.has(session.sessionId) || responseReadySessions.has(session.sessionId),
+  });
+  if (state === 'working' || state === 'needsInput') return true;
+  if (state === null) return activePtyIds.has(session.sessionId);
+  return false;
+}
+
 // Exported so the sidebar's "hide a Project with no surviving Session" rule asks the same
 // question this module does, rather than keeping its own copy of the four filters.
-export function filterSessions(sessions, { activePtyIds = new Set(), searchMatchIds = null, showStarredOnly = false, showRunningOnly = false, showTodayOnly = false, now = 0 } = {}) {
+export function filterSessions(sessions, { activePtyIds = new Set(), busySessions = new Set(), attentionSessions = new Set(), responseReadySessions = new Set(), searchMatchIds = null, showStarredOnly = false, showRunningOnly = false, showTodayOnly = false, now = 0 } = {}) {
   let out = sessions;
   if (showStarredOnly) out = out.filter(s => s.starred);
-  if (showRunningOnly) out = out.filter(s => activePtyIds.has(s.sessionId));
+  if (showRunningOnly) out = out.filter(s => isActiveRow(s, { activePtyIds, busySessions, attentionSessions, responseReadySessions }));
   if (showTodayOnly) {
     const todayKey = localDayKey(new Date(now));
     out = out.filter(s => s.modified && localDayKey(new Date(s.modified)) === todayKey);
@@ -76,6 +94,9 @@ function sortByPriority(items) {
 export function partitionSessionList({
   sessions = [],
   activePtyIds = new Set(),
+  busySessions = new Set(),
+  attentionSessions = new Set(),
+  responseReadySessions = new Set(),
   searchMatchIds = null,
   showStarredOnly = false,
   showRunningOnly = false,
@@ -84,7 +105,7 @@ export function partitionSessionList({
   sessionMaxAgeDays = 3,
   now = 0,
 } = {}) {
-  const filters = { activePtyIds, searchMatchIds, showStarredOnly, showRunningOnly, showTodayOnly, now };
+  const filters = { activePtyIds, busySessions, attentionSessions, responseReadySessions, searchMatchIds, showStarredOnly, showRunningOnly, showTodayOnly, now };
   const kept = filterSessions(sessions, filters);
   const anyFilter = !!(searchMatchIds || showStarredOnly || showRunningOnly || showTodayOnly);
 

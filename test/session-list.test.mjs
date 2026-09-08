@@ -32,11 +32,38 @@ test('the starred filter keeps only starred sessions', () => {
   assert.deepEqual(ids(out.visible), ['a']);
 });
 
-test('the running filter keeps only sessions with a live pty', () => {
-  const a = session({ sessionId: 'a' });
-  const b = session({ sessionId: 'b' });
-  const out = partition({ sessions: [a, b], showRunningOnly: true, activePtyIds: new Set(['b']) });
-  assert.deepEqual(ids(out.visible), ['b']);
+test('the running filter keeps the active Session States (working + needsInput)', () => {
+  const working = session({ sessionId: 'working' });
+  const needs = session({ sessionId: 'needs' });
+  const sleepingWithPty = session({ sessionId: 'sleepingWithPty' });
+  const out = partition({
+    sessions: [working, needs, sleepingWithPty],
+    showRunningOnly: true,
+    // A live PTY on every row: liveness is not a Session State — only work is.
+    activePtyIds: new Set(['working', 'needs', 'sleepingWithPty']),
+    busySessions: new Set(['working']),
+    attentionSessions: new Set(['needs']),
+  });
+  assert.deepEqual(ids(out.visible).sort(), ['needs', 'working']);
+});
+
+test('the running filter drops a done Session with no live signal', () => {
+  const done = session({ sessionId: 'done', done: 1 });
+  const out = partition({ sessions: [done], showRunningOnly: true, activePtyIds: new Set(['done']) });
+  assert.deepEqual(ids(out.visible), []);
+});
+
+test('the running filter treats a response-ready turn as needsInput', () => {
+  const ready = session({ sessionId: 'ready' });
+  const out = partition({ sessions: [ready], showRunningOnly: true, responseReadySessions: new Set(['ready']) });
+  assert.deepEqual(ids(out.visible), ['ready']);
+});
+
+test('the running filter keeps an open Terminal, so it does not vanish surprisingly', () => {
+  const term = session({ sessionId: 'term', type: 'terminal' });
+  const deadTerm = session({ sessionId: 'deadTerm', type: 'terminal' });
+  const out = partition({ sessions: [term, deadTerm], showRunningOnly: true, activePtyIds: new Set(['term']) });
+  assert.deepEqual(ids(out.visible), ['term']);
 });
 
 test('the today filter keeps only sessions modified today', () => {
@@ -263,7 +290,7 @@ test('filterSessions applies the same four filters as the partition', () => {
   assert.deepEqual(filterSessions([a, b], { now: NOW, showStarredOnly: true }).map(s => s.sessionId), ['a']);
   assert.deepEqual(filterSessions([a, b], { now: NOW, showTodayOnly: true }).map(s => s.sessionId), ['a']);
   assert.deepEqual(
-    filterSessions([a, b], { now: NOW, showRunningOnly: true, activePtyIds: new Set(['b']) }).map(s => s.sessionId),
+    filterSessions([a, b], { now: NOW, showRunningOnly: true, busySessions: new Set(['b']) }).map(s => s.sessionId),
     ['b']
   );
   assert.deepEqual(filterSessions([a, b], { now: NOW, searchMatchIds: new Set(['b']) }).map(s => s.sessionId), ['b']);

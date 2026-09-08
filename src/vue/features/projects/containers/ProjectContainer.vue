@@ -222,6 +222,9 @@ function toggle() {
 const partition = computed(() => partitionSessionList({
   sessions: props.project.sessions || [],
   activePtyIds: props.activePtyIds,
+  busySessions: props.sessionBusyState,
+  attentionSessions: props.attentionSessions,
+  responseReadySessions: props.responseReadySessions,
   searchMatchIds: props.searchMatchIds,
   showStarredOnly: props.showStarredOnly,
   showRunningOnly: props.showRunningOnly,
