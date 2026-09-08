@@ -53,6 +53,36 @@ _Avoid_: Dev server, run tab, console
 The command a Run Terminal starts on. User-authored, global with a per-Project override, empty by default — WootonPad never guesses it from a manifest. Sent to the shell verbatim, exactly as the user would type it.
 _Avoid_: Dev command, start script
 
+### Session state
+
+**Session State**:
+What a Session is doing right now, as one of four mutually exclusive values — `sleeping`, `needsInput`, `working`, `done`. It answers a single question: does this line still want something from me? A Plain Terminal or a Run Terminal has no Session State.
+_Avoid_: Status, activity, phase
+
+**Sleeping**:
+A Session State: nothing is in progress and nobody is waiting. The default, and where a Session spends most of its life.
+_Avoid_: Idle, inactive, dormant
+
+**Needs Input**:
+A Session State: the human holds the ball — the CLI is blocked on an approval, or it has finished a turn and the subject is not closed. The work is unfinished either way.
+_Avoid_: Blocked, waiting, attention
+
+**Working**:
+A Session State: the CLI or one of its subagents is producing something. Nothing is expected from the human.
+_Avoid_: Busy, running, active
+
+**Done**:
+A Session State: the subject is closed — no further human input is needed and the work is finished. The only State a machine cannot observe, so it is declared, never inferred; and it is lifted the moment the Session works again.
+_Avoid_: Finished, completed, closed, resolved
+
+**State Dot**:
+The ring at the left of a Session row that renders its Session State, and only that. It never reports whether a shell is alive.
+_Avoid_: Status dot, indicator, badge
+
+**Unread**:
+A Session whose latest output the human has not yet looked at. Orthogonal to Session State — reading is not working — and carried by the row's title, never by the State Dot.
+_Avoid_: Response-ready, new, notification
+
 ### Git
 
 **Git Snapshot**:
