@@ -71,6 +71,7 @@ const { resolveRunTerminal, RUN_TERMINAL_TYPE } = require('./run-command');
 const { startScheduler } = require('./schedule-runner');
 const { encodeProjectPath } = require('./encode-project-path');
 const { readSessionContextTail } = require('./read-session-file');
+const { createContextLivePush } = require('./context-live-push');
 
 
 
@@ -2438,6 +2439,20 @@ const { detectSessionTransitions } = sessionTransitions;
 let projectsWatcher = null;
 let projectsPoller = null;
 
+// VIN-149: the live context relay. It hangs off the write signal the recursive fs.watch
+// already sees, so no new watcher and no per-Session timer. On each .jsonl change it throttles
+// (≈2.5s/Session), reads only the file's tail and pushes `session-context` — the same event
+// the busy→idle path uses — so the gauge moves during a running turn, for every Session whose
+// file is written, in-app or not. Reuses one instance so the throttle state persists.
+const contextLivePush = createContextLivePush({
+  send: (sessionId, usage, model) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('session-context', sessionId, usage, model);
+    }
+  },
+  projectsDir: () => activeProjectsDir(),
+});
+
 // How often the polling fallback sweeps the projects directory. Only used when
 // a recursive fs.watch cannot be trusted — see startProjectsWatcher.
 const PROJECTS_POLL_MS = 5000;
@@ -2543,6 +2558,11 @@ function startProjectsWatcher() {
       // Only care about .jsonl changes or top-level folder add/remove
       const basename = parts[parts.length - 1];
       if (parts.length !== 1 && !basename.endsWith('.jsonl')) return;
+
+      // Live gauge (VIN-149): push this write's tail context straight away, throttled, before
+      // the debounced re-index. The re-index still runs (it carries the value at rest into the
+      // cache); this only makes the pixel move within the running turn instead of one turn late.
+      if (basename.endsWith('.jsonl')) contextLivePush.onFileChanged(folder, basename);
 
       queueFolder(folder);
     });
