@@ -134,24 +134,61 @@ test('a non-.jsonl change is ignored', () => {
 });
 
 // onFolderChanged is the poller fallback's entry point (WSL, and any account whose fs.watch
-// failed): folder-mtime granular, so it must find the changed file itself.
+// failed): folder-mtime granular, so it must find the changed file(s) itself.
 
-test('a changed folder pushes its most-recently-modified .jsonl', () => {
+test('a changed folder pushes every .jsonl modified since the prior sweep', () => {
   const dir = makeProjectsDir();
-  writeSession(dir, 'proj', 'stale', [assistantEntry({ input_tokens: 1 }, 'm')]);
-  writeSession(dir, 'proj', 'active', [assistantEntry({ input_tokens: 300 }, 'm')]);
-  // Make 'active' unambiguously the newest, regardless of write order's mtime granularity.
-  const now = Date.now();
-  fs.utimesSync(path.join(dir, 'proj', 'stale.jsonl'), new Date(now - 10000), new Date(now - 10000));
-  fs.utimesSync(path.join(dir, 'proj', 'active.jsonl'), new Date(now), new Date(now));
+  writeSession(dir, 'proj', 's1', [assistantEntry({ input_tokens: 1 }, 'm')]);
+  writeSession(dir, 'proj', 's2', [assistantEntry({ input_tokens: 2 }, 'm')]);
+  const base = Date.now();
+  fs.utimesSync(path.join(dir, 'proj', 's1.jsonl'), new Date(base), new Date(base));
+  fs.utimesSync(path.join(dir, 'proj', 's2.jsonl'), new Date(base), new Date(base));
   const { send, events } = collector();
-  const live = createContextLivePush({ send, projectsDir: () => dir, now: () => 1000 });
+  let now = 1000;
+  const live = createContextLivePush({ send, projectsDir: () => dir, now: () => now, intervalMs: 2500 });
+
+  // First sweep has no baseline: both files are pushed and their mtimes recorded.
+  live.onFolderChanged('proj');
+  assert.deepEqual(events.map((e) => e.id).sort(), ['s1', 's2']);
+
+  // Two Sessions run in parallel and both append this turn. The poller sees only the folder,
+  // but every file that advanced since the prior sweep must move — not just whichever is newest.
+  events.length = 0;
+  now += 2500;
+  writeSession(dir, 'proj', 's1', [assistantEntry({ input_tokens: 100 }, 'm')]);
+  writeSession(dir, 'proj', 's2', [assistantEntry({ input_tokens: 300 }, 'm')]);
+  fs.utimesSync(path.join(dir, 'proj', 's1.jsonl'), new Date(base + 5000), new Date(base + 5000));
+  fs.utimesSync(path.join(dir, 'proj', 's2.jsonl'), new Date(base + 10000), new Date(base + 10000));
 
   live.onFolderChanged('proj');
 
-  assert.equal(events.length, 1);
-  assert.equal(events[0].id, 'active');
-  assert.equal(events[0].usage.inputTokens, 300);
+  assert.deepEqual(events.map((e) => e.id).sort(), ['s1', 's2']);
+  assert.equal(events.find((e) => e.id === 's1').usage.inputTokens, 100);
+  assert.equal(events.find((e) => e.id === 's2').usage.inputTokens, 300);
+});
+
+test('a changed folder leaves an untouched .jsonl alone on the next sweep', () => {
+  const dir = makeProjectsDir();
+  writeSession(dir, 'proj', 's1', [assistantEntry({ input_tokens: 1 }, 'm')]);
+  writeSession(dir, 'proj', 's2', [assistantEntry({ input_tokens: 2 }, 'm')]);
+  const base = Date.now();
+  fs.utimesSync(path.join(dir, 'proj', 's1.jsonl'), new Date(base), new Date(base));
+  fs.utimesSync(path.join(dir, 'proj', 's2.jsonl'), new Date(base), new Date(base));
+  const { send, events } = collector();
+  let now = 1000;
+  const live = createContextLivePush({ send, projectsDir: () => dir, now: () => now, intervalMs: 2500 });
+
+  live.onFolderChanged('proj'); // baseline
+  events.length = 0;
+
+  // Only s2 advances; s1 is unchanged, so its mtime matches the baseline and it is not pushed.
+  now += 2500;
+  writeSession(dir, 'proj', 's2', [assistantEntry({ input_tokens: 300 }, 'm')]);
+  fs.utimesSync(path.join(dir, 'proj', 's2.jsonl'), new Date(base + 10000), new Date(base + 10000));
+
+  live.onFolderChanged('proj');
+
+  assert.deepEqual(events.map((e) => e.id), ['s2']);
 });
 
 test('a changed folder with no .jsonl pushes nothing', () => {

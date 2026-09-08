@@ -46,12 +46,19 @@ function createContextLivePush({
     if (ctx) send(sessionId, ctx.contextUsage, ctx.contextModel);
   }
 
+  // Prior-sweep mtimes per folder, so onFolderChanged can name every .jsonl touched since it
+  // last looked — not just the single newest. Claude Code's projects dir is one folder per
+  // project, so two Sessions running in parallel in the same project append to two files in the
+  // same folder; a "newest only" push would move whichever file won the mtime race and leave the
+  // other frozen until the next sweep it happened to win. Keyed by folder path.
+  const priorMtimes = new Map();
+
   // The polling fallback (WSL-backed accounts, and any account whose fs.watch failed — see
   // startProjectsWatcher in main.js) is folder-mtime granular: it knows a folder changed but not
-  // which file. Enumerate that folder's .jsonl files and push the most-recently-modified one —
-  // on a running turn that is the Session being appended to. Pushing only the newest keeps the
-  // per-sweep cost over the 9p share to a single tail read rather than one per Session, and the
-  // throttle still spaces repeats. Without this the gauge never moves live on those platforms.
+  // which file. Enumerate the folder's .jsonl files and push every one modified since the prior
+  // sweep — so all Sessions running in parallel in the same project move live, not just the one
+  // that is newest at sweep time. The per-Session throttle collapses the resulting bursts, so no
+  // extra IPC pressure follows; without this the gauge never moves live on those platforms.
   function onFolderChanged(folder) {
     const folderPath = path.join(projectsDir(), folder);
     let entries;
@@ -60,8 +67,9 @@ function createContextLivePush({
     } catch {
       return;
     }
-    let newest = null;
-    let newestMtime = -Infinity;
+    const prior = priorMtimes.get(folder);
+    const current = new Map();
+    const changed = [];
     for (const entry of entries) {
       if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
       let mtime;
@@ -70,12 +78,14 @@ function createContextLivePush({
       } catch {
         continue;
       }
-      if (mtime > newestMtime) {
-        newestMtime = mtime;
-        newest = entry.name;
-      }
+      current.set(entry.name, mtime);
+      // No prior snapshot (first sight of this folder) treats every file as changed: a change
+      // did fire to reach here, we just have no baseline to name it, and the throttle bounds
+      // the one-time burst. After that only files whose mtime actually advanced are pushed.
+      if (!prior || prior.get(entry.name) !== mtime) changed.push(entry.name);
     }
-    if (newest) onFileChanged(folder, newest);
+    priorMtimes.set(folder, current);
+    for (const name of changed) onFileChanged(folder, name);
   }
 
   return { onFileChanged, onFolderChanged };
