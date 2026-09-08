@@ -38,10 +38,10 @@ export function sessionStateFor({ type, done, isBusy, isAttention } = {}) {
 
 // The State Dot's single class. One class per state, so the stylesheet arbitrates nothing.
 const DOT_CLASSES = {
-  working: 'session-status-dot--working',
-  needsInput: 'session-status-dot--needs-input',
-  done: 'session-status-dot--done',
-  sleeping: 'session-status-dot--sleeping',
+  working: 'session-state-dot--working',
+  needsInput: 'session-state-dot--needs-input',
+  done: 'session-state-dot--done',
+  sleeping: 'session-state-dot--sleeping',
 };
 
 export function stateDotClass(state) {

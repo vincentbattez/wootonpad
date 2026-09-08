@@ -36,11 +36,11 @@ test('setActivePtyIds replaces the running set', () => {
   assert.deepEqual([...store.activePtyIds], ['p1', 'p2']);
 });
 
-test('setResponseReady marks ready and clears busy in one move', () => {
+test('setUnread marks the row unread and clears busy in one move', () => {
   const store = makeStore();
   const bridge = createSessionsBridge(store);
   bridge.setBusy('s1', true);
-  bridge.setResponseReady('s1');
+  bridge.setUnread('s1');
   assert.equal(store.unreadSessions.has('s1'), true);
   assert.equal(store.sessionBusyState.has('s1'), false);
 });
@@ -49,7 +49,7 @@ test('clearNotifications clears attention and unread together', () => {
   const store = makeStore();
   const bridge = createSessionsBridge(store);
   bridge.addAttention('s2');
-  bridge.setResponseReady('s2');
+  bridge.setUnread('s2');
   bridge.clearNotifications('s2');
   assert.equal(store.attentionSessions.has('s2'), false);
   assert.equal(store.unreadSessions.has('s2'), false);

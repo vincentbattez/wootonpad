@@ -56,10 +56,10 @@ test('setBusy adds and removes from the busy map', () => {
   assert.equal(sessionsStore.sessionBusyState.has('s1'), false);
 });
 
-test('setResponseReady marks ready and clears busy', () => {
+test('setUnread marks the row unread and clears busy', () => {
   const bridge = createSidebarBridge(store);
   bridge.setBusy('s3', true);
-  bridge.setResponseReady('s3');
+  bridge.setUnread('s3');
   assert.equal(sessionsStore.unreadSessions.has('s3'), true);
   assert.equal(sessionsStore.sessionBusyState.has('s3'), false);
   bridge.clearNotifications('s3');
@@ -68,7 +68,7 @@ test('setResponseReady marks ready and clears busy', () => {
 test('clearNotifications clears attention and unread', () => {
   const bridge = createSidebarBridge(store);
   bridge.addAttention('s4');
-  bridge.setResponseReady('s4');
+  bridge.setUnread('s4');
   bridge.clearNotifications('s4');
   assert.equal(sessionsStore.attentionSessions.has('s4'), false);
   assert.equal(sessionsStore.unreadSessions.has('s4'), false);

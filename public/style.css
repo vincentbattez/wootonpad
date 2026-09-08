@@ -1801,7 +1801,7 @@ body { display: flex; flex-direction: column; }
   flex-wrap: nowrap;
 }
 
-.session-item--row:not(.compact) .session-status-dot {
+.session-item--row:not(.compact) .session-state-dot {
   margin-top: 0;
 }
 
@@ -1846,7 +1846,7 @@ body { display: flex; flex-direction: column; }
 /* Renders the Session State and nothing else (VIN-148). Exactly one modifier class is ever
    set on it, computed upstream in session-state.mjs — no :not() cascade, no !important, and
    no report on whether a shell happens to be alive. */
-.session-status-dot {
+.session-state-dot {
   width: 14px;
   height: 14px;
   box-sizing: border-box;
@@ -1869,20 +1869,20 @@ body { display: flex; flex-direction: column; }
 }
 
 /* sleeping — nothing in progress, nobody waiting: the neutral empty ring, the base rule. */
-.session-status-dot--sleeping {
+.session-state-dot--sleeping {
   border-color: var(--neutral-a6);
 }
 
 /* needsInput — the ball is on the human's side: a dashed amber ring, still empty because
    nothing is being produced. */
-.session-status-dot--needs-input {
+.session-state-dot--needs-input {
   border-color: var(--amber-9);
   border-style: dashed;
 }
 
 /* working — the CLI is producing something: an empty blue ring that breathes. One animation
    for the state, not two. */
-.session-status-dot--working {
+.session-state-dot--working {
   border-color: var(--blue-9);
   animation: breath-dot 2s ease-in-out infinite;
 }
@@ -1894,7 +1894,7 @@ body { display: flex; flex-direction: column; }
 
 /* done — the subject is closed: a solid green disc. padding: 0 lets the background fill the
    whole ring rather than the 2px inner dot the padded base leaves. */
-.session-status-dot--done {
+.session-state-dot--done {
   border-color: var(--green-500);
   background: var(--green-500);
   padding: 0;
@@ -2091,7 +2091,7 @@ body { display: flex; flex-direction: column; }
   align-items: center;
 }
 
-.session-item.compact .session-status-dot,
+.session-item.compact .session-state-dot,
 .session-item.compact .session-subtitle {
   display: none;
 }
@@ -4873,9 +4873,6 @@ body { display: flex; flex-direction: column; }
 }
 
 /* ---- Terminal row: one line, a badge and its own two actions (VIN-148) ---- */
-/* No date, no message count, no context gauge and no State Dot — a Terminal has no .jsonl
-   behind it. Its liveness is carried by the Stop button, which is the only thing that ever
-   reported it. */
 .session-item.terminal-item .session-row {
   height: 34px;
   box-sizing: border-box;
