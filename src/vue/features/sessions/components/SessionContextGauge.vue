@@ -18,12 +18,16 @@
       />
       <span class="session-context-label">{{ label }}</span>
     </template>
-    <SbMeter
-      v-else
-      class="session-context-meter session-context-meter--empty"
-      :value="0"
-      :max="windowSize"
-    />
+    <template v-else>
+      <SbMeter
+        class="session-context-meter session-context-meter--empty"
+        :value="0"
+        :max="windowSize"
+      />
+      <!-- The label's slot is reserved even while measuring, so the first value's arrival
+           fills it rather than widening the row and shifting the line (VIN-149). -->
+      <span class="session-context-label" aria-hidden="true"></span>
+    </template>
   </div>
 </template>
 

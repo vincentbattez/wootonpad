@@ -27,6 +27,13 @@ function createContextPushThrottle(intervalMs = DEFAULT_PUSH_INTERVAL_MS) {
           toPush.push(id);
         }
       }
+      // Evict Sessions idle for a full interval so the Map tracks only recently-written
+      // Sessions, not every id seen for the singleton's lifetime. Behaviour-preserving: the
+      // branch above treats an absent id and a stale one alike (both push on next sight), so a
+      // stale entry carries no state worth keeping.
+      for (const [id, last] of lastPushed) {
+        if (now - last >= intervalMs) lastPushed.delete(id);
+      }
       return toPush;
     },
   };

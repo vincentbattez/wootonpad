@@ -23,7 +23,11 @@ function writeSession(dir, folder, sessionId, entries) {
   fs.writeFileSync(path.join(folderPath, sessionId + '.jsonl'), body);
 }
 
-function assistantEntry(model, usage) {
+// Usage first, model second — the same argument order as e2e/app-fixture.js's assistantMessage,
+// so the two assistant-jsonl builders cannot be confused. The shapes differ on purpose (this
+// one is a full jsonl entry with a type wrapper; the fixture's is the inner message object),
+// so they stay two builders rather than one shared helper.
+function assistantEntry(usage, model) {
   return { type: 'assistant', message: { role: 'assistant', model, usage } };
 }
 
@@ -36,7 +40,7 @@ test('a .jsonl write pushes the tail context on the file\'s session key', () => 
   const dir = makeProjectsDir();
   writeSession(dir, 'proj', 's1', [
     { type: 'user', message: { role: 'user', content: 'hi' } },
-    assistantEntry('claude-opus-4-1', { input_tokens: 100, cache_read_input_tokens: 50, output_tokens: 10 }),
+    assistantEntry({ input_tokens: 100, cache_read_input_tokens: 50, output_tokens: 10 }, 'claude-opus-4-1'),
   ]);
   const { send, events } = collector();
   const live = createContextLivePush({ send, projectsDir: () => dir, now: () => 1000 });
@@ -53,7 +57,7 @@ test('a .jsonl write pushes the tail context on the file\'s session key', () => 
 
 test('a burst of writes on one session collapses to a single push', () => {
   const dir = makeProjectsDir();
-  writeSession(dir, 'proj', 's1', [assistantEntry('m', { input_tokens: 1 })]);
+  writeSession(dir, 'proj', 's1', [assistantEntry({ input_tokens: 1 }, 'm')]);
   const { send, events } = collector();
   let now = 1000;
   const live = createContextLivePush({ send, projectsDir: () => dir, now: () => now });
@@ -69,7 +73,7 @@ test('a burst of writes on one session collapses to a single push', () => {
 
 test('once the interval has elapsed the newer value pushes', () => {
   const dir = makeProjectsDir();
-  writeSession(dir, 'proj', 's1', [assistantEntry('m', { input_tokens: 100 })]);
+  writeSession(dir, 'proj', 's1', [assistantEntry({ input_tokens: 100 }, 'm')]);
   const { send, events } = collector();
   let now = 1000;
   const live = createContextLivePush({ send, projectsDir: () => dir, now: () => now, intervalMs: 2500 });
@@ -77,8 +81,8 @@ test('once the interval has elapsed the newer value pushes', () => {
   live.onFileChanged('proj', 's1.jsonl');
   // The turn writes a second, larger assistant entry.
   writeSession(dir, 'proj', 's1', [
-    assistantEntry('m', { input_tokens: 100 }),
-    assistantEntry('m', { input_tokens: 300 }),
+    assistantEntry({ input_tokens: 100 }, 'm'),
+    assistantEntry({ input_tokens: 300 }, 'm'),
   ]);
   now += 2500;
   live.onFileChanged('proj', 's1.jsonl');
@@ -89,8 +93,8 @@ test('once the interval has elapsed the newer value pushes', () => {
 
 test('several sessions writing together each push on their own key', () => {
   const dir = makeProjectsDir();
-  writeSession(dir, 'proj', 's1', [assistantEntry('m', { input_tokens: 1 })]);
-  writeSession(dir, 'proj', 's2', [assistantEntry('m', { input_tokens: 2 })]);
+  writeSession(dir, 'proj', 's1', [assistantEntry({ input_tokens: 1 }, 'm')]);
+  writeSession(dir, 'proj', 's2', [assistantEntry({ input_tokens: 2 }, 'm')]);
   const { send, events } = collector();
   const live = createContextLivePush({ send, projectsDir: () => dir, now: () => 1000 });
 
