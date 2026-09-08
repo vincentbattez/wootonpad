@@ -27,7 +27,7 @@
             compact
             :usage="session.contextUsage"
             :model="session.contextModel"
-            :working="isBusy"
+            :working="isBusy && !isTerminalLike"
           />
         </div>
       </div>

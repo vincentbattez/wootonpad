@@ -11,10 +11,18 @@ const { createContextLivePush } = require('../context-live-push');
 // re-parsing the whole file — with the throttle spacing a burst. `now` is injected so the
 // cadence is tested without waiting.
 
+// Track every temp dir so the whole suite cleans up after itself instead of leaking a
+// mkdtemp dir per test into os.tmpdir().
+const tempDirs = [];
 function makeProjectsDir() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vin149-live-'));
+  tempDirs.push(dir);
   return dir;
 }
+
+test.after(() => {
+  for (const dir of tempDirs) fs.rmSync(dir, { recursive: true, force: true });
+});
 
 function writeSession(dir, folder, sessionId, entries) {
   const folderPath = path.join(dir, folder);

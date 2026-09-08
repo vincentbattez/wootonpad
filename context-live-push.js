@@ -18,6 +18,11 @@ function createContextLivePush({
   now = Date.now,
   intervalMs,
 } = {}) {
+  // `send` and `projectsDir` have no safe default — an undefined `send` no-ops the whole relay
+  // and an undefined `projectsDir` throws deep in path.join on the first write. Fail loud at
+  // construction instead of building a silently-broken push (CODING_STANDARDS, optional params).
+  if (typeof send !== 'function') throw new TypeError('createContextLivePush: send is required');
+  if (typeof projectsDir !== 'function') throw new TypeError('createContextLivePush: projectsDir is required');
   const throttle = createContextPushThrottle(intervalMs);
 
   // `folder` is a projects-dir subfolder, `filename` the changed file's basename. The
@@ -29,6 +34,10 @@ function createContextLivePush({
     const sessionId = filename.slice(0, -'.jsonl'.length);
     const due = throttle.select([sessionId], now());
     if (!due.length) return;
+    // Claude Code's projects dir is flat — one folder of .jsonl files per project — so the path
+    // rebuilds as folder/sessionId.jsonl. A deeper watch path (nested subfolders) would rebuild a
+    // wrong path here and readTail would return null; the push then safely no-ops rather than
+    // pushing a bad value. Not reachable with today's layout; kept a silent safe-fail on purpose.
     const filePath = path.join(projectsDir(), folder, sessionId + '.jsonl');
     const ctx = readTail(filePath);
     // No assistant usage yet (a just-started Session) pushes nothing — the row shows the
