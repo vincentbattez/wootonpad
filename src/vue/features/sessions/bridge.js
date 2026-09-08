@@ -23,13 +23,22 @@ export function createSessionsBridge(store) {
       else store.sessionBusyState.delete(sessionId);
     },
     addAttention(sessionId) { store.attentionSessions.add(sessionId); },
-    setResponseReady(sessionId) {
-      store.responseReadySessions.add(sessionId);
+    // The turn ended: the ball is in the human's court whether or not the Session is on
+    // screen. Lifted by the Session going busy again, or by a declared `done`.
+    setNeedsInput(sessionId) { store.needsInputSessions.add(sessionId); },
+    clearNeedsInput(sessionId) { store.needsInputSessions.delete(sessionId); },
+    // A turn ended off-focus: the title reads Unread, and the row's Session State reads
+    // needsInput until the human takes the ball back.
+    setUnread(sessionId) {
+      store.unreadSessions.add(sessionId);
       store.sessionBusyState.delete(sessionId);
     },
+    // Opening a Session clears what is a *reading* state — the attention badge and the Unread
+    // accent. It deliberately leaves needsInput alone: looking at an answer is not replying
+    // to it, and the subject stays open until the Session works again or is declared done.
     clearNotifications(sessionId) {
       store.attentionSessions.delete(sessionId);
-      store.responseReadySessions.delete(sessionId);
+      store.unreadSessions.delete(sessionId);
     },
 
     // The active Session's terminal-header context.

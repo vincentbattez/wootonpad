@@ -42,7 +42,8 @@ db.exec(`
     sessionId TEXT PRIMARY KEY,
     name TEXT,
     starred INTEGER DEFAULT 0,
-    archived INTEGER DEFAULT 0
+    archived INTEGER DEFAULT 0,
+    done INTEGER DEFAULT 0
   )
 `);
 
@@ -206,6 +207,13 @@ const migrations = [
     try { db.exec('DROP TABLE IF EXISTS search_fts'); } catch {}
     searchFtsRecreated = true;
   },
+  // v11: Session State (VIN-148). `done` is user-declared data, never inferred (ADR 0015), so it
+  // sits in session_meta beside starred and archived rather than in the cache. Purely additive:
+  // unlike the session_cache migrations above, this one must NOT delete a row — session_meta
+  // holds the pins, the archives and the manual renames, and a purge here would lose them.
+  (db) => {
+    try { db.exec('ALTER TABLE session_meta ADD COLUMN done INTEGER DEFAULT 0'); } catch {}
+  },
 ];
 
 const currentDbVersion = (() => {
@@ -254,6 +262,10 @@ const stmts = {
   upsertArchived: db.prepare(`
     INSERT INTO session_meta (sessionId, archived) VALUES (?, ?)
     ON CONFLICT(sessionId) DO UPDATE SET archived = excluded.archived
+  `),
+  upsertDone: db.prepare(`
+    INSERT INTO session_meta (sessionId, done) VALUES (?, ?)
+    ON CONFLICT(sessionId) DO UPDATE SET done = excluded.done
   `),
   // Session cache statements
   cacheCountByAccount: db.prepare("SELECT COUNT(*) as cnt FROM session_cache WHERE accountId = ?"),
@@ -337,6 +349,18 @@ function toggleStar(sessionId) {
 
 function setArchived(sessionId, archived) {
   stmts.upsertArchived.run(sessionId, archived ? 1 : 0);
+}
+
+// `done` is declared, never inferred (ADR 0015): the human from the row, or the agent through
+// the MCP bridge. Written here, and lifted here when the Session goes busy again.
+function setDone(sessionId, done) {
+  stmts.upsertDone.run(sessionId, done ? 1 : 0);
+  return done ? 1 : 0;
+}
+
+function toggleDone(sessionId) {
+  const row = stmts.get.get(sessionId);
+  return setDone(sessionId, !row?.done);
 }
 
 // --- Session cache functions ---
@@ -729,7 +753,7 @@ function closeDb() {
 }
 
 module.exports = {
-  getMeta, getAllMeta, setName, toggleStar, setArchived,
+  getMeta, getAllMeta, setName, toggleStar, setArchived, setDone, toggleDone,
   isCachePopulated, getAllCached, getCachedByFolder, getCachedFolder, getCachedSession, upsertCachedSessions,
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,

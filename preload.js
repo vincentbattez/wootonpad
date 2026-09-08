@@ -33,6 +33,7 @@ contextBridge.exposeInMainWorld('api', {
   toggleStar: (id) => ipcRenderer.invoke('toggle-star', id),
   renameSession: (id, name) => ipcRenderer.invoke('rename-session', id, name),
   archiveSession: (id, archived) => ipcRenderer.invoke('archive-session', id, archived),
+  toggleSessionDone: (id) => ipcRenderer.invoke('toggle-session-done', id),
   openTerminal: (id, projectPath, isNew, sessionOptions) => ipcRenderer.invoke('open-terminal', id, projectPath, isNew, sessionOptions),
   search: (type, query, titleOnly) => ipcRenderer.invoke('search', type, query, titleOnly),
   readSessionJsonl: (sessionId) => ipcRenderer.invoke('read-session-jsonl', sessionId),
@@ -121,6 +122,11 @@ contextBridge.exposeInMainWorld('api', {
   },
   onSessionContext: (callback) => {
     ipcRenderer.on('session-context', (_event, sessionId, usage, model) => callback(sessionId, usage, model));
+  },
+  // `done` written anywhere but the row: the MCP tool, or the automatic lift when the Session
+  // goes busy again (ADR 0015).
+  onSessionDone: (callback) => {
+    ipcRenderer.on('session-done', (_event, sessionId, done) => callback(sessionId, done));
   },
   onSessionForked: (callback) => {
     ipcRenderer.on('session-forked', (_event, oldId, newId) => callback(oldId, newId));

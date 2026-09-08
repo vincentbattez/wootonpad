@@ -8,9 +8,18 @@
       :active-session-id="activeSessionId"
       :session-busy-state="sessionBusyState"
       :attention-sessions="attentionSessions"
-      :response-ready-sessions="responseReadySessions"
+      :needs-input-sessions="needsInputSessions"
+      :unread-sessions="unreadSessions"
       v-on="rowListeners"
       @archive-all="(sessions) => $emit('archive-sessions', sessions)"
+    />
+    <SessionTerminalItem
+      v-else-if="isTerminalLike(item.session)"
+      :session="item.session"
+      :is-active="activeSessionId === item.session.sessionId"
+      :is-running="activePtyIds.has(item.session.sessionId)"
+      @open="$emit('open', item.session)"
+      v-on="terminalListeners"
     />
     <SessionItem
       v-else
@@ -19,7 +28,8 @@
       :is-running="activePtyIds.has(item.session.sessionId)"
       :is-busy="sessionBusyState.get(item.session.sessionId) || false"
       :is-attention="attentionSessions.has(item.session.sessionId)"
-      :is-response-ready="responseReadySessions.has(item.session.sessionId)"
+      :is-needs-input="needsInputSessions.has(item.session.sessionId)"
+      :is-unread="unreadSessions.has(item.session.sessionId)"
       @open="$emit('open', item.session)"
       v-on="itemListeners"
     />
@@ -44,9 +54,18 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
-        :response-ready-sessions="responseReadySessions"
+      :needs-input-sessions="needsInputSessions"
+        :unread-sessions="unreadSessions"
         v-on="rowListeners"
         @archive-all="(sessions) => $emit('archive-sessions', sessions)"
+      />
+      <SessionTerminalItem
+        v-else-if="isTerminalLike(item.session)"
+        :session="item.session"
+        :is-active="activeSessionId === item.session.sessionId"
+        :is-running="activePtyIds.has(item.session.sessionId)"
+        @open="$emit('open', item.session)"
+        v-on="terminalListeners"
       />
       <SessionItem
         v-else
@@ -55,14 +74,15 @@
         :is-running="activePtyIds.has(item.session.sessionId)"
         :is-busy="sessionBusyState.get(item.session.sessionId) || false"
         :is-attention="attentionSessions.has(item.session.sessionId)"
-        :is-response-ready="responseReadySessions.has(item.session.sessionId)"
+        :is-needs-input="needsInputSessions.has(item.session.sessionId)"
+        :is-unread="unreadSessions.has(item.session.sessionId)"
         @open="$emit('open', item.session)"
         v-on="itemListeners"
       />
     </template>
   </template>
 
-  <!-- This Project's archive: revealed here and nowhere else -->
+  <!-- This Project's archive: revealed here and nowhere else. A Terminal is never archived. -->
   <div
     v-if="archivedCount > 0"
     class="sessions-more-toggle sessions-archive-toggle"
@@ -82,7 +102,8 @@
       :is-running="activePtyIds.has(item.session.sessionId)"
       :is-busy="sessionBusyState.get(item.session.sessionId) || false"
       :is-attention="attentionSessions.has(item.session.sessionId)"
-      :is-response-ready="responseReadySessions.has(item.session.sessionId)"
+      :is-needs-input="needsInputSessions.has(item.session.sessionId)"
+      :is-unread="unreadSessions.has(item.session.sessionId)"
       @open="$emit('open', item.session)"
       @archive="$emit('archive', item.session.sessionId)"
       @rename="(id, name) => $emit('rename', id, name)"
@@ -102,13 +123,15 @@
 <script setup>
 import { computed, ref, watchEffect } from 'vue';
 import SessionItem from '../../sessions/components/SessionItem.vue';
+import SessionTerminalItem from '../../sessions/components/SessionTerminalItem.vue';
+import { isTerminalLike } from '../../sessions/session-state.mjs';
 import SlugGroup from './SlugGroup.vue';
 
 // The list of a Project's Sessions and Slug groups: the visible run, an older toggle, and this
-// Project's own archive with its own older toggle. The item (SessionItem / SlugGroup) and the list
-// are separate components. A Dumb Component — the ordering and the archived split are decided
-// upstream in the pure session-list module and handed in as arrays; this only holds the three
-// expand flags and forwards every row event untouched.
+// Project's own archive with its own older toggle. The item (SessionItem / SessionTerminalItem
+// / SlugGroup) and the list are separate components. A Dumb Component — the ordering and the
+// archived split are decided upstream in the pure session-list module and handed in as arrays;
+// this only holds the three expand flags and forwards every row event untouched.
 const props = defineProps({
   visible: { type: Array, default: () => [] },
   older: { type: Array, default: () => [] },
@@ -118,24 +141,29 @@ const props = defineProps({
   activeSessionId: { type: String, default: null },
   sessionBusyState: { type: Map, required: true },
   attentionSessions: { type: Set, required: true },
-  responseReadySessions: { type: Set, required: true },
+  needsInputSessions: { type: Set, required: true },
+  unreadSessions: { type: Set, required: true },
   searchMatchIds: { type: Set, default: null },
 });
 
 const emit = defineEmits([
-  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-sessions',
+  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'done', 'archive-sessions',
 ]);
 
 // Every row event bar `open` forwards unchanged; grouped so the two rendered runs and the slug
 // groups share one binding rather than fifteen repeated lines.
-const itemListeners = {
+const terminalListeners = {
   stop: (id) => emit('stop', id),
   star: (id) => emit('star', id),
+  rename: (id, name) => emit('rename', id, name),
+};
+const itemListeners = {
+  ...terminalListeners,
   archive: (id) => emit('archive', id),
   fork: (id) => emit('fork', id),
   jsonl: (id) => emit('jsonl', id),
   'launch-config': (id) => emit('launch-config', id),
-  rename: (id, name) => emit('rename', id, name),
+  done: (id) => emit('done', id),
 };
 const rowListeners = {
   open: (s) => emit('open', s),
