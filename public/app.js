@@ -319,11 +319,9 @@ window.api.onCliBusyState((sessionId, busy) => {
 function applyDoneToCaches(sessionId, done) {
   const s = sessionMap.get(sessionId);
   if (s) s.done = done;
-  for (const list of [cachedProjects, cachedAllProjects]) {
-    for (const p of list) {
-      const row = p.sessions.find(x => x.sessionId === sessionId);
-      if (row) row.done = done;
-    }
+  for (const p of cachedProjects) {
+    const row = p.sessions.find(x => x.sessionId === sessionId);
+    if (row) row.done = done;
   }
 }
 

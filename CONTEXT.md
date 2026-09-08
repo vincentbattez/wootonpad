@@ -53,6 +53,50 @@ _Avoid_: Dev server, run tab, console
 The command a Run Terminal starts on. User-authored, global with a per-Project override, empty by default — WootonPad never guesses it from a manifest. Sent to the shell verbatim, exactly as the user would type it.
 _Avoid_: Dev command, start script
 
+### Session state
+
+**Session State**:
+The single thing the State Dot renders — one value of four at a time: Sleeping, Needs Input,
+Working, or Done. It answers "does this Session still want something from me?", and nothing else.
+Computed in the renderer by a pure module (`sessionStateFor`), never arbitrated in a stylesheet.
+A Plain Terminal or Run Terminal has no Session State.
+_Avoid_: status, activity, mode
+
+**Sleeping**:
+The default Session State: nothing in progress, no one waiting. An empty grey ring. Distinct from
+the backend's low-level `idle` (OSC 0: "the CLI shows no spinner") — Sleeping is the domain fact
+"this Session asks nothing of anyone". A live PTY that is merely idle is Sleeping: a process being
+alive is not work.
+_Avoid_: idle (that is the OSC-0 word), inactive, dormant
+
+**Needs Input**:
+The Session State when the ball is in the human's court and the subject is not closed — a
+permission/approval/plan-mode prompt, or a turn that just ended on an unfocused Session. An empty
+yellow dotted ring.
+_Avoid_: waiting, blocked, attention
+
+**Working**:
+The Session State when the CLI or a subagent is producing something (the busy signal). An empty
+blue ring that breathes.
+_Avoid_: busy, running, active
+
+**Done**:
+The Session State declared — never inferred — when the subject is closed and the work is finished
+(ADR 0015). A solid green disc. Written only by the human (from the row) or the agent (the
+`markSessionDone` MCP tool), lifted automatically when the Session goes Working again. Orthogonal
+to Archived: finished and filed away are two decisions.
+_Avoid_: finished (as a status word), complete, closed, stopped
+
+**State Dot**:
+The dot to the left of a Session row that renders the Session State — one class, one state.
+_Avoid_: status dot, running dot, indicator
+
+**Unread**:
+Output a Session produced that the human has not yet looked at. A typographic accent on the row's
+title, cleared when the Session is opened. Independent of the Session State (reading is not
+working): a Session can be Unread and Sleeping, or read and Needs Input.
+_Avoid_: unseen, notification, response-ready
+
 ### Git
 
 **Git Snapshot**:
