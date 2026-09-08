@@ -123,7 +123,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-sessions',
+  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-sessions', 'done',
 ]);
 
 // Every row event bar `open` forwards unchanged; grouped so the two rendered runs and the slug
@@ -136,6 +136,7 @@ const itemListeners = {
   jsonl: (id) => emit('jsonl', id),
   'launch-config': (id) => emit('launch-config', id),
   rename: (id, name) => emit('rename', id, name),
+  done: (id) => emit('done', id),
 };
 const rowListeners = {
   open: (s) => emit('open', s),

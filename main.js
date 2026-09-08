@@ -101,7 +101,7 @@ if (app.isPackaged || process.env.FORCE_UPDATER) {
   });
 }
 const {
-  getMeta, getAllMeta, toggleStar, setName, setArchived,
+  getMeta, getAllMeta, toggleStar, setName, setArchived, toggleDone, setDone,
   isCachePopulated, getAllCached, getCachedByFolder, getCachedFolder, getCachedSession, upsertCachedSessions,
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,
@@ -1923,6 +1923,32 @@ ipcMain.handle('toggle-star', (_event, sessionId) => {
   return { starred };
 });
 
+// --- IPC: toggle-done ---
+// The human's path to the Session State `done` flag (ADR 0015), a sibling of toggle-star.
+ipcMain.handle('toggle-done', (_event, sessionId) => {
+  const done = toggleDone(sessionId);
+  return { done };
+});
+
+// Persist a `done` value from a main-initiated source (the markSessionDone MCP tool, or the
+// automatic lift when a Session goes busy again) and tell the renderer to reflect it. The
+// human toggle above does not route through here — the renderer already knows that outcome.
+function setSessionDone(sessionId, done) {
+  setDone(sessionId, done);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('session-done-changed', sessionId, done ? 1 : 0);
+  }
+}
+
+// The automatic lift: a Session that resumes real work must never keep a stale green dot
+// (ADR 0015). Only the busy signal lifts `done` — not terminal noise, not a TUI repaint, not
+// opening the Session. Guarded by getMeta so the write (and the renderer round-trip) happens
+// once per resume, not on every busy tick.
+function liftDoneOnBusy(sessionId) {
+  const meta = getMeta(sessionId);
+  if (meta && meta.done) setSessionDone(sessionId, 0);
+}
+
 // --- IPC: rename-session ---
 ipcMain.handle('rename-session', (_event, sessionId, name) => {
   setName(sessionId, name || null);
@@ -2174,6 +2200,8 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
             // keeps running across an account switch, and a diff arriving after
             // one must still resolve against its own distribution.
             hostPath: (p) => accountHostPath(activeAccount, p),
+            // The agent's markSessionDone tool: persist the flag and notify the renderer.
+            onMarkDone: (id) => setSessionDone(id, 1),
           });
           claudeCmd += ' --ide';
         } catch (err) {
@@ -2272,6 +2300,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('cli-busy-state', currentId, true);
             }
+            liftDoneOnBusy(currentId);
           } else if (isIdle && session._cliBusy) {
             session._cliBusy = false;
             session._oscIdle = true;
@@ -2303,6 +2332,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('cli-busy-state', currentId, true);
             }
+            liftDoneOnBusy(currentId);
           }
         } else {
           // Regular notification (attention, permission, etc.)

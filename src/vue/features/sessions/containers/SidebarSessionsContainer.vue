@@ -150,6 +150,7 @@ const listeners = {
   onStop: (id) => sb.stopSession?.(id),
   onStar: (id) => sb.toggleStar?.(id),
   onArchive: (id) => sb.archiveSession?.(id),
+  onDone: (id) => sb.markDone?.(id),
   onFork: (id) => sb.forkSession?.(id),
   onJsonl: (id) => sb.showJsonl?.(id),
   onLaunchConfig: (id) => sb.launchConfig?.(id),

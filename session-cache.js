@@ -209,6 +209,9 @@ function buildProjectsFromCache() {
       name: meta?.name || null,
       starred: meta?.starred || 0,
       archived: meta?.archived || 0,
+      // Session State's `done` flag (VIN-148): persisted user data like starred/archived,
+      // read here so it survives a restart and rides every row rebuilt from the cache.
+      done: meta?.done || 0,
       accountId: row.accountId || 'default',
       // Context gauge (VIN-143): the last assistant turn's usage breakdown and model,
       // a property of the Session so every row carries it, running or not.
@@ -269,7 +272,7 @@ function buildProjectsFromCache() {
     if (!proj.sessions.some(s => s.sessionId === sessionId)) {
       const synthetic = {
         sessionId, summary: 'Terminal', firstPrompt: '', projectPath: session.projectPath,
-        name: null, starred: 0, archived: 0, messageCount: 0,
+        name: null, starred: 0, archived: 0, done: 0, messageCount: 0,
         modified: new Date(session._openedAt).toISOString(),
         created: new Date(session._openedAt).toISOString(),
         type: 'terminal',

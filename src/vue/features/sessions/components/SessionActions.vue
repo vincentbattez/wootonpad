@@ -7,6 +7,7 @@
   <div v-else class="session-actions">
     <SessionStopButton @stop="$emit('stop')" />
     <template v-if="!isTerminalLike">
+      <SessionDoneButton :done="done" @done="$emit('done')" />
       <SessionForkButton @fork="$emit('fork')" />
       <SessionMessagesButton @jsonl="$emit('jsonl')" />
       <SessionArchiveButton :archived="archived" @archive="$emit('archive')" />
@@ -22,6 +23,7 @@
 // .jsonl behind it, so fork, messages, archive and launch-config drop out, leaving stop and
 // pin. Each button is its own component; this only arranges them and forwards their events.
 import SessionStopButton from './actions/SessionStopButton.vue';
+import SessionDoneButton from './actions/SessionDoneButton.vue';
 import SessionForkButton from './actions/SessionForkButton.vue';
 import SessionMessagesButton from './actions/SessionMessagesButton.vue';
 import SessionArchiveButton from './actions/SessionArchiveButton.vue';
@@ -33,7 +35,8 @@ defineProps({
   isTerminalLike: { type: Boolean, default: false },
   archived: { type: Boolean, default: false },
   starred: { type: Boolean, default: false },
+  done: { type: Boolean, default: false },
 });
 
-defineEmits(['stop', 'fork', 'jsonl', 'archive', 'launch-config', 'star']);
+defineEmits(['stop', 'fork', 'jsonl', 'archive', 'launch-config', 'star', 'done']);
 </script>

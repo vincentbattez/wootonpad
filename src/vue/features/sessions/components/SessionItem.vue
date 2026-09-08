@@ -40,12 +40,14 @@
         :is-terminal-like="isTerminalLike"
         :archived="!!session.archived"
         :starred="!!session.starred"
+        :done="!!session.done"
         @stop="$emit('stop', session.sessionId)"
         @fork="$emit('fork', session.sessionId)"
         @jsonl="$emit('jsonl', session.sessionId)"
         @archive="$emit('archive', session.sessionId)"
         @launch-config="$emit('launch-config', session.sessionId)"
         @star="$emit('star', session.sessionId)"
+        @done="$emit('done', session.sessionId)"
       />
     </div>
   </div>
@@ -73,7 +75,7 @@ const props = defineProps({
   compact: Boolean,
 });
 
-const emit = defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename']);
+const emit = defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'done']);
 
 const { editing: renaming, draft: renameValue, start, submit, cancel } =
   useInlineRename((name) => emit('rename', props.session.sessionId, name));

@@ -24,6 +24,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
       />
 
       <!-- When both a promoted run and a rest exist, the rest hides behind a "+N more" toggle;
@@ -53,6 +54,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
       />
     </div>
   </div>
@@ -77,7 +79,7 @@ const props = defineProps({
   responseReadySessions: { type: Set, required: true },
 });
 
-defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-all']);
+defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-all', 'done']);
 
 const groupId = computed(() => 'slug-' + props.slug.replace(/[^a-zA-Z0-9_-]/g, '_'));
 

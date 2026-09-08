@@ -116,6 +116,14 @@ const MCP_TOOLS = [
       properties: { uri: { type: 'string' } },
     },
   },
+  {
+    // Declared, never inferred (ADR 0015): the agent closes the subject itself so the human
+    // sees the result without opening the Session. No parameter — ~30 tokens in the system
+    // prompt. This is NOT stop: the Stop button kills the PTY; this closes the subject.
+    name: 'markSessionDone',
+    description: 'Mark this session as finished — no further human input needed',
+    inputSchema: { type: 'object', properties: {} },
+  },
 ];
 
 // ── JSON-RPC Message Handler ─────────────────────────────────────────
@@ -189,6 +197,8 @@ async function handleToolCall(entry, rpcId, params, log) {
       return handleCloseAllDiffTabs(entry, rpcId, log);
     case 'getDiagnostics':
       return handleGetDiagnostics(entry, rpcId);
+    case 'markSessionDone':
+      return handleMarkSessionDone(entry, rpcId);
     default:
       return sendError(entry, rpcId, -32602, `Unknown tool: ${toolName}`);
   }
@@ -324,6 +334,17 @@ async function handleGetDiagnostics(entry, rpcId) {
   });
 }
 
+// The agent's path to `done`. The effect (persist + notify the renderer) is injected as
+// entry.onMarkDone by the main process; the bridge only routes the call and answers the CLI.
+function handleMarkSessionDone(entry, rpcId) {
+  if (typeof entry.onMarkDone === 'function') {
+    try { entry.onMarkDone(entry.sessionId); } catch {}
+  }
+  sendResult(entry, rpcId, {
+    content: [{ type: 'text', text: 'Session marked as done' }],
+  });
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /**
@@ -370,6 +391,9 @@ async function startMcpServer(sessionId, workspaceFolders, mainWindow, log, opti
     // Translates a path the CLI reports into one this process can open.
     // Identity unless the session runs inside a distribution.
     hostPath: options.hostPath || ((p) => p),
+    // Called when the CLI invokes markSessionDone; the main process persists the flag and
+    // notifies the renderer. Absent in contexts that don't wire it (the tool still answers).
+    onMarkDone: options.onMarkDone || null,
     ws: null,
     pendingDiffs: new Map(),
   };
@@ -515,4 +539,7 @@ module.exports = {
   resolvePendingDiff,
   rekeyMcpServer,
   cleanStaleLockFiles,
+  // Exported for the JSON-RPC contract test — the CLI-facing surface, not the WS server.
+  handleMessage,
+  MCP_TOOLS,
 };

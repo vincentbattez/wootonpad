@@ -17,6 +17,7 @@
     @jsonl="(id) => $emit('jsonl', id)"
     @launch-config="(id) => $emit('launch-config', id)"
     @rename="(id, name) => $emit('rename', id, name)"
+    @done="(id) => $emit('done', id)"
   />
 </template>
 
@@ -37,5 +38,5 @@ defineProps({
   compact: { type: Boolean, default: false },
 });
 
-defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename']);
+defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'done']);
 </script>

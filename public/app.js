@@ -314,6 +314,27 @@ window.api.onCliBusyState((sessionId, busy) => {
   setActivity(sessionId, busy);
 });
 
+// Patch the persisted `done` flag onto the cached Session rows so the next sidebar render
+// carries it — the same technique toggleStar/archiveSession use for their own flags.
+function applyDoneToCaches(sessionId, done) {
+  const s = sessionMap.get(sessionId);
+  if (s) s.done = done;
+  for (const list of [cachedProjects, cachedAllProjects]) {
+    for (const p of list) {
+      const row = p.sessions.find(x => x.sessionId === sessionId);
+      if (row) row.done = done;
+    }
+  }
+}
+
+// The Session State `done` flag, changed by a main-process source: the agent's markSessionDone
+// tool, or the automatic lift when a Session resumes work (ADR 0015). The human's own toggle
+// does not arrive here — markDone already patched the caches for that path.
+window.api.onSessionDoneChanged((sessionId, done) => {
+  applyDoneToCaches(sessionId, done);
+  refreshSidebar({ resort: false });
+});
+
 // --- Single entry point for all sidebar renders ---
 // resort=true: re-sort items by priority+time (use for user-initiated actions)
 // resort=false (default): preserve existing DOM order, new items go to top
@@ -1769,6 +1790,14 @@ window.__sb = {
     await window.api.archiveSession(id, newVal);
     session.archived = newVal;
     loadProjects();
+  },
+
+  // The human's one-gesture Session State toggle — a sibling of toggleStar. `done` is user
+  // data (ADR 0015): mark a subject finished, or un-mark one marked too early. Never archives.
+  markDone: async (id) => {
+    const { done } = await window.api.toggleDone(id);
+    applyDoneToCaches(id, done);
+    refreshSidebar({ resort: false });
   },
 
   forkSession: (id) => {

@@ -42,7 +42,8 @@ db.exec(`
     sessionId TEXT PRIMARY KEY,
     name TEXT,
     starred INTEGER DEFAULT 0,
-    archived INTEGER DEFAULT 0
+    archived INTEGER DEFAULT 0,
+    done INTEGER DEFAULT 0
   )
 `);
 
@@ -206,6 +207,13 @@ const migrations = [
     try { db.exec('DROP TABLE IF EXISTS search_fts'); } catch {}
     searchFtsRecreated = true;
   },
+  // v11: Session State (VIN-148). `done` is user data — a subject declared finished, at the
+  // same level as `starred` and `archived`. Additive column on session_meta. Unlike the
+  // session_cache migrations above, this one MUST NOT purge session_meta: it holds the manual
+  // renames, pins, archives and now `done` flags, none of which are re-derivable from a .jsonl.
+  (db) => {
+    try { db.exec('ALTER TABLE session_meta ADD COLUMN done INTEGER DEFAULT 0'); } catch {}
+  },
 ];
 
 const currentDbVersion = (() => {
@@ -254,6 +262,17 @@ const stmts = {
   upsertArchived: db.prepare(`
     INSERT INTO session_meta (sessionId, archived) VALUES (?, ?)
     ON CONFLICT(sessionId) DO UPDATE SET archived = excluded.archived
+  `),
+  // `done` is declared, never inferred (ADR 0015). The human toggles it from the row; the
+  // agent sets it via the markSessionDone MCP tool; the app lifts it (to 0) when the Session
+  // goes busy again. A toggle for the human path, an explicit set for the other two.
+  toggleDoneStmt: db.prepare(`
+    INSERT INTO session_meta (sessionId, done) VALUES (?, 1)
+    ON CONFLICT(sessionId) DO UPDATE SET done = CASE WHEN done = 1 THEN 0 ELSE 1 END
+  `),
+  upsertDone: db.prepare(`
+    INSERT INTO session_meta (sessionId, done) VALUES (?, ?)
+    ON CONFLICT(sessionId) DO UPDATE SET done = excluded.done
   `),
   // Session cache statements
   cacheCountByAccount: db.prepare("SELECT COUNT(*) as cnt FROM session_cache WHERE accountId = ?"),
@@ -337,6 +356,19 @@ function toggleStar(sessionId) {
 
 function setArchived(sessionId, archived) {
   stmts.upsertArchived.run(sessionId, archived ? 1 : 0);
+}
+
+// The human's one-gesture toggle from the Session row. Returns the new `done` value.
+function toggleDone(sessionId) {
+  stmts.toggleDoneStmt.run(sessionId);
+  const row = stmts.get.get(sessionId);
+  return row.done;
+}
+
+// The explicit write — used by the markSessionDone MCP tool (1) and by the automatic lift
+// when a Session goes busy again (0). Idempotent, so the lift can fire on every busy signal.
+function setDone(sessionId, done) {
+  stmts.upsertDone.run(sessionId, done ? 1 : 0);
 }
 
 // --- Session cache functions ---
@@ -729,7 +761,7 @@ function closeDb() {
 }
 
 module.exports = {
-  getMeta, getAllMeta, setName, toggleStar, setArchived,
+  getMeta, getAllMeta, setName, toggleStar, setArchived, toggleDone, setDone,
   isCachePopulated, getAllCached, getCachedByFolder, getCachedFolder, getCachedSession, upsertCachedSessions,
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,

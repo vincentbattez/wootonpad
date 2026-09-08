@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('api', {
   getActiveTerminals: () => ipcRenderer.invoke('get-active-terminals'),
   stopSession: (id) => ipcRenderer.invoke('stop-session', id),
   toggleStar: (id) => ipcRenderer.invoke('toggle-star', id),
+  toggleDone: (id) => ipcRenderer.invoke('toggle-done', id),
   renameSession: (id, name) => ipcRenderer.invoke('rename-session', id, name),
   archiveSession: (id, archived) => ipcRenderer.invoke('archive-session', id, archived),
   openTerminal: (id, projectPath, isNew, sessionOptions) => ipcRenderer.invoke('open-terminal', id, projectPath, isNew, sessionOptions),
@@ -118,6 +119,9 @@ contextBridge.exposeInMainWorld('api', {
   },
   onCliBusyState: (callback) => {
     ipcRenderer.on('cli-busy-state', (_event, sessionId, busy) => callback(sessionId, busy));
+  },
+  onSessionDoneChanged: (callback) => {
+    ipcRenderer.on('session-done-changed', (_event, sessionId, done) => callback(sessionId, done));
   },
   onSessionContext: (callback) => {
     ipcRenderer.on('session-context', (_event, sessionId, usage, model) => callback(sessionId, usage, model));

@@ -88,6 +88,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
         @archive-sessions="(sessions) => $emit('archive-sessions', sessions)"
       />
 
@@ -115,6 +116,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
         @new-session="(p, btn) => $emit('new-session', p, btn)"
         @settings="(path) => $emit('settings', path)"
         @open-external-ide="(path) => $emit('open-external-ide', path)"
@@ -166,7 +168,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename',
+  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'done',
   'new-session', 'settings', 'open-external-ide', 'open-project-folder', 'run-project', 'archive-sessions', 'remove-project',
 ]);
 
