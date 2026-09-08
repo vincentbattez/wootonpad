@@ -37,17 +37,17 @@ test('the starred filter keeps only starred sessions', () => {
 test('the running filter keeps the working and needsInput sessions, not the live ptys', () => {
   const busy = session({ sessionId: 'busy' });
   const waiting = session({ sessionId: 'waiting' });
-  const unread = session({ sessionId: 'unread' });
+  const answered = session({ sessionId: 'answered' });
   const livePty = session({ sessionId: 'livePty' });
   const out = partition({
-    sessions: [busy, waiting, unread, livePty],
+    sessions: [busy, waiting, answered, livePty],
     showRunningOnly: true,
-    activePtyIds: new Set(['busy', 'waiting', 'unread', 'livePty']),
+    activePtyIds: new Set(['busy', 'waiting', 'answered', 'livePty']),
     busySessionIds: new Set(['busy']),
     attentionSessionIds: new Set(['waiting']),
-    unreadSessionIds: new Set(['unread']),
+    needsInputSessionIds: new Set(['answered']),
   });
-  assert.deepEqual(ids(out.visible).sort(), ['busy', 'unread', 'waiting']);
+  assert.deepEqual(ids(out.visible).sort(), ['answered', 'busy', 'waiting']);
 });
 
 test('the running filter drops a sleeping and a done session', () => {

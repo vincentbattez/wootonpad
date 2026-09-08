@@ -15,6 +15,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
+      :needs-input-sessions="needsInputSessions"
         :unread-sessions="unreadSessions"
         @open="(s) => $emit('open', s)"
         @stop="(id) => $emit('stop', id)"
@@ -45,6 +46,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
+      :needs-input-sessions="needsInputSessions"
         :unread-sessions="unreadSessions"
         @open="(s) => $emit('open', s)"
         @stop="(id) => $emit('stop', id)"
@@ -76,6 +78,7 @@ const props = defineProps({
   activeSessionId: { type: String, default: null },
   sessionBusyState: { type: Map, required: true },
   attentionSessions: { type: Set, required: true },
+  needsInputSessions: { type: Set, required: true },
   unreadSessions: { type: Set, required: true },
 });
 

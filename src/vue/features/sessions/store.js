@@ -15,6 +15,10 @@ export const sessionsStore = reactive({
   activeSessionId: null,
   sessionBusyState: new Map(),
   attentionSessions: new Set(),
+  // The turn ended and the human has not answered yet — the needsInput half of the Session
+  // State. Kept apart from `unreadSessions` because reading is not answering: opening a
+  // Session clears Unread, it does not take the ball back (VIN-148, US 6 and 21).
+  needsInputSessions: new Set(),
   unreadSessions: new Set(),
   lastActivityTime: new Map(),
   pendingSessions: new Set(),

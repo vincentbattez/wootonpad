@@ -78,6 +78,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
+        :needs-input-sessions="needsInputSessions"
         :unread-sessions="unreadSessions"
         :search-match-ids="searchMatchIds"
         @open="(s) => $emit('open', s)"
@@ -101,6 +102,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
+        :needs-input-sessions="needsInputSessions"
         :unread-sessions="unreadSessions"
         :search-match-ids="searchMatchIds"
         :show-starred-only="showStarredOnly"
@@ -157,6 +159,7 @@ const props = defineProps({
   activeSessionId: { type: String, default: null },
   sessionBusyState: { type: Map, required: true },
   attentionSessions: { type: Set, required: true },
+  needsInputSessions: { type: Set, required: true },
   unreadSessions: { type: Set, required: true },
   searchMatchIds: { type: Set, default: null },
   showStarredOnly: Boolean,
@@ -228,6 +231,7 @@ const partition = computed(() => partitionSessionList({
   showTodayOnly: props.showTodayOnly,
   busySessionIds: props.sessionBusyState,
   attentionSessionIds: props.attentionSessions,
+  needsInputSessionIds: props.needsInputSessions,
   unreadSessionIds: props.unreadSessions,
   visibleSessionCount: props.visibleSessionCount,
   sessionMaxAgeDays: props.sessionMaxAgeDays,

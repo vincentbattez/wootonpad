@@ -107,6 +107,7 @@ const visibleProjects = computed(() => {
       showTodayOnly: store.showTodayOnly,
       busySessionIds: store.sessionBusyState,
       attentionSessionIds: store.attentionSessions,
+      needsInputSessionIds: store.needsInputSessions,
       unreadSessionIds: store.unreadSessions,
       now,
     }).length > 0);
@@ -139,6 +140,7 @@ const shared = computed(() => ({
   activeSessionId: store.activeSessionId,
   sessionBusyState: store.sessionBusyState,
   attentionSessions: store.attentionSessions,
+  needsInputSessions: store.needsInputSessions,
   unreadSessions: store.unreadSessions,
   searchMatchIds: store.searchMatchIds,
   showStarredOnly: store.showStarredOnly,

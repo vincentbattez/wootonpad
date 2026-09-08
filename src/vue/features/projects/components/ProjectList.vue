@@ -8,6 +8,7 @@
       :active-session-id="activeSessionId"
       :session-busy-state="sessionBusyState"
       :attention-sessions="attentionSessions"
+      :needs-input-sessions="needsInputSessions"
       :unread-sessions="unreadSessions"
       v-on="rowListeners"
       @archive-all="(sessions) => $emit('archive-sessions', sessions)"
@@ -27,6 +28,7 @@
       :is-running="activePtyIds.has(item.session.sessionId)"
       :is-busy="sessionBusyState.get(item.session.sessionId) || false"
       :is-attention="attentionSessions.has(item.session.sessionId)"
+      :is-needs-input="needsInputSessions.has(item.session.sessionId)"
       :is-unread="unreadSessions.has(item.session.sessionId)"
       @open="$emit('open', item.session)"
       v-on="itemListeners"
@@ -52,6 +54,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
+      :needs-input-sessions="needsInputSessions"
         :unread-sessions="unreadSessions"
         v-on="rowListeners"
         @archive-all="(sessions) => $emit('archive-sessions', sessions)"
@@ -71,6 +74,7 @@
         :is-running="activePtyIds.has(item.session.sessionId)"
         :is-busy="sessionBusyState.get(item.session.sessionId) || false"
         :is-attention="attentionSessions.has(item.session.sessionId)"
+        :is-needs-input="needsInputSessions.has(item.session.sessionId)"
         :is-unread="unreadSessions.has(item.session.sessionId)"
         @open="$emit('open', item.session)"
         v-on="itemListeners"
@@ -98,6 +102,7 @@
       :is-running="activePtyIds.has(item.session.sessionId)"
       :is-busy="sessionBusyState.get(item.session.sessionId) || false"
       :is-attention="attentionSessions.has(item.session.sessionId)"
+      :is-needs-input="needsInputSessions.has(item.session.sessionId)"
       :is-unread="unreadSessions.has(item.session.sessionId)"
       @open="$emit('open', item.session)"
       @archive="$emit('archive', item.session.sessionId)"
@@ -136,6 +141,7 @@ const props = defineProps({
   activeSessionId: { type: String, default: null },
   sessionBusyState: { type: Map, required: true },
   attentionSessions: { type: Set, required: true },
+  needsInputSessions: { type: Set, required: true },
   unreadSessions: { type: Set, required: true },
   searchMatchIds: { type: Set, default: null },
 });
