@@ -1668,11 +1668,9 @@ function applyDoneToCaches(id, done) {
   if (!s) return;
   const updated = { ...s, done };
   sessionMap.set(id, updated);
-  for (const list of [cachedProjects, cachedAllProjects]) {
-    for (const p of list) {
-      const idx = p.sessions.findIndex(x => x.sessionId === id);
-      if (idx !== -1) p.sessions[idx] = updated;
-    }
+  for (const p of cachedProjects) {
+    const idx = p.sessions.findIndex(x => x.sessionId === id);
+    if (idx !== -1) p.sessions[idx] = updated;
   }
 }
 
@@ -1791,11 +1789,9 @@ window.__sb = {
     if (s) {
       const updated = { ...s, starred };
       sessionMap.set(id, updated);
-      for (const list of [cachedProjects, cachedAllProjects]) {
-        for (const p of list) {
-          const idx = p.sessions.findIndex(x => x.sessionId === id);
-          if (idx !== -1) p.sessions[idx] = updated;
-        }
+      for (const p of cachedProjects) {
+        const idx = p.sessions.findIndex(x => x.sessionId === id);
+        if (idx !== -1) p.sessions[idx] = updated;
       }
     }
     refreshSidebar({ resort: true });
