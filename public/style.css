@@ -1983,11 +1983,27 @@ body { display: flex; flex-direction: column; }
   width: 32px;
 }
 
+/* The empty "measuring" track (VIN-149): a working Session with no assistant turn indexed yet.
+   A blue tint over the otherwise-neutral track reads "we're measuring", not "nothing to report"
+   — the fill stays at zero, so only the track shows. The alpha accent token holds the tint
+   across both modes and the five neutral tones. */
+.session-context-meter--empty {
+  background: var(--blue-a4);
+}
+
 .session-context-label {
   font-size: 10px;
   color: var(--text-tertiary);
   font-family: var(--font-mono);
   white-space: nowrap;
+}
+
+/* Reserve the compact label's slot so the measuring track and the arrived gauge occupy the
+   same width: the first value fills the reserved space rather than growing the row leftward
+   under margin-left:auto and shifting the line (VIN-149). Wide enough for the compact "NNNk". */
+.session-context--compact .session-context-label {
+  min-width: 32px;
+  text-align: right;
 }
 
 /* ---- Session action buttons ---- */

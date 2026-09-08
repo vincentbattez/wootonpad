@@ -1,8 +1,14 @@
 <template>
-  <!-- Empty until there is a usage to show. At full density the slot keeps its width so the
-       gauge's arrival on the first assistant turn shifts nothing; compact collapses instead. -->
-  <div class="session-context" :class="{ 'session-context--compact': compact }" :title="tooltip">
-    <template v-if="hasGauge">
+  <!-- Three states (context-gauge.mjs gaugeState): the gauge once a usage is known; the empty
+       "measuring" track for a working Session with no value yet — it keeps the meter's width so
+       the first value's arrival shifts nothing; and nothing at all for a resting Session. -->
+  <div
+    v-if="state !== 'none'"
+    class="session-context"
+    :class="{ 'session-context--compact': compact }"
+    :title="tooltip"
+  >
+    <template v-if="state === 'gauge'">
       <SbMeter
         class="session-context-meter"
         :value="total"
@@ -12,6 +18,16 @@
       />
       <span class="session-context-label">{{ label }}</span>
     </template>
+    <template v-else>
+      <SbMeter
+        class="session-context-meter session-context-meter--empty"
+        :value="0"
+        :max="windowSize"
+      />
+      <!-- The label's slot is reserved even while measuring, so the first value's arrival
+           fills it rather than widening the row and shifting the line (VIN-149). -->
+      <span class="session-context-label" aria-hidden="true"></span>
+    </template>
   </div>
 </template>
 
@@ -19,7 +35,7 @@
 import { computed } from 'vue';
 import SbMeter from '../../../shared/ui/SbMeter.vue';
 import {
-  windowFor, tickTokens, contextTotal, formatLabel, formatTokens, severityFor,
+  windowFor, tickTokens, contextTotal, formatLabel, formatTokens, severityFor, gaugeState,
 } from '../context-gauge.mjs';
 
 // The resting context gauge for a Session row. Dumb: it takes the last assistant
@@ -33,8 +49,12 @@ const props = defineProps({
   // The sidebar row's density: a narrower track and the used tokens alone, the window
   // being one hover away in the tooltip.
   compact: { type: Boolean, default: false },
+  // Whether the Session is working. A working Session with no value yet shows the empty
+  // measuring track; a resting one with no value shows nothing (VIN-149).
+  working: { type: Boolean, default: false },
 });
 
+const state = computed(() => gaugeState(props.usage, props.working));
 const hasGauge = computed(() => props.usage != null);
 const total = computed(() => contextTotal(props.usage));
 const windowSize = computed(() => windowFor(props.model));
