@@ -101,7 +101,7 @@ if (app.isPackaged || process.env.FORCE_UPDATER) {
   });
 }
 const {
-  getMeta, getAllMeta, toggleStar, setName, setArchived,
+  getMeta, getAllMeta, toggleStar, setName, setArchived, setDone, toggleDone,
   isCachePopulated, getAllCached, getCachedByFolder, getCachedFolder, getCachedSession, upsertCachedSessions,
   deleteCachedSession, deleteCachedFolder,
   getFolderMeta, getAllFolderMeta, setFolderMeta,
@@ -603,6 +603,31 @@ const { readSessionFile, readFolderFromFilesystem, refreshFolder, populateCacheF
  * Called on a busy→idle transition. Plain terminals and un-located sessions have no
  * transcript, so they are skipped silently.
  */
+/**
+ * Persist a Session's `done` flag and tell the renderer (VIN-148). The single write path:
+ * the row's own action, the MCP tool, and the automatic lift all come through here, so the
+ * flag on disk and the State Dot on screen can never disagree.
+ */
+function applySessionDone(sessionId, done) {
+  const value = setDone(sessionId, done);
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('session-done', sessionId, value);
+  }
+  return value;
+}
+
+/**
+ * Lift a stale `done` the moment the Session works again (ADR 0015). Called from the two busy
+ * edges and nowhere else: neither terminal noise, nor a TUI repaint, nor opening the Session
+ * lifts it. Reads before writing so a Session that was never `done` costs one indexed lookup.
+ */
+function liftSessionDone(sessionId) {
+  try {
+    if (!getMeta(sessionId)?.done) return;
+    applySessionDone(sessionId, 0);
+  } catch {}
+}
+
 function pushSessionContext(session, currentId) {
   if (!session || session.isPlainTerminal || !session.projectFolder) return;
   try {
@@ -1923,6 +1948,14 @@ ipcMain.handle('toggle-star', (_event, sessionId) => {
   return { starred };
 });
 
+// --- IPC: toggle-session-done ---
+// The human's half of ADR 0015, and the primary path: one click from the row. Not `stop-session`
+// — that kills the PTY, this closes the subject.
+ipcMain.handle('toggle-session-done', (_event, sessionId) => {
+  const done = toggleDone(sessionId);
+  return { done };
+});
+
 // --- IPC: rename-session ---
 ipcMain.handle('rename-session', (_event, sessionId, name) => {
   setName(sessionId, name || null);
@@ -2174,6 +2207,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
             // keeps running across an account switch, and a diff arriving after
             // one must still resolve against its own distribution.
             hostPath: (p) => accountHostPath(activeAccount, p),
+            // The agent's half of ADR 0015. Bound to the id the entry carries, so a fork
+            // that re-keys the server still marks the Session the CLI is actually in.
+            onMarkDone: (id) => applySessionDone(id, 1),
           });
           claudeCmd += ' --ide';
         } catch (err) {
@@ -2269,6 +2305,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
             session._cliBusy = true;
             session._oscIdle = false;
             log.debug(`[OSC 0] session=${currentId} → BUSY`);
+            liftSessionDone(currentId);
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('cli-busy-state', currentId, true);
             }
@@ -2300,6 +2337,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
             session._cliBusy = true;
             session._oscIdle = false;
             log.debug(`[OSC 9;4] session=${currentId} → BUSY`);
+            liftSessionDone(currentId);
             if (mainWindow && !mainWindow.isDestroyed()) {
               mainWindow.webContents.send('cli-busy-state', currentId, true);
             }

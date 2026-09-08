@@ -71,12 +71,12 @@ let searchMatchProjectPaths = null; // Set<string> of project paths matched by n
 //   2. Noise-filtered terminal output (fallback: non-noise, non-TUI-repaint data)
 //
 // Both feed into setActivity(sessionId, active):
-//   active=true  → cli-busy (spinner dot)
-//   active=false → response-ready if not focused (terminal state until user clicks)
+//   active=true  → the row's Session State is `working`
+//   active=false → `needsInput` if not focused, and the title reads Unread until it is opened
 // OSC 0 idle signal is the authoritative source for marking sessions as idle.
 //
 const attentionSessions = new Set(); // sessions needing user action (OSC 9)
-const responseReadySessions = new Set(); // Claude finished, user hasn't looked (terminal state)
+const unreadSessions = new Set(); // Claude finished, user hasn't looked (terminal state)
 const sessionBusyState = new Map(); // sessionId → boolean (currently active)
 const lastActivityTime = new Map(); // sessionId → Date of last terminal output
 window.lastActivityTime = lastActivityTime; // exposed for Vue components
@@ -86,13 +86,13 @@ const activityNoiseRe = /file-history-snapshot|^\s*$/;
 
 // Central activity dispatcher
 function setActivity(sessionId, active) {
-  if (responseReadySessions.has(sessionId)) return;
+  if (unreadSessions.has(sessionId)) return;
 
   const wasActive = sessionBusyState.get(sessionId) || false;
   sessionBusyState.set(sessionId, active);
 
   if (wasActive && !active && sessionId !== activeSessionId) {
-    responseReadySessions.add(sessionId);
+    unreadSessions.add(sessionId);
     window.vueSidebar?.setResponseReady(sessionId);
   }
 
@@ -106,7 +106,7 @@ function trackActivity(sessionId, data) {
 }
 
 function clearUnread(sessionId) {
-  responseReadySessions.delete(sessionId);
+  unreadSessions.delete(sessionId);
   window.vueSidebar?.clearNotifications(sessionId);
 }
 
@@ -298,7 +298,7 @@ window.api.onTerminalNotification((sessionId, message) => {
     attentionSessions.add(sessionId);
     window.vueSidebar?.addAttention(sessionId);
   } else if (/waiting for your input/i.test(message)) {
-    // "Claude is waiting for your input" — delayed idle notification, mark response-ready
+    // "Claude is waiting for your input" — delayed idle notification: the turn ended
     setActivity(sessionId, false);
   }
 
@@ -312,6 +312,15 @@ window.api.onTerminalNotification((sessionId, message) => {
 // --- CLI busy state (OSC 0 title spinner detection) ---
 window.api.onCliBusyState((sessionId, busy) => {
   setActivity(sessionId, busy);
+});
+
+// --- Session done (VIN-148) ---
+// `done` written anywhere but the row: the agent's markSessionDone, or the automatic lift the
+// main process performs when the Session goes busy again. The row's own toggle patches the
+// caches itself; this is the same patch for the writes it does not originate.
+window.api.onSessionDone((sessionId, done) => {
+  applyDoneToCaches(sessionId, done);
+  refreshSidebar();
 });
 
 // --- Single entry point for all sidebar renders ---
@@ -413,13 +422,12 @@ function updateRunningIndicators() {
     const running = activePtyIds.has(id);
     item.classList.toggle('has-running-pty', running);
     if (!running) {
-      item.classList.remove('needs-attention', 'response-ready', 'cli-busy');
+      // A dead PTY produces nothing and waits for nobody: drop the signals the row's
+      // Session State reads. The State Dot itself is Vue's (VIN-148).
       attentionSessions.delete(id);
-      responseReadySessions.delete(id);
+      unreadSessions.delete(id);
       sessionBusyState.delete(id);
     }
-    const dot = item.querySelector('.session-status-dot');
-    if (dot) dot.classList.toggle('running', running);
   });
   // Update slug group running dots
   document.querySelectorAll('.slug-group').forEach(group => {
@@ -1633,6 +1641,22 @@ function reportHandoffFailure(label, path, result) {
   setUpdaterStatus(`${label} failed: ${result?.message || 'unknown error'}`, 8000);
 }
 
+// Re-point every cached copy of a Session row at a row carrying the new `done`. The rows are
+// re-used across refreshes and Object.assign()ed in place, so handing Vue a fresh object is
+// what makes the State Dot re-render (the same reason the sessions Bridge copies them).
+function applyDoneToCaches(id, done) {
+  const s = sessionMap.get(id);
+  if (!s) return;
+  const updated = { ...s, done };
+  sessionMap.set(id, updated);
+  for (const list of [cachedProjects, cachedAllProjects]) {
+    for (const p of list) {
+      const idx = p.sessions.findIndex(x => x.sessionId === id);
+      if (idx !== -1) p.sessions[idx] = updated;
+    }
+  }
+}
+
 window.__sb = {
   onTabChange(tabName) {
     activeTab = tabName;
@@ -1756,6 +1780,15 @@ window.__sb = {
       }
     }
     refreshSidebar({ resort: true });
+  },
+
+  // The human declaring a subject closed (ADR 0015). Same shape as toggleStar — it is user
+  // data, persisted beside the pins, and it archives nothing: "finished" and "put away" stay
+  // two separate decisions.
+  toggleDone: async (id) => {
+    const { done } = await window.api.toggleSessionDone(id);
+    applyDoneToCaches(id, done);
+    refreshSidebar();
   },
 
   archiveSession: async (id) => {

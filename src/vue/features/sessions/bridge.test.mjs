@@ -11,7 +11,7 @@ function makeStore() {
     activeSessionId: null,
     sessionBusyState: new Map(),
     attentionSessions: new Set(),
-    responseReadySessions: new Set(),
+    unreadSessions: new Set(),
     headerSession: null,
     headerPtyTitle: null,
     headerShellProfile: null,
@@ -41,18 +41,18 @@ test('setResponseReady marks ready and clears busy in one move', () => {
   const bridge = createSessionsBridge(store);
   bridge.setBusy('s1', true);
   bridge.setResponseReady('s1');
-  assert.equal(store.responseReadySessions.has('s1'), true);
+  assert.equal(store.unreadSessions.has('s1'), true);
   assert.equal(store.sessionBusyState.has('s1'), false);
 });
 
-test('clearNotifications clears attention and response-ready together', () => {
+test('clearNotifications clears attention and unread together', () => {
   const store = makeStore();
   const bridge = createSessionsBridge(store);
   bridge.addAttention('s2');
   bridge.setResponseReady('s2');
   bridge.clearNotifications('s2');
   assert.equal(store.attentionSessions.has('s2'), false);
-  assert.equal(store.responseReadySessions.has('s2'), false);
+  assert.equal(store.unreadSessions.has('s2'), false);
 });
 
 test('the header setters normalise empty values to null', () => {

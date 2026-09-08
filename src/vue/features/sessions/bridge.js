@@ -23,13 +23,16 @@ export function createSessionsBridge(store) {
       else store.sessionBusyState.delete(sessionId);
     },
     addAttention(sessionId) { store.attentionSessions.add(sessionId); },
+    // `setResponseReady` is the frozen renderer's name for "a turn ended off-focus". It feeds
+    // two things now: the Unread accent on the title, and — through the row — the needsInput
+    // Session State. The name stays because public/app.js is the contract.
     setResponseReady(sessionId) {
-      store.responseReadySessions.add(sessionId);
+      store.unreadSessions.add(sessionId);
       store.sessionBusyState.delete(sessionId);
     },
     clearNotifications(sessionId) {
       store.attentionSessions.delete(sessionId);
-      store.responseReadySessions.delete(sessionId);
+      store.unreadSessions.delete(sessionId);
     },
 
     // The active Session's terminal-header context.
