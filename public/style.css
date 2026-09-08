@@ -2017,6 +2017,7 @@ body { display: flex; flex-direction: column; }
 }
 
 .session-stop-btn,
+.session-done-btn,
 .session-launch-config-btn,
 .session-fork-btn,
 .session-jsonl-btn,
@@ -2054,6 +2055,16 @@ body { display: flex; flex-direction: column; }
 .session-archive-btn:hover {
   color: var(--indigo-400);
   background: color-mix(in srgb, var(--indigo-400) 10%, transparent);
+}
+
+/* Done shares the jade of the state-done dot, so the button and the dot it drives read as one. */
+.session-done-btn:hover {
+  color: var(--jade-9);
+  background: color-mix(in srgb, var(--jade-9) 10%, transparent);
+}
+
+.session-done-btn.done {
+  color: var(--jade-9);
 }
 
 .session-jsonl-btn:hover {

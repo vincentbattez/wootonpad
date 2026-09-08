@@ -198,7 +198,7 @@ async function handleToolCall(entry, rpcId, params, log) {
     case 'getDiagnostics':
       return handleGetDiagnostics(entry, rpcId);
     case 'markSessionDone':
-      return handleMarkSessionDone(entry, rpcId);
+      return handleMarkSessionDone(entry, rpcId, log);
     default:
       return sendError(entry, rpcId, -32602, `Unknown tool: ${toolName}`);
   }
@@ -336,9 +336,13 @@ async function handleGetDiagnostics(entry, rpcId) {
 
 // The agent's path to `done`. The effect (persist + notify the renderer) is injected as
 // entry.onMarkDone by the main process; the bridge only routes the call and answers the CLI.
-function handleMarkSessionDone(entry, rpcId) {
+function handleMarkSessionDone(entry, rpcId, log) {
   if (typeof entry.onMarkDone === 'function') {
-    try { entry.onMarkDone(entry.sessionId); } catch {}
+    try {
+      entry.onMarkDone(entry.sessionId);
+    } catch (err) {
+      log.error(`[mcp] session=${entry.sessionId} markSessionDone persist failed: ${err.message}`);
+    }
   }
   sendResult(entry, rpcId, {
     content: [{ type: 'text', text: 'Session marked as done' }],

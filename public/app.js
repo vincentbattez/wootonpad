@@ -437,8 +437,6 @@ function updateRunningIndicators() {
       responseReadySessions.delete(id);
       sessionBusyState.delete(id);
     }
-    const dot = item.querySelector('.session-status-dot');
-    if (dot) dot.classList.toggle('running', running);
   });
   // Update slug group running dots
   document.querySelectorAll('.slug-group').forEach(group => {

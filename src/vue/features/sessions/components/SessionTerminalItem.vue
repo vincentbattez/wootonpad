@@ -1,6 +1,6 @@
 <template>
   <div
-    class="session-item session-terminal-item"
+    class="session-item"
     :class="{ active: isActive, 'has-running-pty': isRunning, 'is-terminal': true }"
     :id="'si-' + session.sessionId"
     :data-session-id="session.sessionId"
