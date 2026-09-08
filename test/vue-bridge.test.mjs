@@ -60,18 +60,18 @@ test('setResponseReady marks ready and clears busy', () => {
   const bridge = createSidebarBridge(store);
   bridge.setBusy('s3', true);
   bridge.setResponseReady('s3');
-  assert.equal(sessionsStore.responseReadySessions.has('s3'), true);
+  assert.equal(sessionsStore.unreadSessions.has('s3'), true);
   assert.equal(sessionsStore.sessionBusyState.has('s3'), false);
   bridge.clearNotifications('s3');
 });
 
-test('clearNotifications clears attention and response-ready', () => {
+test('clearNotifications clears attention and unread', () => {
   const bridge = createSidebarBridge(store);
   bridge.addAttention('s4');
   bridge.setResponseReady('s4');
   bridge.clearNotifications('s4');
   assert.equal(sessionsStore.attentionSessions.has('s4'), false);
-  assert.equal(sessionsStore.responseReadySessions.has('s4'), false);
+  assert.equal(sessionsStore.unreadSessions.has('s4'), false);
 });
 
 test('the header setters coerce falsy to null and clearHeader resets them', () => {

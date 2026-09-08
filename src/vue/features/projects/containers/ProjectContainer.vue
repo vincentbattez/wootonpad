@@ -78,7 +78,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
-        :response-ready-sessions="responseReadySessions"
+        :unread-sessions="unreadSessions"
         :search-match-ids="searchMatchIds"
         @open="(s) => $emit('open', s)"
         @stop="(id) => $emit('stop', id)"
@@ -88,6 +88,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
         @archive-sessions="(sessions) => $emit('archive-sessions', sessions)"
       />
 
@@ -100,7 +101,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
-        :response-ready-sessions="responseReadySessions"
+        :unread-sessions="unreadSessions"
         :search-match-ids="searchMatchIds"
         :show-starred-only="showStarredOnly"
         :show-running-only="showRunningOnly"
@@ -115,6 +116,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
         @new-session="(p, btn) => $emit('new-session', p, btn)"
         @settings="(path) => $emit('settings', path)"
         @open-external-ide="(path) => $emit('open-external-ide', path)"
@@ -155,7 +157,7 @@ const props = defineProps({
   activeSessionId: { type: String, default: null },
   sessionBusyState: { type: Map, required: true },
   attentionSessions: { type: Set, required: true },
-  responseReadySessions: { type: Set, required: true },
+  unreadSessions: { type: Set, required: true },
   searchMatchIds: { type: Set, default: null },
   showStarredOnly: Boolean,
   showRunningOnly: Boolean,
@@ -166,7 +168,7 @@ const props = defineProps({
 });
 
 const emit = defineEmits([
-  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename',
+  'open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'done',
   'new-session', 'settings', 'open-external-ide', 'open-project-folder', 'run-project', 'archive-sessions', 'remove-project',
 ]);
 
@@ -224,6 +226,9 @@ const partition = computed(() => partitionSessionList({
   showStarredOnly: props.showStarredOnly,
   showRunningOnly: props.showRunningOnly,
   showTodayOnly: props.showTodayOnly,
+  busySessionIds: props.sessionBusyState,
+  attentionSessionIds: props.attentionSessions,
+  unreadSessionIds: props.unreadSessions,
   visibleSessionCount: props.visibleSessionCount,
   sessionMaxAgeDays: props.sessionMaxAgeDays,
   now: Date.now(),

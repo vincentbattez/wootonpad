@@ -15,7 +15,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
-        :response-ready-sessions="responseReadySessions"
+        :unread-sessions="unreadSessions"
         @open="(s) => $emit('open', s)"
         @stop="(id) => $emit('stop', id)"
         @star="(id) => $emit('star', id)"
@@ -24,6 +24,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
       />
 
       <!-- When both a promoted run and a rest exist, the rest hides behind a "+N more" toggle;
@@ -44,7 +45,7 @@
         :active-session-id="activeSessionId"
         :session-busy-state="sessionBusyState"
         :attention-sessions="attentionSessions"
-        :response-ready-sessions="responseReadySessions"
+        :unread-sessions="unreadSessions"
         @open="(s) => $emit('open', s)"
         @stop="(id) => $emit('stop', id)"
         @star="(id) => $emit('star', id)"
@@ -53,6 +54,7 @@
         @jsonl="(id) => $emit('jsonl', id)"
         @launch-config="(id) => $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
+        @done="(id) => $emit('done', id)"
       />
     </div>
   </div>
@@ -74,10 +76,10 @@ const props = defineProps({
   activeSessionId: { type: String, default: null },
   sessionBusyState: { type: Map, required: true },
   attentionSessions: { type: Set, required: true },
-  responseReadySessions: { type: Set, required: true },
+  unreadSessions: { type: Set, required: true },
 });
 
-defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'archive-all']);
+defineEmits(['open', 'stop', 'star', 'archive', 'fork', 'jsonl', 'launch-config', 'rename', 'done', 'archive-all']);
 
 const groupId = computed(() => 'slug-' + props.slug.replace(/[^a-zA-Z0-9_-]/g, '_'));
 

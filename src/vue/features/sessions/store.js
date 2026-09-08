@@ -1,9 +1,9 @@
 import { reactive } from 'vue';
 
-// The sessions Feature store. Two slices the feature owns: the Session/Project tree with
-// the live PTY sets that drive a row's running / busy / attention / response-ready states,
-// and the terminal header's identity. The feature's Bridge
-// writes here; a Dumb Component reads it only through a Container.
+// The sessions Feature store. Two slices the feature owns: the Session/Project tree with the
+// live PTY sets that feed a row's Session State (busy → working, attention → needsInput) and
+// its Unread accent, and the terminal header's identity. The feature's Bridge writes here; a
+// Dumb Component reads it only through a Container.
 
 // Session runtime state: the Project/Session tree plus the live PTY sets.
 export const sessionsStore = reactive({
@@ -15,7 +15,7 @@ export const sessionsStore = reactive({
   activeSessionId: null,
   sessionBusyState: new Map(),
   attentionSessions: new Set(),
-  responseReadySessions: new Set(),
+  unreadSessions: new Set(),
   lastActivityTime: new Map(),
   pendingSessions: new Set(),
 
