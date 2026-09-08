@@ -11,26 +11,27 @@ function localDayKey(date) {
 // `working` or `needsInput`. A live PTY is not an answer to it, so a Session whose shell
 // happens to be up but which is doing nothing drops out. A Terminal has no Session State at
 // all; it survives on its PTY alone, so opening one never makes it vanish from under the
-// filter. `busySessionIds`, `attentionSessionIds` and `unreadSessionIds` are anything with a
-// `.has()` — the renderer hands its live Map and Sets straight in.
-function isActiveSession(session, { activePtyIds, busySessionIds, attentionSessionIds, unreadSessionIds }) {
+// filter. `busySessionIds`, `attentionSessionIds` and `needsInputSessionIds` are anything with
+// a `.has()` — the renderer hands its live Map and Sets straight in. Unread is absent on
+// purpose: an answer nobody has read yet is not a separate reason to be active.
+function isActiveSession(session, { activePtyIds, busySessionIds, attentionSessionIds, needsInputSessionIds }) {
   const id = session.sessionId;
   if (isTerminalLike(session)) return activePtyIds.has(id);
   const state = sessionStateFor({
     type: session.type,
     done: session.done,
     isBusy: busySessionIds.has(id),
-    isAttention: attentionSessionIds.has(id) || unreadSessionIds.has(id),
+    isAttention: attentionSessionIds.has(id) || needsInputSessionIds.has(id),
   });
   return state === 'working' || state === 'needsInput';
 }
 
 // Exported so the sidebar's "hide a Project with no surviving Session" rule asks the same
 // question this module does, rather than keeping its own copy of the four filters.
-export function filterSessions(sessions, { activePtyIds = new Set(), searchMatchIds = null, showStarredOnly = false, showRunningOnly = false, showTodayOnly = false, busySessionIds = new Set(), attentionSessionIds = new Set(), unreadSessionIds = new Set(), now = 0 } = {}) {
+export function filterSessions(sessions, { activePtyIds = new Set(), searchMatchIds = null, showStarredOnly = false, showRunningOnly = false, showTodayOnly = false, busySessionIds = new Set(), attentionSessionIds = new Set(), needsInputSessionIds = new Set(), now = 0 } = {}) {
   let out = sessions;
   if (showStarredOnly) out = out.filter(s => s.starred);
-  if (showRunningOnly) out = out.filter(s => isActiveSession(s, { activePtyIds, busySessionIds, attentionSessionIds, unreadSessionIds }));
+  if (showRunningOnly) out = out.filter(s => isActiveSession(s, { activePtyIds, busySessionIds, attentionSessionIds, needsInputSessionIds }));
   if (showTodayOnly) {
     const todayKey = localDayKey(new Date(now));
     out = out.filter(s => s.modified && localDayKey(new Date(s.modified)) === todayKey);
@@ -102,12 +103,12 @@ export function partitionSessionList({
   showTodayOnly = false,
   busySessionIds = new Set(),
   attentionSessionIds = new Set(),
-  unreadSessionIds = new Set(),
+  needsInputSessionIds = new Set(),
   visibleSessionCount = 10,
   sessionMaxAgeDays = 3,
   now = 0,
 } = {}) {
-  const filters = { activePtyIds, searchMatchIds, showStarredOnly, showRunningOnly, showTodayOnly, busySessionIds, attentionSessionIds, unreadSessionIds, now };
+  const filters = { activePtyIds, searchMatchIds, showStarredOnly, showRunningOnly, showTodayOnly, busySessionIds, attentionSessionIds, needsInputSessionIds, now };
   const kept = filterSessions(sessions, filters);
   const anyFilter = !!(searchMatchIds || showStarredOnly || showRunningOnly || showTodayOnly);
 

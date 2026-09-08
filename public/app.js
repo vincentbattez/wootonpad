@@ -77,6 +77,7 @@ let searchMatchProjectPaths = null; // Set<string> of project paths matched by n
 //
 const attentionSessions = new Set(); // sessions needing user action (OSC 9)
 const unreadSessions = new Set(); // Claude finished, user hasn't looked (terminal state)
+const needsInputSessions = new Set(); // turn over, the human owes a reply (Session State)
 const sessionBusyState = new Map(); // sessionId → boolean (currently active)
 const lastActivityTime = new Map(); // sessionId → Date of last terminal output
 window.lastActivityTime = lastActivityTime; // exposed for Vue components
@@ -84,19 +85,35 @@ window.lastActivityTime = lastActivityTime; // exposed for Vue components
 // Noise patterns — these don't count as activity
 const activityNoiseRe = /file-history-snapshot|^\s*$/;
 
-// Central activity dispatcher
+// Central activity dispatcher. Splits one CLI edge into the two things it means: the Session
+// State (working, then needsInput once the turn ends) and the reading state (Unread).
 function setActivity(sessionId, active) {
-  if (unreadSessions.has(sessionId)) return;
-
   const wasActive = sessionBusyState.get(sessionId) || false;
   sessionBusyState.set(sessionId, active);
 
-  if (wasActive && !active && sessionId !== activeSessionId) {
-    unreadSessions.add(sessionId);
-    window.vueSidebar?.setUnread(sessionId);
+  if (wasActive && !active) {
+    // The turn ended: the ball is in the human's court. True whether or not the Session is
+    // the one on screen — watching an answer arrive is not replying to it (VIN-148, US 6).
+    needsInputSessions.add(sessionId);
+    window.vueSidebar?.setNeedsInput(sessionId);
+    // Unread is the reading state, and only a Session nobody is looking at can be unread.
+    if (sessionId !== activeSessionId) {
+      unreadSessions.add(sessionId);
+      window.vueSidebar?.setUnread(sessionId);
+    }
   }
 
+  // Work resuming takes the ball back, and `working` outranks needsInput anyway.
+  if (active) clearNeedsInput(sessionId);
+
   window.vueSidebar?.setBusy(sessionId, active);
+}
+
+// The Session is no longer waiting on the human: it resumed work, or the subject was declared
+// closed. Not called when a Session is merely opened — reading is not answering.
+function clearNeedsInput(sessionId) {
+  needsInputSessions.delete(sessionId);
+  window.vueSidebar?.clearNeedsInput(sessionId);
 }
 
 // Terminal output activity — updates lastActivityTime only, busy state driven by backend
@@ -319,6 +336,7 @@ window.api.onCliBusyState((sessionId, busy) => {
 // main process performs when the Session goes busy again. The row's own toggle patches the
 // caches itself; this is the same patch for the writes it does not originate.
 window.api.onSessionDone((sessionId, done) => {
+  if (done) clearNeedsInput(sessionId);
   applyDoneToCaches(sessionId, done);
   refreshSidebar();
 });
@@ -426,6 +444,7 @@ function updateRunningIndicators() {
       // Session State reads. The State Dot itself is Vue's (VIN-148).
       attentionSessions.delete(id);
       unreadSessions.delete(id);
+      needsInputSessions.delete(id);
       sessionBusyState.delete(id);
     }
   });
@@ -1787,6 +1806,7 @@ window.__sb = {
   // two separate decisions.
   toggleDone: async (id) => {
     const { done } = await window.api.toggleSessionDone(id);
+    if (done) clearNeedsInput(id);
     applyDoneToCaches(id, done);
     refreshSidebar();
   },

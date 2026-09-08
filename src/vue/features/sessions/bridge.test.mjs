@@ -11,6 +11,7 @@ function makeStore() {
     activeSessionId: null,
     sessionBusyState: new Map(),
     attentionSessions: new Set(),
+    needsInputSessions: new Set(),
     unreadSessions: new Set(),
     headerSession: null,
     headerPtyTitle: null,
@@ -80,4 +81,27 @@ test('clearHeader empties every header field', () => {
   assert.equal(store.headerPtyTitle, null);
   assert.equal(store.headerShellProfile, null);
   assert.equal(store.headerAccount, null);
+});
+
+// VIN-148 — the turn ending and the human reading are two different edges. Opening a Session
+// clears what it is fair to clear by looking; it never takes the ball back.
+test('opening a Session clears Unread but leaves needsInput standing', () => {
+  const store = makeStore();
+  const bridge = createSessionsBridge(store);
+
+  bridge.setNeedsInput('s9');
+  bridge.setUnread('s9');
+  bridge.clearNotifications('s9');
+
+  assert.equal(store.unreadSessions.has('s9'), false, 'reading clears Unread');
+  assert.equal(store.needsInputSessions.has('s9'), true, 'reading is not replying');
+});
+
+test('needsInput is lifted explicitly, by work resuming or a declared done', () => {
+  const store = makeStore();
+  const bridge = createSessionsBridge(store);
+
+  bridge.setNeedsInput('s10');
+  bridge.clearNeedsInput('s10');
+  assert.equal(store.needsInputSessions.has('s10'), false);
 });

@@ -21,6 +21,7 @@ if (!app.isPackaged) {
 
 const log = require('electron-log');
 // getFolderIndexMtimeMs moved to session-cache.js
+const { isBusyTitle, isIdleTitle } = require('./cli-activity');
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
@@ -2298,8 +2299,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         // Detect Claude CLI busy state from OSC 0 title (spinner chars = busy, ✳ = idle)
         if (code === '0') {
           const firstChar = payload.charAt(0);
-          const isBusy = firstChar.charCodeAt(0) >= 0x2800 && firstChar.charCodeAt(0) <= 0x28FF;
-          const isIdle = firstChar === '\u2733'; // ✳
+          // The spinner alphabet is the CLI's and changes between releases — read it in one
+          // tested place (cli-activity.js), never inline here (VIN-148).
+          const isBusy = isBusyTitle(payload);
+          const isIdle = isIdleTitle(payload);
           log.debug(`[OSC 0] session=${currentId} char=U+${firstChar.charCodeAt(0).toString(16).toUpperCase()} busy=${isBusy} idle=${isIdle} wasBusy=${!!session._cliBusy}`);
           if (isBusy && !session._cliBusy) {
             session._cliBusy = true;

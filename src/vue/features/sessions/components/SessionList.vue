@@ -18,6 +18,7 @@
       :is-running="activePtyIds.has(s.sessionId)"
       :is-busy="sessionBusyState.get(s.sessionId) || false"
       :is-attention="attentionSessions.has(s.sessionId)"
+      :is-needs-input="needsInputSessions.has(s.sessionId)"
       :is-unread="unreadSessions.has(s.sessionId)"
       @open="$emit('open', s)"
       @stop="(id) => $emit('stop', id)"
@@ -48,6 +49,7 @@ defineProps({
   activeSessionId: { type: String, default: null },
   sessionBusyState: { type: Map, required: true },
   attentionSessions: { type: Set, required: true },
+  needsInputSessions: { type: Set, required: true },
   unreadSessions: { type: Set, required: true },
   compact: { type: Boolean, default: false },
 });

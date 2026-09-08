@@ -61,6 +61,7 @@ const props = defineProps({
   isRunning: Boolean,
   isBusy: Boolean,
   isAttention: Boolean,
+  isNeedsInput: Boolean,
   isUnread: Boolean,
   // Density only, deliberately untied from `archived` (ADR 0005).
   compact: Boolean,
@@ -83,13 +84,13 @@ const msgSuffix = computed(() =>
 );
 
 // The two needs-input signals join here and nowhere else: the OSC 9 approval/permission
-// notification, and the turn that ended off-focus. Unread also rides the second one, but it
-// is a reading state, not a Session State — it accents the title, never the dot.
+// notification, and a turn that has ended without a reply. Unread is deliberately absent —
+// it is a reading state, it accents the title, and it never reaches the State Dot.
 const sessionState = computed(() => sessionStateFor({
   type: props.session.type,
   done: !!props.session.done,
   isBusy: props.isBusy,
-  isAttention: props.isAttention || props.isUnread,
+  isAttention: props.isAttention || props.isNeedsInput,
 }));
 
 const dotClass = computed(() => stateDotClass(sessionState.value));
