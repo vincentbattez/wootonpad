@@ -2482,7 +2482,15 @@ function startProjectsPolling(watchDir, queueFolder) {
 
     if (previous) {
       for (const [folder, mtime] of current) {
-        if (previous.get(folder) !== mtime) queueFolder(folder);
+        if (previous.get(folder) !== mtime) {
+          // Live gauge (VIN-149): the recursive fs.watch branch pushes each .jsonl write's tail
+          // straight away, but this poller is the only feed on WSL-backed accounts (and whenever
+          // fs.watch fails), and it sees folders, not files. Push the changed folder's newest
+          // .jsonl tail so the gauge moves within a running turn here too — throttled, ahead of
+          // the debounced re-index that queueFolder triggers.
+          contextLivePush.onFolderChanged(folder);
+          queueFolder(folder);
+        }
       }
       for (const folder of previous.keys()) {
         if (!current.has(folder)) queueFolder(folder);

@@ -7,6 +7,7 @@
 //
 // Kept free of Electron so a test can drive it with a temp .jsonl and a collector: `send`,
 // `projectsDir` and `now` are injected, the tail read defaults to the real one.
+const fs = require('fs');
 const path = require('path');
 const { readSessionContextTail } = require('./read-session-file');
 const { createContextPushThrottle } = require('./context-push-throttle');
@@ -45,7 +46,39 @@ function createContextLivePush({
     if (ctx) send(sessionId, ctx.contextUsage, ctx.contextModel);
   }
 
-  return { onFileChanged };
+  // The polling fallback (WSL-backed accounts, and any account whose fs.watch failed — see
+  // startProjectsWatcher in main.js) is folder-mtime granular: it knows a folder changed but not
+  // which file. Enumerate that folder's .jsonl files and push the most-recently-modified one —
+  // on a running turn that is the Session being appended to. Pushing only the newest keeps the
+  // per-sweep cost over the 9p share to a single tail read rather than one per Session, and the
+  // throttle still spaces repeats. Without this the gauge never moves live on those platforms.
+  function onFolderChanged(folder) {
+    const folderPath = path.join(projectsDir(), folder);
+    let entries;
+    try {
+      entries = fs.readdirSync(folderPath, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    let newest = null;
+    let newestMtime = -Infinity;
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      let mtime;
+      try {
+        mtime = fs.statSync(path.join(folderPath, entry.name)).mtimeMs;
+      } catch {
+        continue;
+      }
+      if (mtime > newestMtime) {
+        newestMtime = mtime;
+        newest = entry.name;
+      }
+    }
+    if (newest) onFileChanged(folder, newest);
+  }
+
+  return { onFileChanged, onFolderChanged };
 }
 
 module.exports = { createContextLivePush };

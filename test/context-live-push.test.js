@@ -132,3 +132,46 @@ test('a non-.jsonl change is ignored', () => {
 
   assert.equal(events.length, 0);
 });
+
+// onFolderChanged is the poller fallback's entry point (WSL, and any account whose fs.watch
+// failed): folder-mtime granular, so it must find the changed file itself.
+
+test('a changed folder pushes its most-recently-modified .jsonl', () => {
+  const dir = makeProjectsDir();
+  writeSession(dir, 'proj', 'stale', [assistantEntry({ input_tokens: 1 }, 'm')]);
+  writeSession(dir, 'proj', 'active', [assistantEntry({ input_tokens: 300 }, 'm')]);
+  // Make 'active' unambiguously the newest, regardless of write order's mtime granularity.
+  const now = Date.now();
+  fs.utimesSync(path.join(dir, 'proj', 'stale.jsonl'), new Date(now - 10000), new Date(now - 10000));
+  fs.utimesSync(path.join(dir, 'proj', 'active.jsonl'), new Date(now), new Date(now));
+  const { send, events } = collector();
+  const live = createContextLivePush({ send, projectsDir: () => dir, now: () => 1000 });
+
+  live.onFolderChanged('proj');
+
+  assert.equal(events.length, 1);
+  assert.equal(events[0].id, 'active');
+  assert.equal(events[0].usage.inputTokens, 300);
+});
+
+test('a changed folder with no .jsonl pushes nothing', () => {
+  const dir = makeProjectsDir();
+  const folderPath = path.join(dir, 'proj');
+  fs.mkdirSync(folderPath, { recursive: true });
+  fs.writeFileSync(path.join(folderPath, 'sessions-index.json'), '{}');
+  const { send, events } = collector();
+  const live = createContextLivePush({ send, projectsDir: () => dir, now: () => 1000 });
+
+  live.onFolderChanged('proj');
+
+  assert.equal(events.length, 0);
+});
+
+test('a missing folder no-ops rather than throwing', () => {
+  const dir = makeProjectsDir();
+  const { send, events } = collector();
+  const live = createContextLivePush({ send, projectsDir: () => dir, now: () => 1000 });
+
+  assert.doesNotThrow(() => live.onFolderChanged('does-not-exist'));
+  assert.equal(events.length, 0);
+});

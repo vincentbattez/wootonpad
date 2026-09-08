@@ -48,6 +48,16 @@ over on the renderer side — see `context-gauge.mjs`.)
 
 The missing relay is a **write-signal-driven** live push: on each `.jsonl` change, read only the
 tail and push `session-context`, throttled, independent of the OSC title and of the cache
-re-index. That is exactly what VIN-149 adds — `context-live-push.js` hung off the existing
-`fs.watch` signal in `startProjectsWatcher` (`main.js`), throttled by `context-push-throttle.js`
-— plus `applyStoredContext` so Path B can no longer blank a running row.
+re-index. That is exactly what VIN-149 adds — `context-live-push.js`, throttled by
+`context-push-throttle.js`, driven off both feeds the projects directory has: the recursive
+`fs.watch` signal in `startProjectsWatcher` (`main.js`), and the polling fallback used on
+WSL-backed accounts and whenever `fs.watch` fails. The watch branch calls `onFileChanged` with
+the written file's basename; the poller is folder-mtime granular, so it calls `onFolderChanged`,
+which pushes the changed folder's most-recently-modified `.jsonl` — the Session being appended to
+during a running turn. Wiring both feeds keeps the gauge moving live on every platform the app
+supports, not only the ones where `fs.watch` delivers file-level events.
+
+The renderer's pre-existing `applyStoredContext` (`context-gauge.mjs`, unchanged here) still does
+its own job — re-applying the last live value onto a freshly rebuilt tree so Path B's re-index
+cannot blank a running row — but it is not part of this fix; VIN-149 only adds the write-signal
+relay above (and, on the renderer side, `gaugeState` for the empty "measuring" track).
