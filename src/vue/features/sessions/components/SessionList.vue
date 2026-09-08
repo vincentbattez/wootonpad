@@ -7,7 +7,6 @@
       :is-running="activePtyIds.has(s.sessionId)"
       @open="$emit('open', s)"
       @stop="(id) => $emit('stop', id)"
-      @star="(id) => $emit('star', id)"
       @rename="(id, name) => $emit('rename', id, name)"
     />
     <SessionItem

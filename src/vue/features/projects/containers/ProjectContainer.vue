@@ -232,7 +232,6 @@ const partition = computed(() => partitionSessionList({
   busySessionIds: props.sessionBusyState,
   attentionSessionIds: props.attentionSessions,
   needsInputSessionIds: props.needsInputSessions,
-  unreadSessionIds: props.unreadSessions,
   visibleSessionCount: props.visibleSessionCount,
   sessionMaxAgeDays: props.sessionMaxAgeDays,
   now: Date.now(),

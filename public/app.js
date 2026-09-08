@@ -311,7 +311,7 @@ window.api.onTerminalNotification((sessionId, message) => {
   // 2. "Claude Code needs your approval for the plan" → approval, needs your
   // 3. "Claude needs your permission to use {tool}"   → permission, needs your
   // 4. "Claude Code wants to enter plan mode"         → wants to enter
-  if (/attention|approval|permission|needs your|wants to enter/i.test(message) && sessionId !== activeSessionId) {
+  if (/attention|approval|permission|needs your|wants to enter/i.test(message)) {
     attentionSessions.add(sessionId);
     window.vueSidebar?.addAttention(sessionId);
   } else if (/waiting for your input/i.test(message)) {

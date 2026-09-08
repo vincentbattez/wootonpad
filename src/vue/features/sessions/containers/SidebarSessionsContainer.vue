@@ -108,7 +108,6 @@ const visibleProjects = computed(() => {
       busySessionIds: store.sessionBusyState,
       attentionSessionIds: store.attentionSessions,
       needsInputSessionIds: store.needsInputSessions,
-      unreadSessionIds: store.unreadSessions,
       now,
     }).length > 0);
   }

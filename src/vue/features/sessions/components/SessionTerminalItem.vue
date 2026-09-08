@@ -24,7 +24,6 @@
 
       <div class="session-actions">
         <SessionStopButton @stop="$emit('stop', session.sessionId)" />
-        <SessionPinButton :starred="!!session.starred" @star="$emit('star', session.sessionId)" />
       </div>
     </div>
   </div>
@@ -40,7 +39,6 @@ import SbEditableLabel from '../../../shared/ui/SbEditableLabel.vue';
 import { useInlineRename } from '../../../shared/composables/use-inline-rename.js';
 import { sessionDisplayName } from '../composables/use-session-display.js';
 import SessionStopButton from './actions/SessionStopButton.vue';
-import SessionPinButton from './actions/SessionPinButton.vue';
 import SessionRunBadgeIcon from '../icons/SessionRunBadgeIcon.vue';
 import SessionTerminalBadgeIcon from '../icons/SessionTerminalBadgeIcon.vue';
 
@@ -50,7 +48,7 @@ const props = defineProps({
   isRunning: Boolean,
 });
 
-const emit = defineEmits(['open', 'stop', 'star', 'rename']);
+const emit = defineEmits(['open', 'stop', 'rename']);
 
 const { editing: renaming, draft: renameValue, start, submit, cancel } =
   useInlineRename((name) => emit('rename', props.session.sessionId, name));
