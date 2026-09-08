@@ -7,7 +7,7 @@
     @click="!renaming && $emit('open', session)"
   >
     <div class="session-row">
-      <span class="session-status-dot" :class="dotClass"></span>
+      <span class="session-state-dot" :class="dotClass"></span>
 
       <div class="session-info">
         <div class="session-summary" @dblclick.stop="startRename">
@@ -33,7 +33,7 @@
         :compact="compact"
         :archived="!!session.archived"
         :starred="!!session.starred"
-        :done="sessionState === 'done'"
+        :done="!!session.done"
         @stop="$emit('stop', session.sessionId)"
         @fork="$emit('fork', session.sessionId)"
         @jsonl="$emit('jsonl', session.sessionId)"

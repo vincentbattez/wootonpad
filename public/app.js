@@ -93,7 +93,7 @@ function setActivity(sessionId, active) {
 
   if (wasActive && !active && sessionId !== activeSessionId) {
     unreadSessions.add(sessionId);
-    window.vueSidebar?.setResponseReady(sessionId);
+    window.vueSidebar?.setUnread(sessionId);
   }
 
   window.vueSidebar?.setBusy(sessionId, active);

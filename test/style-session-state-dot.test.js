@@ -16,10 +16,10 @@ const styleCss = fs.readFileSync(
 );
 
 const STATE_CLASSES = [
-  '.session-status-dot--sleeping',
-  '.session-status-dot--needs-input',
-  '.session-status-dot--working',
-  '.session-status-dot--done',
+  '.session-state-dot--sleeping',
+  '.session-state-dot--needs-input',
+  '.session-state-dot--working',
+  '.session-state-dot--done',
 ];
 
 test('each Session State has its own State Dot rule', () => {
@@ -39,7 +39,7 @@ test('a State Dot rule is a single class — no cascade arbitrates between two s
 });
 
 test('no State Dot rule uses !important', () => {
-  const dotRules = [...styleCss.matchAll(/\.session-status-dot[^{}]*\{([^}]*)\}/g)];
+  const dotRules = [...styleCss.matchAll(/\.session-state-dot[^{}]*\{([^}]*)\}/g)];
   assert.ok(dotRules.length >= STATE_CLASSES.length);
   for (const [rule, body] of dotRules) {
     assert.ok(!body.includes('!important'), `!important survives in: ${rule.split('\n')[0]}`);
@@ -48,7 +48,8 @@ test('no State Dot rule uses !important', () => {
 
 test('the states the dot no longer renders have no rule left', () => {
   const gone = [
-    '.session-status-dot.running',
+    '.session-status-dot',
+    '.session-state-dot.running',
     '.session-item.cli-busy',
     '.session-item.needs-attention',
     '.session-item.response-ready',
@@ -64,7 +65,7 @@ test('the spinning arc and the attention ripple are gone, the breath replaces th
   assert.ok(styleCss.includes('@keyframes breath-dot'), 'working needs its breath animation');
   // The arc keyframe survives for the terminal header dot, which this ticket leaves alone —
   // but no Session row rule may reach for it any more.
-  assert.ok(!/\.session-status-dot[^{}]*\{[^}]*spin-dot/.test(styleCss), 'no State Dot spins');
+  assert.ok(!/\.session-state-dot[^{}]*\{[^}]*spin-dot/.test(styleCss), 'no State Dot spins');
 });
 
 test('exactly one state animates the dot', () => {
@@ -72,13 +73,13 @@ test('exactly one state animates the dot', () => {
     const m = styleCss.match(new RegExp(`${cls.replace('.', '\\.')}\\s*\\{([^}]*)\\}`));
     return m && /animation:/.test(m[1]);
   });
-  assert.deepEqual(animated, ['.session-status-dot--working']);
+  assert.deepEqual(animated, ['.session-state-dot--working']);
 });
 
 test('Unread accents the title and never the dot', () => {
   assert.ok(styleCss.includes('.session-item.is-unread .session-summary'), 'unread keeps its title accent');
   assert.ok(
-    !/\.session-item\.is-unread[^{}]*\.session-status-dot/.test(styleCss),
+    !/\.session-item\.is-unread[^{}]*\.session-state-dot/.test(styleCss),
     'unread must not reach the State Dot',
   );
 });
