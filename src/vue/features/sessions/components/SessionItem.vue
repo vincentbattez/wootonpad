@@ -7,7 +7,11 @@
     @click="!renaming && $emit('open', session)"
   >
     <div class="session-row">
-      <span class="session-status-dot" :class="{ running: isRunning }"></span>
+      <span
+        v-if="state"
+        class="session-state-dot"
+        :class="'state-' + state"
+      ></span>
 
       <div class="session-info">
         <div class="session-summary" @dblclick.stop="startRename">
@@ -52,6 +56,7 @@ import { computed } from 'vue';
 import SbEditableLabel from '../../../shared/ui/SbEditableLabel.vue';
 import { useInlineRename } from '../../../shared/composables/use-inline-rename.js';
 import { sessionDisplayName, sessionTimeStr } from '../composables/use-session-display.js';
+import { sessionStateFor } from '../session-state.mjs';
 import SessionActions from './SessionActions.vue';
 import SessionContextGauge from './SessionContextGauge.vue';
 import SessionRunBadgeIcon from '../icons/SessionRunBadgeIcon.vue';
@@ -80,6 +85,17 @@ function startRename() {
 const displayName = computed(() => sessionDisplayName(props.session));
 const timeStr = computed(() => sessionTimeStr(props.session));
 
+// The State Dot renders exactly this — one value of four, or null for a terminal-like row.
+// `needsInput` unites the two signals the app already carries: an OSC 9 attention/permission
+// notification, and a turn that just ended on an unfocused Session (the old `response-ready`).
+// `isRunning` (a live PTY) is deliberately not passed — it is not a Session State (ADR 0015).
+const state = computed(() => sessionStateFor({
+  type: props.session.type,
+  done: !!props.session.done,
+  isBusy: props.isBusy,
+  isAttention: props.isAttention || props.isResponseReady,
+}));
+
 const msgSuffix = computed(() =>
   props.session.messageCount ? ` · ${props.session.messageCount} msgs` : ''
 );
@@ -89,12 +105,16 @@ const isTerminalLike = computed(() =>
   props.session.type === 'terminal' || props.session.type === 'run-terminal'
 );
 
+// The item classes drive row chrome only — the Stop button, the pin border, the title's
+// busy shimmer and its Unread accent. The Session State no longer rides here as a stack of
+// booleans: it lives on the single State Dot class above (`state-*`). `response-ready` is
+// kept for the Unread accent on the title (decoupled from the dot); `cli-busy` for its
+// shimmer. There is deliberately no `needs-attention` chrome any more.
 const itemClasses = computed(() => ({
   'session-item--row': true,
   active: props.isActive,
   'has-running-pty': props.isRunning,
   'cli-busy': props.isBusy,
-  'needs-attention': props.isAttention,
   'response-ready': props.isResponseReady,
   'is-pinned': !!props.session.starred,
   'archived-item': !!props.session.archived,
