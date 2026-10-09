@@ -1322,6 +1322,11 @@ let projectsSortOrder = 'name'; // 'name' | 'changes'
 const projectInfoCache = new Map(); // persists across renders
 
 function openProjectViewer(project) {
+  // A Remote Project declares no Project Viewer yet (VIN-154): its ssh://<hostId>/… path has no
+  // local working copy, so the viewer's git/file reads would fail. Honour the declared capability
+  // and refuse to open — this is the single funnel every entry point (card click, legacy card,
+  // UI-state restore) reaches, so gating here hides the viewer everywhere at once (ADR 0014 spirit).
+  if (project?.capabilities?.projectViewer === false) return;
   hideAllViewers();
   placeholder.style.display = 'none';
   terminalArea.style.display = 'none';
