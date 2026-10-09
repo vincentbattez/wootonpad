@@ -6,7 +6,7 @@ const { deriveProjectPath } = require('./derive-project-path');
 const { readSessionFile } = require('./read-session-file');
 const { encodeProjectPath } = require('./encode-project-path');
 const { resolveSessionTitle, resolveSessionSearchTitle } = require('./session-title');
-const { createSource } = require('./session-source');
+const { localSourceFromCtx } = require('./session-source');
 
 /**
  * Session cache module.
@@ -21,19 +21,20 @@ const { createSource } = require('./session-source');
  * its source.
  *
  * Per-source *watching* is not wired here. main.js runs a single filesystem
- * watcher over the Local Host's projects directory; driving a watcher per
- * registered source belongs to the VIN-150 integration that introduces Remote
- * Host mirrors and their sync, and is deliberately deferred to it. Until then no
- * Source but the local one is registered, so nothing is left unwatched in this
- * branch.
+ * watcher over the Local Host's projects directory and passes localSource()
+ * explicitly to the per-folder functions; driving a watcher per registered
+ * source belongs to the VIN-150 integration that introduces Remote Host mirrors
+ * and their sync, and is deliberately deferred to it. Until then no Source but
+ * the local one is registered, so nothing is left unwatched in this branch.
  */
 let activeSessions, getMainWindow, log;
 let deleteCachedFolder, getCachedByFolder, upsertCachedSessions, deleteCachedSession;
 let deleteSearchFolder, deleteSearchSession, upsertSearchEntries;
 let setFolderMeta, getAllFolderMeta, getAllMeta, getAllCached, getSetting, getMeta, setName, getAllProjectGitCounts;
 
-// The registered Sources, keyed by id, and the id of the Local Host's source —
-// the implicit default for every per-folder call the local watcher makes.
+// The registered Sources, keyed by id, and the id of the Local Host's source.
+// The per-folder functions all take their source explicitly; localSource() is
+// how the single local watcher in main.js names it.
 const sources = new Map();
 let localSourceId = null;
 
@@ -62,7 +63,7 @@ function init(ctx) {
   // register the Local Host's one. Identity qualifiers keep local behaviour and
   // persisted local rows unchanged.
   sources.clear();
-  const local = createSource({ id: ctx.accountId || 'default', projectsDir: ctx.PROJECTS_DIR, accountId: ctx.accountId || 'default' });
+  const local = localSourceFromCtx(ctx);
   localSourceId = local.id;
   sources.set(local.id, local);
 }
@@ -96,17 +97,15 @@ class UnknownSourceError extends Error {
 }
 
 /**
- * Resolve a source argument: a Source, a source id, or undefined (→ local).
- * The result is dereferenced straight away (source.projectsDir, …), so an id
- * that names no registered source throws here with a clear message rather than
- * NPE-ing downstream with an opaque TypeError.
+ * Resolve a source argument: a Source or a source id. The source is required —
+ * there is no undefined→local default, so a caller that forgets it fails loudly
+ * rather than silently scanning or evicting the local source. The result is
+ * dereferenced straight away (source.projectsDir, …), so an id that names no
+ * registered source throws here with a clear message rather than NPE-ing
+ * downstream with an opaque TypeError.
  */
 function resolveSource(sourceOrId) {
-  if (!sourceOrId) {
-    const local = localSource();
-    if (!local) throw new UnknownSourceError(localSourceId);
-    return local;
-  }
+  if (!sourceOrId) throw new Error('resolveSource: a source is required');
   if (typeof sourceOrId === 'string') {
     const source = sources.get(sourceOrId);
     if (!source) throw new UnknownSourceError(sourceOrId);
@@ -457,9 +456,14 @@ function cancelScan(id) {
   populatingSources.delete(id);
 }
 
+/** Scan one source on a worker thread. The source is required (see resolveSource). */
 function populateCacheViaWorker(sourceOrId) {
-  const targets = sourceOrId ? [resolveSource(sourceOrId)] : getSources();
-  for (const source of targets) populateSourceViaWorker(source);
+  populateSourceViaWorker(resolveSource(sourceOrId));
+}
+
+/** Scan every registered source — the cold-start / full re-index fan-out. */
+function populateAllSourcesViaWorker() {
+  for (const source of getSources()) populateSourceViaWorker(source);
 }
 
 function populateSourceViaWorker(source) {
@@ -561,6 +565,7 @@ module.exports = {
   unregisterSource,
   getSource,
   getSources,
+  localSource,
   UnknownSourceError,
   readSessionFile,
   readFolderFromFilesystem,
@@ -570,4 +575,5 @@ module.exports = {
   notifyRendererProjectsChanged,
   sendStatus,
   populateCacheViaWorker,
+  populateAllSourcesViaWorker,
 };

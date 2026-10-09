@@ -54,4 +54,17 @@ function createSource({ id, projectsDir, accountId, hostId = null }) {
   };
 }
 
-module.exports = { createSource };
+/**
+ * Build the Local Host's Source from the shared init context (VIN-152).
+ *
+ * One Source shape across the codebase: session-cache and session-transitions
+ * both bind the local source through here rather than hand-rolling the same
+ * `createSource({ ... })` literal, so the local binding can only drift in one
+ * place.
+ */
+function localSourceFromCtx(ctx) {
+  const id = ctx.accountId || 'default';
+  return createSource({ id, projectsDir: ctx.PROJECTS_DIR, accountId: id });
+}
+
+module.exports = { createSource, localSourceFromCtx };

@@ -597,7 +597,8 @@ function initSessionCache() {
 
 initSessionCache();
 const { readSessionFile, readFolderFromFilesystem, refreshFolder, populateCacheFromFilesystem,
-        buildProjectsFromCache, notifyRendererProjectsChanged, sendStatus, populateCacheViaWorker } = sessionCache;
+        buildProjectsFromCache, notifyRendererProjectsChanged, sendStatus,
+        populateAllSourcesViaWorker, localSource } = sessionCache;
 
 /**
  * Read the tail of a Session's .jsonl and push its live context to the renderer (VIN-143).
@@ -694,7 +695,7 @@ ipcMain.handle('add-project', (_event, rawProjectPath) => {
     }
 
     // Immediately index the new folder so it's in cache before frontend renders
-    refreshFolder(folder);
+    refreshFolder(folder, localSource());
     notifyRendererProjectsChanged();
     // Kick off du -sk once on add; subsequent refreshes use the long random TTL
     cacheProjectSize(projectPath);
@@ -1166,7 +1167,7 @@ ipcMain.handle('get-projects', () => {
     const needsPopulate = !isCachePopulated(getActiveAccount().id) || !isSearchIndexPopulated();
 
     if (needsPopulate) {
-      populateCacheViaWorker();
+      populateAllSourcesViaWorker();
       return [];
     }
 
@@ -1714,7 +1715,7 @@ ipcMain.handle('set-active-account-id', (_event, accountId) => {
     PROJECTS_DIR: activeProjectsDir(), activeSessions, getMainWindow: () => mainWindow, log, rekeyMcpServer,
   });
   restartProjectsWatcher();
-  populateCacheViaWorker();
+  populateAllSourcesViaWorker();
   return { ok: true };
 });
 
@@ -2547,8 +2548,8 @@ function startProjectsWatcher() {
     for (const folder of folders) {
       const folderPath = path.join(watchDir, folder);
       if (fs.existsSync(folderPath)) {
-        detectSessionTransitions(folder);
-        refreshFolder(folder);
+        detectSessionTransitions(folder, sessionTransitions.localSource());
+        refreshFolder(folder, localSource());
       } else {
         deleteCachedFolder(folder, getActiveAccount().id);
       }
@@ -2689,7 +2690,7 @@ app.whenReady().then(() => {
   startScheduler(log, runScheduleCommand);
 
   // Re-index search if FTS table was recreated (e.g. tokenizer config change)
-  if (searchFtsRecreated) populateCacheViaWorker();
+  if (searchFtsRecreated) populateAllSourcesViaWorker();
 
   // Check for updates after launch
   if (autoUpdater) {

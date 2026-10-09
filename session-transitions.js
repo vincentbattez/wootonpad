@@ -1,6 +1,6 @@
 const path = require('path');
 const fs = require('fs');
-const { createSource } = require('./session-source');
+const { localSourceFromCtx } = require('./session-source');
 
 /**
  * Fork / plan-accept detection for active PTY sessions.
@@ -8,26 +8,29 @@ const { createSource } = require('./session-source');
  *
  * Detection runs per Source: it reads one source's projects directory and only
  * considers the active sessions belonging to that source, so a fork landing on
- * one Host never rekeys a same-named folder's session on another (VIN-152). The
- * Local Host is the default source for the no-argument call the local watcher
- * makes, which keeps existing behaviour unchanged.
+ * one Host never rekeys a same-named folder's session on another (VIN-152).
+ * detectSessionTransitions takes its source explicitly; the single local watcher
+ * in main.js passes localSource() for it.
  */
 let activeSessions, getMainWindow, log, rekeyMcpServer;
-let localSource = null;
+let local = null;
 
 function init(ctx) {
   activeSessions = ctx.activeSessions;
   getMainWindow = ctx.getMainWindow;
   log = ctx.log;
   rekeyMcpServer = ctx.rekeyMcpServer;
-  // One Source shape across the codebase — build the local source through
-  // createSource rather than hand-rolling a partial literal of it.
-  localSource = createSource({ id: ctx.accountId || 'default', projectsDir: ctx.PROJECTS_DIR, accountId: ctx.accountId || 'default' });
+  local = localSourceFromCtx(ctx);
+}
+
+/** The Local Host's source, for the local watcher to pass to detectSessionTransitions. */
+function localSource() {
+  return local;
 }
 
 /** The source a session belongs to — the Local Host unless it carries a sourceId. */
 function sessionSourceId(session) {
-  return session.sourceId || (localSource && localSource.id) || 'default';
+  return session.sourceId || (local && local.id) || 'default';
 }
 
 // --- Fork / plan-accept detection ---
@@ -93,17 +96,17 @@ function readOldSessionTail(filePath) {
 
 /** Detect fork or plan-accept transitions for active PTY sessions in a folder */
 function detectSessionTransitions(folder, source) {
-  const src = source || localSource;
-  const folderPath = path.join(src.projectsDir, folder);
+  if (!source) throw new Error('detectSessionTransitions: a source is required');
+  const folderPath = path.join(source.projectsDir, folder);
   let currentFiles;
   try {
     currentFiles = fs.readdirSync(folderPath).filter(f => f.endsWith('.jsonl'));
   } catch { return; }
 
   for (const [sessionId, session] of [...activeSessions]) {
-    if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder || sessionSourceId(session) !== src.id) {
+    if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder || sessionSourceId(session) !== source.id) {
       if (!session.exited && !session.isPlainTerminal && session.forkFrom) {
-        log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : session.projectFolder !== folder ? 'folderMismatch('+session.projectFolder+' vs '+folder+')' : 'sourceMismatch('+sessionSourceId(session)+' vs '+src.id+')'}`);
+        log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : session.projectFolder !== folder ? 'folderMismatch('+session.projectFolder+' vs '+folder+')' : 'sourceMismatch('+sessionSourceId(session)+' vs '+source.id+')'}`);
       }
       continue;
     }
@@ -211,4 +214,4 @@ function detectSessionTransitions(folder, source) {
 }
 
 
-module.exports = { init, detectSessionTransitions };
+module.exports = { init, detectSessionTransitions, localSource };
