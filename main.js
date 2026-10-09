@@ -26,6 +26,7 @@ const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolveP
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
 const { createProjectGit } = require('./project-git');
+const remoteHostsIpcModule = require('./remote-hosts-ipc');
 const { execFile } = require('child_process');
 
 // A working diff can be large; the 1 MB default would truncate it into a parse error.
@@ -1741,6 +1742,26 @@ ipcMain.handle('get-accounts-usage', async () => {
   return results;
 });
 
+// --- Remote Hosts (VIN-153) ---
+// The SSH adapter, the Host store and the reachability-probe lifecycle all live in
+// remote-hosts-ipc.js so they are unit-tested without Electron; main.js only injects the db
+// settings and the renderer send, then wires each ipcMain.handle to a method on it (CODING_STANDARDS).
+const remoteHostsIpc = remoteHostsIpcModule.createRemoteHostsIpc({
+  getSetting,
+  setSetting,
+  send: (channel, ...payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...payload);
+  },
+});
+
+ipcMain.handle('get-hosts', () => remoteHostsIpc.getHosts());
+ipcMain.handle('add-host', (_event, host) => remoteHostsIpc.addHost(host));
+ipcMain.handle('add-remote-account', (_event, hostId, account) => remoteHostsIpc.addRemoteAccount(hostId, account));
+ipcMain.handle('remove-host', (_event, hostId) => remoteHostsIpc.removeHost(hostId));
+ipcMain.handle('remove-remote-account', (_event, hostId, accountId) => remoteHostsIpc.removeRemoteAccount(hostId, accountId));
+ipcMain.handle('test-host-connection', (_event, hostId) => remoteHostsIpc.testConnection(hostId));
+ipcMain.handle('get-host-reachability', () => remoteHostsIpc.getReachability());
+
 // --- Scheduled tasks ---
 const scheduleIpc = require('./schedule-ipc');
 
@@ -2633,6 +2654,7 @@ app.whenReady().then(() => {
   buildMenu();
   createWindow();
   startProjectsWatcher();
+  remoteHostsIpc.startHostProbe();
 
   // Both schedule modules resolve their directories per call, so schedules
   // follow the active account instead of the Windows home, and project paths
@@ -2711,6 +2733,9 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   // Shut down all MCP servers
   shutdownAllMcp();
+
+  // Stop the reachability probe so its interval timer stops firing after quit
+  remoteHostsIpc.stopHostProbe();
 
   // Close filesystem watcher
   if (projectsWatcher) {

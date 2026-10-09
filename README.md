@@ -14,6 +14,7 @@ This repo forks [fortael/wootonpad](https://github.com/fortael/wootonpad). On to
 - **Open Project Folder** — One click opens a project — or a worktree — in Finder, Explorer, or your Linux file manager. Nothing to configure.
 - **Run Project** — One click starts your dev server in a Run Terminal beside your Claude sessions, on a command you configure per project. Clicking again reveals it rather than restarting it; Ctrl+C then the up arrow is the restart.
 - **Descriptive session titles** — A session is titled by its goal, not its first prompt. The `ai-title` Claude Code writes is promoted to the displayed title; sessions without one keep a first prompt that is sanitised at ingestion — harness markup stripped, the first useful line kept instead of a raw 120-character cut. The first prompt drops to the terminal header subtitle. Applies to old and archived sessions alike; no LLM is called.
+- **Remote Hosts** — The Accounts tab is a Host → Accounts tree: the Local Host first, then Remote Hosts you reach over SSH. Each shows its SSH target, a live Reachable / Unreachable badge probed in the background, and its Accounts. **Test connection** walks the prerequisites in order — SSH with key auth, a known host key, `tmux` and `claude` on the login PATH, each Account's `configDir` and `.oauth-token` — and stops at the first failure with the exact command to fix it. No password or host-key prompt can ever block the app.
 - **Agent tooling** — Linear as the issue tracker, a mise task runner, ADRs and a project glossary.
 
 ---

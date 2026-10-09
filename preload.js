@@ -54,6 +54,22 @@ contextBridge.exposeInMainWorld('api', {
   getActiveAccountId: () => ipcRenderer.invoke('get-active-account-id'),
   setActiveAccountId: (id) => ipcRenderer.invoke('set-active-account-id', id),
   getAccountsUsage: () => ipcRenderer.invoke('get-accounts-usage'),
+
+  // Remote Hosts (VIN-153)
+  getHosts: () => ipcRenderer.invoke('get-hosts'),
+  addHost: (host) => ipcRenderer.invoke('add-host', host),
+  addRemoteAccount: (hostId, account) => ipcRenderer.invoke('add-remote-account', hostId, account),
+  removeHost: (hostId) => ipcRenderer.invoke('remove-host', hostId),
+  removeRemoteAccount: (hostId, accountId) => ipcRenderer.invoke('remove-remote-account', hostId, accountId),
+  testHostConnection: (hostId) => ipcRenderer.invoke('test-host-connection', hostId),
+  getHostReachability: () => ipcRenderer.invoke('get-host-reachability'),
+  onHostReachability: (callback) => {
+    // Drop any previous subscriber first, so a re-mount of HostsContainer can't stack duplicate
+    // listeners that each fire the callback on one push.
+    ipcRenderer.removeAllListeners('host-reachability');
+    ipcRenderer.on('host-reachability', (_event, hostId, reachable) => callback(hostId, reachable));
+  },
+
   getHomedir: () => ipcRenderer.invoke('get-homedir'),
   getEffectiveSettings: (projectPath) => ipcRenderer.invoke('get-effective-settings', projectPath),
   getScheduleCreatorCommand: () => ipcRenderer.invoke('get-schedule-creator-command'),
