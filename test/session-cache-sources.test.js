@@ -152,6 +152,26 @@ test('unregistering a source evicts only its rows, meta and search entries', () 
   assert.equal(db.getAllCached('mac-mini').length, 0);
 });
 
+test('evicting the local source leaves a remote source\'s cache_meta and search entries intact', () => {
+  const { db, local, remote, FOLDER } = setup();
+  sessionCache.refreshFolder(FOLDER, local);
+  sessionCache.refreshFolder(FOLDER, remote);
+
+  // Evicting the local source must not reach into the remote's rows, even though
+  // cache_meta and search are keyed by folder alone (not Account-scoped) and both
+  // folders share a name. Structural ownership — local claims only bare keys —
+  // keeps the host-qualified remote key out of the local eviction's folder set.
+  sessionCache.unregisterSource(local.id);
+
+  const projects = sessionCache.buildProjectsFromCache();
+  assert.equal(projects.length, 1);
+  assert.equal(projects[0].projectPath, 'ssh://mac-mini/home/me/work/proj');
+  assert.equal(db._meta.size, 1);
+  assert.equal(db._search.length, 1);
+  assert.equal(db._search[0].id, 'remote-sess-1');
+  assert.equal(db.getAllCached('mac-mini').length, 1);
+});
+
 test('unregistering a source mid-scan cancels it so the worker cannot resurrect evicted rows', async () => {
   const { db, remote } = setup();
   // Kick off a background scan of the remote source, then pull it out of the

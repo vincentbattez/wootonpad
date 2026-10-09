@@ -21,11 +21,13 @@
  * The on-disk folder name is kept raw for filesystem access; only the identifier
  * written to the database is qualified.
  */
-function createSource({ id, projectsDir, accountId, hostId = null } = {}) {
+function createSource({ id, projectsDir, accountId, hostId = null }) {
+  if (!id) throw new Error('createSource: id is required');
+  if (!projectsDir) throw new Error('createSource: projectsDir is required');
   const resolvedHostId = hostId || null;
   const resolvedAccountId = accountId || 'default';
   return {
-    id: id || resolvedAccountId,
+    id,
     projectsDir,
     accountId: resolvedAccountId,
     hostId: resolvedHostId,
@@ -36,18 +38,18 @@ function createSource({ id, projectsDir, accountId, hostId = null } = {}) {
     qualifyFolder(folder) {
       return resolvedHostId ? `ssh://${resolvedHostId}/${folder}` : folder;
     },
-    // A folder identifier belongs to this source. Lets eviction find a remote
-    // source's folders in the Account-agnostic cache_meta / search tables.
+    // A folder identifier belongs to this source. Lets eviction find a source's
+    // folders in the Account-agnostic cache_meta / search tables.
     //
-    // A local source (hostId null) claims every folder it is shown. That is only
-    // sound because callers scope the folder set by Account first — getAllCached
-    // is Account-scoped, and local and remote sources carry distinct accountIds —
-    // so a local source never sees a remote folder to mis-claim. The invariant
-    // this rests on: no two sources share an accountId. If one were ever reused
-    // (e.g. a second source also defaulting to 'default'), a local ownsFolder
-    // would swallow the other's folders on eviction. Keep accountIds distinct.
+    // Ownership is structural, not conventional: a remote source claims only its
+    // own host-qualified keys, and a local source claims only bare (non-ssh://)
+    // keys. So a local eviction can never swallow a remote source's rows even
+    // though cache_meta and search are not Account-scoped — no reliance on the
+    // two sources carrying distinct accountIds.
     ownsFolder(folderKey) {
-      return resolvedHostId ? String(folderKey).startsWith(`ssh://${resolvedHostId}/`) : true;
+      return resolvedHostId
+        ? String(folderKey).startsWith(`ssh://${resolvedHostId}/`)
+        : !String(folderKey).startsWith('ssh://');
     },
   };
 }
