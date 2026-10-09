@@ -212,9 +212,12 @@ test('a remote Project group carries remote/hostId and a capability set that hid
   assert.equal(remoteProj.capabilities.externalIde, false);
   assert.equal(remoteProj.capabilities.projectFolder, false);
   assert.equal(remoteProj.capabilities.projectViewer, false);
+  // A Session cannot run on a Remote Host yet (next ticket), so launching is not declared either —
+  // the renderer hides the New-session button and swallows resume/fork/launch-config on it.
+  assert.equal(remoteProj.capabilities.launch, false);
 });
 
-test('folderDiskPath resolves a remote session file to the mirror dir, a local one to the local dir', () => {
+test('sessionFilePath resolves a remote session file to the mirror dir, a local one to the local dir', () => {
   const { local, remote, FOLDER } = setup();
   sessionCache.refreshFolder(FOLDER, local);
   sessionCache.refreshFolder(FOLDER, remote);
@@ -225,6 +228,27 @@ test('folderDiskPath resolves a remote session file to the mirror dir, a local o
   assert.equal(sessionCache.sourceForFolder(remoteKey).id, remote.id);
   assert.equal(sessionCache.sourceForFolder(localKey).id, local.id);
 
-  assert.equal(sessionCache.folderDiskPath(localKey), path.join(local.projectsDir, FOLDER));
-  assert.equal(sessionCache.folderDiskPath(remoteKey), path.join(remote.projectsDir, FOLDER));
+  assert.equal(
+    sessionCache.sessionFilePath(localKey, 'local-sess-1'),
+    path.join(local.projectsDir, FOLDER, 'local-sess-1.jsonl'),
+  );
+  assert.equal(
+    sessionCache.sessionFilePath(remoteKey, 'remote-sess-1'),
+    path.join(remote.projectsDir, FOLDER, 'remote-sess-1.jsonl'),
+  );
+});
+
+test('sessionFilePath rejects a remote folder key or sessionId that would escape the mirror root', () => {
+  const { local, remote, FOLDER } = setup();
+  sessionCache.refreshFolder(FOLDER, local);
+  sessionCache.refreshFolder(FOLDER, remote);
+
+  // A Host-controlled sessionId with `..` must not read outside the mirror (CODING_STANDARDS).
+  const remoteKey = remote.qualifyFolder(FOLDER);
+  assert.equal(sessionCache.sessionFilePath(remoteKey, '../../../../etc/passwd'), null);
+  assert.equal(sessionCache.sessionFilePath(remoteKey, '../../../secret'), null);
+
+  // A folder key whose on-disk name carries `..` traversal is rejected the same way.
+  const escapingKey = remote.qualifyFolder('../../../../etc');
+  assert.equal(sessionCache.sessionFilePath(escapingKey, 'passwd'), null);
 });

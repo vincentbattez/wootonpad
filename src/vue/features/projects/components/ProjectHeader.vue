@@ -29,7 +29,7 @@
       v-html="remoteSvg"
     ></span>
     <button class="project-menu-btn" data-tooltip="More actions" @click.stop="$emit('open-menu', $event)" v-html="dotsSvg"></button>
-    <button class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
+    <button v-if="canLaunch" class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
   </div>
 </template>
 
@@ -54,6 +54,10 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   hasActiveSession: { type: Boolean, default: false },
   renaming: { type: Boolean, default: false },
+  // Whether this Project can launch a Session. A Remote Project declares `launch: false` (it cannot
+  // run a Session yet, next ticket), so its New-session button is hidden. Defaults true so a local
+  // Project — which declares no capabilities — keeps its button.
+  canLaunch: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['toggle', 'refresh-commands', 'open-menu', 'new-session', 'rename', 'cancel-rename']);

@@ -287,10 +287,12 @@ function populateCacheFromFilesystem(sourceOrId) {
 
 // The capabilities a Remote Project declares (ADR 0014 spirit): Sessions are listed and their
 // JSONL is readable from the mirror, but nothing else is wired yet. The renderer hides what is not
-// declared — no Run, External IDE, Project Folder or Project Viewer button. A local Project carries
-// no gate; the renderer treats an absent capability as allowed, so local behaviour is unchanged.
+// declared — no Run, External IDE, Project Folder or Project Viewer button — and refuses every
+// launch path (New session, resume, fork, launch config): a Session cannot run on a Remote Host
+// yet (next ticket). A local Project carries no gate; the renderer treats an absent capability as
+// allowed, so local behaviour is unchanged.
 function remoteProjectCapabilities() {
-  return { run: false, externalIde: false, projectFolder: false, projectViewer: false };
+  return { run: false, externalIde: false, projectFolder: false, projectViewer: false, launch: false };
 }
 
 // A fresh sidebar Project group, carrying the Host facts of the Source it came from so the renderer
@@ -318,15 +320,26 @@ function sourceForFolder(folderKey) {
 }
 
 /**
- * The on-disk directory a folder key's `.jsonl` files live in: the mirror for a Remote Host,
- * the local projects dir for the Local Host. Lets a reader (the JSONL viewer) reach a remote
- * Session's transcript off the mirror instead of the local Account's dir. Falls back to the local
- * source for an unqualified key whose source is gone, so local reads never break.
+ * The validated on-disk path of a Session's `.jsonl`, resolved through the owning Source: the
+ * mirror for a Remote Host (folder key ssh://<hostId>/…), the local Account's dir for a local one.
+ * Lets a reader (the JSONL viewer) reach a remote Session's transcript off the mirror instead of
+ * the local Account's dir. Falls back to the local source for an unqualified key whose source is
+ * gone, so local reads never break.
+ *
+ * The folder key and sessionId of a Remote Session are rsync'd down verbatim from the Host's
+ * `projects/` tree — untrusted input (CODING_STANDARDS: validate paths and ids in the main process;
+ * never trust a path because the sidebar sent it). A `..` in either that would resolve outside the
+ * Source's projectsDir yields null rather than a path reading outside the mirror root. Returns null
+ * when the folder has no owning source.
  */
-function folderDiskPath(folderKey) {
+function sessionFilePath(folderKey, sessionId) {
   const source = sourceForFolder(folderKey) || localSource();
   if (!source) return null;
-  return path.join(source.projectsDir, source.rawFolder(folderKey));
+  const root = path.resolve(source.projectsDir);
+  const full = path.resolve(root, source.rawFolder(folderKey), sessionId + '.jsonl');
+  const rel = path.relative(root, full);
+  if (rel === '' || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+  return full;
 }
 
 /** Build projects response from cached data, unioning every registered source */
@@ -600,7 +613,7 @@ module.exports = {
   getSources,
   localSource,
   sourceForFolder,
-  folderDiskPath,
+  sessionFilePath,
   UnknownSourceError,
   readSessionFile,
   readFolderFromFilesystem,

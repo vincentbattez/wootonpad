@@ -9,16 +9,22 @@ const { createRemoteHostsIpc } = require('../remote-hosts-ipc');
 function harness({ reachable = {} } = {}) {
   const store = {};
   const sent = [];
+  let refreshes = 0;
   let tick = null;
   const ipc = createRemoteHostsIpc({
     getSetting: (k) => store[k],
     setSetting: (k, v) => { store[k] = v; },
     send: (...args) => sent.push(args),
+    onReachabilityChange: () => { refreshes++; },
     run: async (host) => ({ code: reachable[host.sshTarget] ? 0 : 255 }),
     setIntervalFn: (fn) => { tick = fn; return 'timer'; },
     clearIntervalFn: () => { tick = null; },
   });
-  return { ipc, store, sent, runTick: () => tick && tick(), hasTimer: () => tick !== null };
+  return {
+    ipc, store, sent,
+    refreshCount: () => refreshes,
+    runTick: () => tick && tick(), hasTimer: () => tick !== null,
+  };
 }
 
 test('hosts read back normalised, with a Default Account injected', () => {
@@ -51,6 +57,20 @@ test('reachability is pushed only when it flips, not on every probe', async () =
   assert.equal(pushes.length, 1, 'only the first probe, which flipped undefined→reachable, pushed');
   assert.deepEqual(pushes[0], ['host-reachability', 'h1', true]);
   assert.deepEqual(ipc.getReachability(), { h1: true });
+});
+
+test('a reachability flip refreshes the sidebar so greying lands within one probe interval', async () => {
+  const { ipc, store, refreshCount } = harness({ reachable: { 'mac-mini': true } });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.probeHostsOnce();
+  assert.equal(refreshCount(), 1, 'the undefined→reachable flip nudged a projects refresh');
+  await ipc.probeHostsOnce();
+  assert.equal(refreshCount(), 1, 'a steady reachability does not re-fetch projects');
+});
+
+test('createRemoteHostsIpc refuses to build without an onReachabilityChange callback', () => {
+  assert.throws(() => createRemoteHostsIpc({ getSetting: () => {}, setSetting: () => {}, send: () => {} }),
+    /onReachabilityChange/);
 });
 
 test('startHostProbe is idempotent and stopHostProbe releases the timer', () => {

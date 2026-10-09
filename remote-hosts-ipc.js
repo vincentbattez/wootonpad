@@ -53,10 +53,13 @@ function sshRun(host, step, { connectTimeout = 10 } = {}) {
 // pushes to the renderer, `run` executes one step over SSH (the real one shells out; a test one
 // answers from a table), and the timer functions are overridable so the probe lifecycle is testable.
 function createRemoteHostsIpc({
-  getSetting, setSetting, send,
+  getSetting, setSetting, send, onReachabilityChange,
   run = sshRun,
   setIntervalFn = setInterval, clearIntervalFn = clearInterval,
 }) {
+  if (typeof onReachabilityChange !== 'function') {
+    throw new Error('createRemoteHostsIpc: onReachabilityChange callback is required');
+  }
   // Hosts persist under their own setting key, so the Local Accounts store ('accounts') is never
   // touched and there is no migration. Each Host is normalised on read so a Default Account is
   // always present, even for a record written by an older build.
@@ -74,14 +77,21 @@ function createRemoteHostsIpc({
   // reality within one interval of a Host going down or coming back (CONTEXT.md, Reachable).
   async function probeHostsOnce() {
     const hosts = getHosts();
+    let flipped = false;
     await Promise.all(hosts.map(async host => {
       const res = await run(host, remoteHosts.reachStep(), { connectTimeout: 8 });
       const reachable = remoteHosts.classifyReachability(res);
       if (hostReachability[host.id] !== reachable) {
         hostReachability[host.id] = reachable;
         send('host-reachability', host.id, reachable);
+        flipped = true;
       }
     }));
+    // A flip changes which Projects are greyed — remote-mirror.annotateProjects reads this map at
+    // get-projects time (CONTEXT.md: Unreachable Host → its Projects greyed). Nudge the sidebar to
+    // re-fetch so the Unreachable→greyed and Reachable→un-greyed transitions land within one probe
+    // interval rather than waiting on the next unrelated projects refresh.
+    if (flipped) onReachabilityChange();
   }
 
   function startHostProbe() {

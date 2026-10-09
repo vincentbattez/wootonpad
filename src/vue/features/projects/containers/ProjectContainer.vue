@@ -11,6 +11,7 @@
       v-if="isWorktree"
       :project="project"
       :collapsed="collapsed"
+      :can-launch="canLaunch"
       @toggle="toggle"
       @refresh-commands="refreshCommands"
       @open-menu="openMenu"
@@ -23,6 +24,7 @@
       :collapsed="collapsed"
       :has-active-session="hasActiveSession"
       :renaming="isRenaming"
+      :can-launch="canLaunch"
       @toggle="toggle"
       @refresh-commands="refreshCommands"
       @open-menu="openMenu"
@@ -90,13 +92,13 @@
         :needs-input-sessions="needsInputSessions"
         :unread-sessions="unreadSessions"
         :search-match-ids="searchMatchIds"
-        @open="(s) => $emit('open', s)"
+        @open="(s) => canLaunch && $emit('open', s)"
         @stop="(id) => $emit('stop', id)"
         @star="(id) => $emit('star', id)"
         @archive="(id) => $emit('archive', id)"
-        @fork="(id) => $emit('fork', id)"
+        @fork="(id) => canLaunch && $emit('fork', id)"
         @jsonl="(id) => $emit('jsonl', id)"
-        @launch-config="(id) => $emit('launch-config', id)"
+        @launch-config="(id) => canLaunch && $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
         @done="(id) => $emit('done', id)"
         @archive-sessions="(sessions) => $emit('archive-sessions', sessions)"
@@ -191,6 +193,12 @@ const folderId = computed(() => 'project-' + props.project.projectPath.replace(/
 // The Project's declared capabilities. Absent (a local Project) means unrestricted: every button
 // shows. A Remote Project carries explicit `false`s for what it cannot do yet (VIN-154).
 const caps = computed(() => props.project.capabilities || {});
+
+// Whether a Session can be launched on this Project. A Remote Project declares `launch: false` —
+// a Session cannot run on a Remote Host yet (next ticket) — so the New-session button is hidden and
+// every session-start gesture (resume, fork, launch config) is swallowed before it reaches the
+// start-session flow. Absent (a local Project) means allowed, so local launch paths are unchanged.
+const canLaunch = computed(() => caps.value.launch !== false);
 
 // A user-set label wins over the path; clearing it falls back to the last two segments.
 const shortName = computed(() =>

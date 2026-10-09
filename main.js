@@ -1758,6 +1758,9 @@ const remoteHostsIpc = remoteHostsIpcModule.createRemoteHostsIpc({
   send: (channel, ...payload) => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...payload);
   },
+  // A Host's reachability flip re-colours its Remote Projects (greyed when Unreachable). Greyed is
+  // computed at get-projects time, so nudge the sidebar to re-fetch the moment reachability changes.
+  onReachabilityChange: () => notifyRendererProjectsChanged(),
 });
 
 ipcMain.handle('get-hosts', () => remoteHostsIpc.getHosts());
@@ -2016,10 +2019,13 @@ ipcMain.handle('rename-session', (_event, sessionId, name) => {
 ipcMain.handle('read-session-jsonl', (_event, sessionId) => {
   const folder = getCachedFolder(sessionId);
   if (!folder) return { error: 'Session not found in cache' };
-  // Resolve the on-disk directory through the owning Source: a Remote Host's Sessions are read off
-  // its local mirror (folder key ssh://<hostId>/…), a local one off the active Account's dir.
-  const folderDir = sessionCache.folderDiskPath(folder) || path.join(activeProjectsDir(), folder);
-  const jsonlPath = path.join(folderDir, sessionId + '.jsonl');
+  // Resolve the on-disk path through the owning Source: a Remote Host's Sessions are read off its
+  // local mirror (folder key ssh://<hostId>/…), a local one off the active Account's dir. The
+  // folder key and sessionId of a Remote Session are rsync'd down untrusted, so sessionFilePath
+  // validates the resolved path stays inside the Source's projectsDir and returns null on a `..`
+  // that would escape the mirror root (CODING_STANDARDS).
+  const jsonlPath = sessionCache.sessionFilePath(folder, sessionId);
+  if (!jsonlPath) return { error: 'Session not found in cache' };
   try {
     const content = fs.readFileSync(jsonlPath, 'utf-8');
     const entries = [];
