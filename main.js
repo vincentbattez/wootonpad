@@ -2327,7 +2327,6 @@ function finalizePtyExit(session, sessionId, exitCode, signal) {
 // remote-launch's pure core; this is the adapter that shells out and spawns the headless PTYs.
 function reattachRemoteSessions(host) {
   if (!host || !host.sshTarget) return;
-  const account = remoteMirror.activeAccount(host);
   Promise.resolve(remoteHostsIpcModule.sshRun(host, { command: remoteLaunch.listSessionsCommand() }, { connectTimeout: 10 }))
     .then(res => {
       // No tmux server (nothing was ever launched here) or an unreachable Host: nothing to pick up.
@@ -2343,7 +2342,7 @@ function reattachRemoteSessions(host) {
         if (s.realSessionId) attached.push(s.realSessionId);
       }
       for (const id of remoteLaunch.sessionsToReattach(liveIds, attached)) {
-        reattachRemoteSession(host, account, id);
+        reattachRemoteSession(host, id);
       }
     })
     .catch(e => log.warn(`[remote-reattach] list for ${host.sshTarget} failed: ${e.message}`));
@@ -2353,7 +2352,7 @@ function reattachRemoteSessions(host) {
 // State Dot and buffers output exactly like a foreground launch (wirePtyHandlers), so clicking the
 // row later replays the buffer and streams live — no restart of Claude. Reviving a Session that had
 // dropped reuses its object (and its last buffered State) rather than starting a second row.
-function reattachRemoteSession(host, account, sessionId) {
+function reattachRemoteSession(host, sessionId) {
   const existing = activeSessions.get(sessionId);
   if (existing && !existing.exited && !existing.dropped) return; // already live
   let args;
@@ -2445,7 +2444,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // resumes once the fresh attach connects, or the next Reachable flip picks it up.
     if (session.remote && session.dropped) {
       const host = remoteHostsIpc.getHosts().find(h => h.id === session.hostId);
-      if (host) reattachRemoteSession(host, remoteMirror.activeAccount(host), sessionId);
+      if (host) reattachRemoteSession(host, sessionId);
     }
     session.rendererAttached = true;
     session.firstResize = !session.isPlainTerminal;
