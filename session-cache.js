@@ -6,19 +6,39 @@ const { deriveProjectPath } = require('./derive-project-path');
 const { readSessionFile } = require('./read-session-file');
 const { encodeProjectPath } = require('./encode-project-path');
 const { resolveSessionTitle, resolveSessionSearchTitle } = require('./session-title');
+const { localSourceFromCtx } = require('./session-source');
 
 /**
  * Session cache module.
- * Call init(ctx) once with the shared context object.
+ *
+ * The cache indexes a set of Sources (see session-source.js) side by side, not a
+ * single projects directory. Call init(ctx) once with the shared context object:
+ * it binds the database and registers the Local Host's active Account as the one
+ * source. Remote Hosts register further sources at runtime (VIN-150); each is
+ * refreshed (refreshFolder / populateCacheViaWorker per source) and evicted
+ * (unregisterSource) independently, and folders of the same name on different
+ * sources never collide because every database identifier is qualified through
+ * its source.
+ *
+ * Per-source *watching* is not wired here. main.js runs a single filesystem
+ * watcher over the Local Host's projects directory and passes localSource()
+ * explicitly to the per-folder functions; driving a watcher per registered
+ * source belongs to the VIN-150 integration that introduces Remote Host mirrors
+ * and their sync, and is deliberately deferred to it. Until then no Source but
+ * the local one is registered, so nothing is left unwatched in this branch.
  */
-let PROJECTS_DIR, accountId, activeSessions, getMainWindow, log;
+let activeSessions, getMainWindow, log;
 let deleteCachedFolder, getCachedByFolder, upsertCachedSessions, deleteCachedSession;
 let deleteSearchFolder, deleteSearchSession, upsertSearchEntries;
 let setFolderMeta, getAllFolderMeta, getAllMeta, getAllCached, getSetting, getMeta, setName, getAllProjectGitCounts;
 
+// The registered Sources, keyed by id, and the id of the Local Host's source.
+// The per-folder functions all take their source explicitly; localSource() is
+// how the single local watcher in main.js names it.
+const sources = new Map();
+let localSourceId = null;
+
 function init(ctx) {
-  PROJECTS_DIR = ctx.PROJECTS_DIR;
-  accountId = ctx.accountId || 'default';
   activeSessions = ctx.activeSessions;
   getMainWindow = ctx.getMainWindow;
   log = ctx.log;
@@ -38,6 +58,86 @@ function init(ctx) {
   getMeta = ctx.db.getMeta;
   setName = ctx.db.setName;
   getAllProjectGitCounts = ctx.db.getAllProjectGitCounts;
+
+  // Re-point at the active Account: drop any previously registered sources and
+  // register the Local Host's one. Identity qualifiers keep local behaviour and
+  // persisted local rows unchanged.
+  sources.clear();
+  const local = localSourceFromCtx(ctx);
+  localSourceId = local.id;
+  sources.set(local.id, local);
+}
+
+// --- Source registry ---
+
+function registerSource(source) {
+  sources.set(source.id, source);
+  return source;
+}
+
+function getSource(id) {
+  return sources.get(id) || null;
+}
+
+function getSources() {
+  return [...sources.values()];
+}
+
+function localSource() {
+  return sources.get(localSourceId) || null;
+}
+
+/** Raised when a source id names no registered source. */
+class UnknownSourceError extends Error {
+  constructor(id) {
+    super(`Unknown source: ${id}`);
+    this.name = 'UnknownSourceError';
+    this.sourceId = id;
+  }
+}
+
+/**
+ * Resolve a source argument: a Source or a source id. The source is required —
+ * there is no undefined→local default, so a caller that forgets it fails loudly
+ * rather than silently scanning or evicting the local source. The result is
+ * dereferenced straight away (source.projectsDir, …), so an id that names no
+ * registered source throws here with a clear message rather than NPE-ing
+ * downstream with an opaque TypeError.
+ */
+function resolveSource(sourceOrId) {
+  if (!sourceOrId) throw new Error('resolveSource: a source is required');
+  if (typeof sourceOrId === 'string') {
+    const source = sources.get(sourceOrId);
+    if (!source) throw new UnknownSourceError(sourceOrId);
+    return source;
+  }
+  return sourceOrId;
+}
+
+/** Remove a source and evict everything it put in the cache, search and meta. */
+function unregisterSource(id) {
+  const source = sources.get(id);
+  if (!source) return;
+  // Drop it from the registry first, then cancel any in-flight scan: a late
+  // worker message checks the registry and bails rather than resurrecting rows
+  // evictSource is about to delete.
+  sources.delete(id);
+  cancelScan(id);
+  evictSource(source);
+}
+
+function evictSource(source) {
+  const folders = new Set();
+  for (const row of getAllCached(source.accountId)) {
+    if (source.ownsFolder(row.folder)) folders.add(row.folder);
+  }
+  for (const folderKey of getAllFolderMeta().keys()) {
+    if (source.ownsFolder(folderKey)) folders.add(folderKey);
+  }
+  for (const folderKey of folders) {
+    deleteCachedFolder(folderKey, source.accountId); // also drops cache_meta
+    deleteSearchFolder(folderKey);
+  }
 }
 
 // readSessionFile is imported from read-session-file.js (shared with worker)
@@ -49,16 +149,19 @@ function parseContextUsage(raw) {
 }
 
 /** Read one folder from filesystem by scanning .jsonl files directly */
-function readFolderFromFilesystem(folder) {
-  const folderPath = path.join(PROJECTS_DIR, folder);
-  const projectPath = deriveProjectPath(folderPath, folder);
-  if (!projectPath) return { projectPath: null, sessions: [] };
+function readFolderFromFilesystem(folder, sourceOrId) {
+  const source = resolveSource(sourceOrId);
+  const folderPath = path.join(source.projectsDir, folder);
+  const rawProjectPath = deriveProjectPath(folderPath, folder);
+  if (!rawProjectPath) return { projectPath: null, sessions: [] };
+  const projectPath = source.qualifyProjectPath(rawProjectPath);
+  const folderKey = source.qualifyFolder(folder);
   const sessions = [];
 
   try {
     const jsonlFiles = fs.readdirSync(folderPath).filter(f => f.endsWith('.jsonl'));
     for (const file of jsonlFiles) {
-      const s = readSessionFile(path.join(folderPath, file), folder, projectPath);
+      const s = readSessionFile(path.join(folderPath, file), folderKey, projectPath);
       if (s) sessions.push(s);
     }
   } catch {}
@@ -67,21 +170,25 @@ function readFolderFromFilesystem(folder) {
 }
 
 /** Refresh a single folder incrementally: only re-read changed/new .jsonl files */
-function refreshFolder(folder) {
-  const folderPath = path.join(PROJECTS_DIR, folder);
+function refreshFolder(folder, sourceOrId) {
+  const source = resolveSource(sourceOrId);
+  const accountId = source.accountId;
+  const folderKey = source.qualifyFolder(folder);
+  const folderPath = path.join(source.projectsDir, folder);
   if (!fs.existsSync(folderPath)) {
-    deleteCachedFolder(folder, accountId);
+    deleteCachedFolder(folderKey, accountId);
     return;
   }
 
-  const projectPath = deriveProjectPath(folderPath, folder);
-  if (!projectPath) {
-    setFolderMeta(folder, null, getFolderIndexMtimeMs(folderPath));
+  const rawProjectPath = deriveProjectPath(folderPath, folder);
+  if (!rawProjectPath) {
+    setFolderMeta(folderKey, null, getFolderIndexMtimeMs(folderPath));
     return;
   }
+  const projectPath = source.qualifyProjectPath(rawProjectPath);
 
   // Get what's currently cached for this folder
-  const cachedSessions = getCachedByFolder(folder, accountId);
+  const cachedSessions = getCachedByFolder(folderKey, accountId);
   const cachedMap = new Map(); // sessionId → modified ISO string
   for (const row of cachedSessions) {
     cachedMap.set(row.sessionId, row.modified);
@@ -116,7 +223,7 @@ function refreshFolder(folder) {
     }
 
     // File is new or modified — re-read it
-    const s = readSessionFile(filePath, folder, projectPath);
+    const s = readSessionFile(filePath, folderKey, projectPath);
     if (s) {
       sessionsToUpsert.push(s);
       // Title precedence lives in session-title.js. Only customTitle (Claude /title) promotes to
@@ -159,101 +266,111 @@ function refreshFolder(folder) {
   }
 
   // Update folder mtime
-  setFolderMeta(folder, projectPath, getFolderIndexMtimeMs(folderPath));
+  setFolderMeta(folderKey, projectPath, getFolderIndexMtimeMs(folderPath));
 }
 
-/** Populate entire cache from filesystem (cold start) */
-function populateCacheFromFilesystem() {
+/** Populate entire cache from filesystem (cold start), for one source */
+function populateCacheFromFilesystem(sourceOrId) {
+  const source = resolveSource(sourceOrId);
   try {
-    const folders = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
+    const folders = fs.readdirSync(source.projectsDir, { withFileTypes: true })
       .filter(d => d.isDirectory() && d.name !== '.git')
       .map(d => d.name);
 
     for (const folder of folders) {
-      refreshFolder(folder);
+      refreshFolder(folder, source);
     }
   } catch (err) {
     console.error('Error populating cache:', err);
   }
 }
 
-/** Build projects response from cached data */
+/** Build projects response from cached data, unioning every registered source */
 function buildProjectsFromCache() {
   const metaMap = getAllMeta();
-  const cachedRows = getAllCached(accountId);
   const global = getSetting('global') || {};
   const hiddenProjects = new Set(global.hiddenProjects || []);
   const gitCounts = getAllProjectGitCounts?.() || new Map();
+  const folderMeta = getAllFolderMeta();
 
   // Group by projectPath, not on-disk folder name. Multiple ~/.claude/projects/<folder>/
   // directories can resolve to the same projectPath (Claude Code's folder-name encoding
   // scheme has changed over time, leaving legacy stragglers around), so we merge them into
-  // a single sidebar group to avoid duplicate-id collisions in the morphdom render.
+  // a single sidebar group to avoid duplicate-id collisions in the morphdom render. The
+  // projectPath is already qualified per source (identity locally, ssh://<hostId>/… for a
+  // Remote Host), so the same path on two Hosts stays two Projects.
   // Archived Sessions ship in the payload: each Project group reveals its own archive
   // (ADR 0005), so a fully-archived Project stays browsable in the sidebar.
   const projectMap = new Map();
-  for (const row of cachedRows) {
-    if (!row.projectPath) continue;
-    if (hiddenProjects.has(row.projectPath)) continue;
-    const meta = metaMap.get(row.sessionId);
-    const s = {
-      sessionId: row.sessionId,
-      summary: row.summary,
-      firstPrompt: row.firstPrompt,
-      created: row.created,
-      modified: row.modified,
-      messageCount: row.messageCount,
-      projectPath: row.projectPath,
-      slug: row.slug || null,
-      aiTitle: row.aiTitle || null,
-      name: meta?.name || null,
-      starred: meta?.starred || 0,
-      archived: meta?.archived || 0,
-      // Declared, never inferred (ADR 0015) — user data, carried like starred and archived.
-      done: meta?.done || 0,
-      accountId: row.accountId || 'default',
-      // Context gauge (VIN-143): the last assistant turn's usage breakdown and model,
-      // a property of the Session so every row carries it, running or not.
-      contextUsage: parseContextUsage(row.contextUsage),
-      contextModel: row.contextModel || null,
-    };
-    s.title = resolveSessionTitle(s);
-    if (!projectMap.has(row.projectPath)) {
-      projectMap.set(row.projectPath, {
-        folder: encodeProjectPath(row.projectPath),
+  for (const source of sources.values()) {
+    for (const row of getAllCached(source.accountId)) {
+      if (!source.ownsFolder(row.folder)) continue;
+      if (!row.projectPath) continue;
+      if (hiddenProjects.has(row.projectPath)) continue;
+      const meta = metaMap.get(row.sessionId);
+      const s = {
+        sessionId: row.sessionId,
+        summary: row.summary,
+        firstPrompt: row.firstPrompt,
+        created: row.created,
+        modified: row.modified,
+        messageCount: row.messageCount,
         projectPath: row.projectPath,
-        sessions: [],
-      });
+        slug: row.slug || null,
+        aiTitle: row.aiTitle || null,
+        name: meta?.name || null,
+        starred: meta?.starred || 0,
+        archived: meta?.archived || 0,
+        // Declared, never inferred (ADR 0015) — user data, carried like starred and archived.
+        done: meta?.done || 0,
+        accountId: row.accountId || 'default',
+        // Context gauge (VIN-143): the last assistant turn's usage breakdown and model,
+        // a property of the Session so every row carries it, running or not.
+        contextUsage: parseContextUsage(row.contextUsage),
+        contextModel: row.contextModel || null,
+      };
+      s.title = resolveSessionTitle(s);
+      if (!projectMap.has(row.projectPath)) {
+        projectMap.set(row.projectPath, {
+          folder: encodeProjectPath(row.projectPath),
+          projectPath: row.projectPath,
+          sessions: [],
+        });
+      }
+      projectMap.get(row.projectPath).sessions.push(s);
     }
-    projectMap.get(row.projectPath).sessions.push(s);
   }
 
   // Include empty project directories (no sessions yet). Resolve folder→projectPath
   // through cache_meta (populated by the indexer) instead of re-reading a JSONL off
   // disk for every directory on every render. Fall back to deriveProjectPath only
   // for folders the indexer hasn't seen yet, and backfill cache_meta so subsequent
-  // renders are pure DB reads.
-  try {
-    const folderMeta = getAllFolderMeta();
-    const dirs = fs.readdirSync(PROJECTS_DIR, { withFileTypes: true })
-      .filter(d => d.isDirectory() && d.name !== '.git');
-    for (const d of dirs) {
-      let projectPath = folderMeta.get(d.name)?.projectPath;
-      if (!projectPath) {
-        projectPath = deriveProjectPath(path.join(PROJECTS_DIR, d.name), d.name);
-        if (projectPath) setFolderMeta(d.name, projectPath, 0);
+  // renders are pure DB reads. Done per source so an empty folder is attributed to
+  // the Host it lives on.
+  for (const source of sources.values()) {
+    try {
+      const dirs = fs.readdirSync(source.projectsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && d.name !== '.git');
+      for (const d of dirs) {
+        const folderKey = source.qualifyFolder(d.name);
+        let projectPath = folderMeta.get(folderKey)?.projectPath;
+        if (!projectPath) {
+          const raw = deriveProjectPath(path.join(source.projectsDir, d.name), d.name);
+          projectPath = raw ? source.qualifyProjectPath(raw) : null;
+          if (projectPath) setFolderMeta(folderKey, projectPath, 0);
+        }
+        if (!projectPath) continue;
+        if (hiddenProjects.has(projectPath)) continue;
+        if (!projectMap.has(projectPath)) {
+          projectMap.set(projectPath, {
+            folder: encodeProjectPath(projectPath),
+            projectPath,
+            sessions: [],
+          });
+        }
       }
-      if (!projectPath) continue;
-      if (hiddenProjects.has(projectPath)) continue;
-      if (!projectMap.has(projectPath)) {
-        projectMap.set(projectPath, {
-          folder: encodeProjectPath(projectPath),
-          projectPath,
-          sessions: [],
-        });
-      }
-    }
-  } catch {}
+    } catch {}
+  }
 
   // Inject active plain terminal sessions so they participate in sorting
   for (const [sessionId, session] of activeSessions) {
@@ -322,16 +439,42 @@ function sendStatus(text, type) {
 }
 
 // --- Worker-based cache population (non-blocking) ---
-let populatingCache = false;
+// One in-flight scan per source, so Remote Hosts refresh without blocking local.
+const populatingSources = new Set();
+// The live Worker for each in-flight scan, so an unregister can cancel it.
+const sourceWorkers = new Map();
 
-function populateCacheViaWorker() {
-  if (populatingCache) return;
-  populatingCache = true;
-  sendStatus('Scanning projects\u2026', 'active');
+/**
+ * Stop an in-flight scan for a source. Without this, a source unregistered
+ * mid-scan would have the worker's later `message` write qualified rows and
+ * folder-meta back into the DB — a resurrection eviction can't catch.
+ */
+function cancelScan(id) {
+  const worker = sourceWorkers.get(id);
+  if (worker) worker.terminate();
+  sourceWorkers.delete(id);
+  populatingSources.delete(id);
+}
+
+/** Scan one source on a worker thread. The source is required (see resolveSource). */
+function populateCacheViaWorker(sourceOrId) {
+  populateSourceViaWorker(resolveSource(sourceOrId));
+}
+
+/** Scan every registered source — the cold-start / full re-index fan-out. */
+function populateAllSourcesViaWorker() {
+  for (const source of getSources()) populateSourceViaWorker(source);
+}
+
+function populateSourceViaWorker(source) {
+  if (populatingSources.has(source.id)) return;
+  populatingSources.add(source.id);
+  sendStatus('Scanning projects…', 'active');
 
   const worker = new Worker(path.join(__dirname, 'workers', 'scan-projects.js'), {
-    workerData: { projectsDir: PROJECTS_DIR, accountId },
+    workerData: { projectsDir: source.projectsDir, accountId: source.accountId },
   });
+  sourceWorkers.set(source.id, worker);
 
   worker.on('message', (msg) => {
     // Progress updates from worker
@@ -340,41 +483,54 @@ function populateCacheViaWorker() {
       return;
     }
 
-    if (!msg.ok) {
-      console.error('Worker scan error:', msg.error);
-      sendStatus('Scan failed: ' + msg.error, 'error');
-      populatingCache = false;
+    // The source was unregistered while this scan was running: its rows have
+    // already been evicted, so writing these results back would resurrect them.
+    if (!sources.has(source.id)) {
+      populatingSources.delete(source.id);
+      sourceWorkers.delete(source.id);
       return;
     }
 
-    sendStatus(`Indexing ${msg.results.length} projects\u2026`, 'active');
+    if (!msg.ok) {
+      console.error('Worker scan error:', msg.error);
+      sendStatus('Scan failed: ' + msg.error, 'error');
+      populatingSources.delete(source.id);
+      sourceWorkers.delete(source.id);
+      return;
+    }
 
-    // Write results to DB on main thread (fast)
-    const currentAccountId = msg.accountId || accountId;
+    sendStatus(`Indexing ${msg.results.length} projects…`, 'active');
+
+    // Write results to DB on main thread (fast). The worker returns raw folder
+    // names and cwds; qualify them through the source before they touch the DB.
     let sessionCount = 0;
-    for (const { folder, projectPath, sessions, indexMtimeMs } of msg.results) {
-      deleteCachedFolder(folder, currentAccountId);
-      deleteSearchFolder(folder);
+    for (const { folder, projectPath: rawProjectPath, sessions, indexMtimeMs } of msg.results) {
+      const folderKey = source.qualifyFolder(folder);
+      const projectPath = source.qualifyProjectPath(rawProjectPath);
+      deleteCachedFolder(folderKey, source.accountId);
+      deleteSearchFolder(folderKey);
       if (sessions.length > 0) {
         sessionCount += sessions.length;
-        upsertCachedSessions(sessions, currentAccountId);
-        for (const s of sessions) {
+        const qualified = sessions.map(s => ({ ...s, folder: folderKey, projectPath }));
+        upsertCachedSessions(qualified, source.accountId);
+        for (const s of qualified) {
           // Only JSONL custom-title (genuine user title) promotes to the DB name column,
           // and only when no manual sidebar rename already exists — a manual rename must
           // survive the v10 migration re-index. Matches the refreshFolder guard above.
           // AI titles must not promote — see refreshFolder for the rationale.
           if (!getMeta(s.sessionId)?.name && s.customTitle) setName(s.sessionId, s.customTitle);
         }
-        upsertSearchEntries(sessions.map(s => ({
-          id: s.sessionId, type: 'session', folder: s.folder,
+        upsertSearchEntries(qualified.map(s => ({
+          id: s.sessionId, type: 'session', folder: folderKey,
           title: resolveSessionSearchTitle({ ...s, name: getMeta(s.sessionId)?.name }),
           body: s.textContent,
         })));
       }
-      setFolderMeta(folder, projectPath, indexMtimeMs);
+      setFolderMeta(folderKey, projectPath, indexMtimeMs);
     }
 
-    populatingCache = false;
+    populatingSources.delete(source.id);
+    sourceWorkers.delete(source.id);
     sendStatus(`Indexed ${sessionCount} sessions across ${msg.results.length} projects`, 'done');
     // Clear status after a few seconds
     setTimeout(() => sendStatus(''), 5000);
@@ -384,7 +540,8 @@ function populateCacheViaWorker() {
   worker.on('error', (err) => {
     console.error('Worker error:', err);
     sendStatus('Worker error: ' + err.message, 'error');
-    populatingCache = false;
+    populatingSources.delete(source.id);
+    sourceWorkers.delete(source.id);
   });
 
   // If the worker exits abnormally (SIGSEGV, OOM, uncaught exception) without
@@ -392,8 +549,9 @@ function populateCacheViaWorker() {
   // Reset the flag here to prevent a permanent lockout where the session list
   // stays empty because populateCacheViaWorker() returns immediately.
   worker.on('exit', (code) => {
-    if (populatingCache) {
-      populatingCache = false;
+    sourceWorkers.delete(source.id);
+    if (populatingSources.has(source.id)) {
+      populatingSources.delete(source.id);
       if (code !== 0) {
         sendStatus('Scan worker exited unexpectedly', 'error');
       }
@@ -403,6 +561,12 @@ function populateCacheViaWorker() {
 
 module.exports = {
   init,
+  registerSource,
+  unregisterSource,
+  getSource,
+  getSources,
+  localSource,
+  UnknownSourceError,
   readSessionFile,
   readFolderFromFilesystem,
   refreshFolder,
@@ -411,4 +575,5 @@ module.exports = {
   notifyRendererProjectsChanged,
   sendStatus,
   populateCacheViaWorker,
+  populateAllSourcesViaWorker,
 };
