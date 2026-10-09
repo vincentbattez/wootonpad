@@ -59,7 +59,7 @@ function remoteProject(over = {}) {
   return {
     projectPath: 'ssh://mac-mini/home/me/proj', sessions: [], remote: true, hostId: 'mac-mini',
     hostName: 'mac-mini',
-    capabilities: { run: false, externalIde: false, projectFolder: false, projectViewer: false, launch: false },
+    capabilities: { run: false, externalIde: false, projectFolder: false, projectViewer: false, launch: true },
     ...over,
   };
 }
@@ -135,7 +135,7 @@ function headerBindings(project) {
   return {
     project, shortName: 'proj', editing: false, dropHover: false, collapsed: false,
     hasActiveSession: false, headerId: 'header-x',
-    // A Remote Project declares launch:false; the real prop defaults true for a local Project.
+    // A Remote Project declares launch:true (VIN-155); the prop also defaults true for a local Project.
     canLaunch: (project.capabilities?.launch !== false),
     chevronSvg: '', dotsSvg: '', plusSvg: '<svg class="plus-icon"></svg>', remoteSvg: '<svg class="remote-icon"></svg>',
     submit: noop, cancel: noop, onDragStart: noop, onDragEnd: noop, onDragOver: noop, onDragLeave: noop, onDrop: noop,
@@ -151,12 +151,19 @@ test('the remote badge renders only on a Remote Project', async () => {
   assert.ok(!local.includes('project-remote-badge'), 'no badge on local');
 });
 
-test('the New-session button is hidden on a Remote Project, shown on a local one', async () => {
+test('the New-session button shows on a Remote Project (launch is wired, VIN-155) and on a local one', async () => {
   const headerStubs = { ProjectAvatar: stub, SbEditableLabel: slotStub };
-  // A Remote Project cannot launch a Session yet (next ticket), so no launch path is offered.
+  // A Session can now be started on a Remote Host, so the launch path is offered.
   const remote = await renderTemplate(HEADER, { components: headerStubs, bindings: headerBindings(remoteProject()) });
-  assert.ok(!remote.includes('project-new-btn'), 'New-session button hidden on remote');
+  assert.ok(remote.includes('project-new-btn'), 'New-session button shown on remote');
 
   const local = await renderTemplate(HEADER, { components: headerStubs, bindings: headerBindings(localProject()) });
   assert.ok(local.includes('project-new-btn'), 'New-session button shown on local');
+
+  // A Remote Project that still cannot launch (its Host dropped out of config) hides it.
+  const gated = await renderTemplate(HEADER, {
+    components: headerStubs,
+    bindings: headerBindings(remoteProject({ capabilities: { launch: false } })),
+  });
+  assert.ok(!gated.includes('project-new-btn'), 'New-session button hidden when launch not declared');
 });

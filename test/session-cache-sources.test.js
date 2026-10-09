@@ -212,9 +212,9 @@ test('a remote Project group carries remote/hostId and a capability set that hid
   assert.equal(remoteProj.capabilities.externalIde, false);
   assert.equal(remoteProj.capabilities.projectFolder, false);
   assert.equal(remoteProj.capabilities.projectViewer, false);
-  // A Session cannot run on a Remote Host yet (next ticket), so launching is not declared either —
-  // the renderer hides the New-session button and swallows resume/fork/launch-config on it.
-  assert.equal(remoteProj.capabilities.launch, false);
+  // A Session can be started, resumed and forked on a Remote Host inside tmux (VIN-155), so
+  // launching is declared — the renderer shows the New-session button and allows resume/fork.
+  assert.equal(remoteProj.capabilities.launch, true);
 });
 
 test('sessionFilePath resolves a remote session file to the mirror dir, a local one to the local dir', () => {

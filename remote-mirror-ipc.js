@@ -51,7 +51,7 @@ function rsyncRun(descriptor, { connectTimeout = 15 } = {}) {
 // poll lifecycle is testable.
 function createRemoteMirrorIpc({
   getHosts, getReachability, sessionCache, mirrorRoot,
-  runRsync = rsyncRun, log = console,
+  runRsync = rsyncRun, log = console, onIndexed = null,
   setIntervalFn = setInterval, clearIntervalFn = clearInterval,
 }) {
   // sourceId → the descriptor currently registered, so a changed active Account (new projectsDir /
@@ -96,7 +96,12 @@ function createRemoteMirrorIpc({
         try {
           const res = await runRsync(d);
           if (res && res.code === 0) {
-            if (remoteMirror.hasRsyncChanges(res.stdout)) sessionCache.populateCacheViaWorker(d.id);
+            if (remoteMirror.hasRsyncChanges(res.stdout)) {
+              sessionCache.populateCacheViaWorker(d.id);
+              // A changed mirror may carry the new .jsonl of a fork / plan-accept: let the owner
+              // re-run transition detection over this Host's live Sessions (VIN-155).
+              if (onIndexed) { try { onIndexed(d); } catch (e) { log.warn && log.warn(`[mirror] onIndexed for ${d.hostId} failed: ${e.message}`); } }
+            }
           } else {
             log.warn && log.warn(`[mirror] rsync for ${d.hostId} exited ${res && res.code}: ${((res && res.stderr) || '').trim()}`);
           }

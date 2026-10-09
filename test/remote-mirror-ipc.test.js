@@ -28,7 +28,7 @@ function fakeCache() {
   };
 }
 
-function setup({ hosts = [], reachability = {}, rsync } = {}) {
+function setup({ hosts = [], reachability = {}, rsync, onIndexed } = {}) {
   const cache = fakeCache();
   const runRsync = rsync || (async () => ({ code: 0, stdout: 'proj/abc.jsonl\n' }));
   const rsyncCalls = [];
@@ -39,6 +39,7 @@ function setup({ hosts = [], reachability = {}, rsync } = {}) {
     mirrorRoot: MIRROR_ROOT,
     runRsync: async (d) => { rsyncCalls.push(d); return runRsync(d); },
     log: { warn() {} },
+    onIndexed,
   });
   return { ipc, cache, rsyncCalls };
 }
@@ -51,6 +52,26 @@ test('a Reachable Host registers a Source, rsyncs it, and re-indexes after a cha
   assert.equal(rsyncCalls.length, 1);
   assert.equal(rsyncCalls[0].hostId, 'h1');
   assert.deepEqual(cache.calls.populate, ['ssh:h1']);
+});
+
+test('a changed sync notifies onIndexed with the Source descriptor, so fork detection can run (VIN-155)', async () => {
+  const indexed = [];
+  const { ipc } = setup({ hosts: [host('h1')], reachability: { h1: true }, onIndexed: (d) => indexed.push(d) });
+  await ipc.syncOnce();
+  assert.equal(indexed.length, 1);
+  assert.equal(indexed[0].id, 'ssh:h1');
+  assert.equal(indexed[0].hostId, 'h1');
+});
+
+test('a no-op rsync does not notify onIndexed (nothing new to detect)', async () => {
+  const indexed = [];
+  const { ipc } = setup({
+    hosts: [host('h1')], reachability: { h1: true },
+    rsync: async () => ({ code: 0, stdout: './\n' }),
+    onIndexed: (d) => indexed.push(d),
+  });
+  await ipc.syncOnce();
+  assert.deepEqual(indexed, []);
 });
 
 test('a no-op rsync registers the Source but does not re-index', async () => {

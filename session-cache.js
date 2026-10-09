@@ -285,14 +285,13 @@ function populateCacheFromFilesystem(sourceOrId) {
   }
 }
 
-// The capabilities a Remote Project declares (ADR 0014 spirit): Sessions are listed and their
-// JSONL is readable from the mirror, but nothing else is wired yet. The renderer hides what is not
-// declared — no Run, External IDE, Project Folder or Project Viewer button — and refuses every
-// launch path (New session, resume, fork, launch config): a Session cannot run on a Remote Host
-// yet (next ticket). A local Project carries no gate; the renderer treats an absent capability as
-// allowed, so local behaviour is unchanged.
+// The capabilities a Remote Project declares (ADR 0014 spirit): Sessions are listed, their JSONL is
+// readable from the mirror, and — since VIN-155 — a Session can be started, resumed and forked on
+// the Remote Host inside tmux, so `launch` is on. The renderer still hides what is not declared: no
+// Run, External IDE, Project Folder or Project Viewer button. A local Project carries no gate; the
+// renderer treats an absent capability as allowed, so local behaviour is unchanged.
 function remoteProjectCapabilities() {
-  return { run: false, externalIde: false, projectFolder: false, projectViewer: false, launch: false };
+  return { run: false, externalIde: false, projectFolder: false, projectViewer: false, launch: true };
 }
 
 // A fresh sidebar Project group, carrying the Host facts of the Source it came from so the renderer

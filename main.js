@@ -27,6 +27,8 @@ const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
 const { createProjectGit } = require('./project-git');
 const remoteHostsIpcModule = require('./remote-hosts-ipc');
+const remoteLaunch = require('./remote-launch');
+const { createSource } = require('./session-source');
 const { execFile } = require('child_process');
 
 // A working diff can be large; the 1 MB default would truncate it into a parse error.
@@ -1779,12 +1781,17 @@ ipcMain.handle('get-host-reachability', () => remoteHostsIpc.getReachability());
 // the Remote Hosts adapter, so there is one source of truth for both.
 const remoteMirror = require('./remote-mirror');
 const remoteMirrorIpcModule = require('./remote-mirror-ipc');
+const MIRROR_ROOT = path.join(app.getPath('userData'), 'remote-mirrors');
 const remoteMirrorIpc = remoteMirrorIpcModule.createRemoteMirrorIpc({
   getHosts: () => remoteHostsIpc.getHosts(),
   getReachability: () => remoteHostsIpc.getReachability(),
   sessionCache,
-  mirrorRoot: path.join(app.getPath('userData'), 'remote-mirrors'),
+  mirrorRoot: MIRROR_ROOT,
   log,
+  // A fork or plan-accept on a Remote Host is detected through the mirror: once rsync brings a new
+  // .jsonl down, re-run transition detection over that Host's live Sessions so the one that re-keyed
+  // follows its real id (and its tmux session is renamed to match). VIN-155.
+  onIndexed: (descriptor) => runRemoteTransitions(descriptor),
 });
 
 // --- Scheduled tasks ---
@@ -1986,6 +1993,18 @@ ipcMain.handle('stop-session', (_event, sessionId) => {
   if (!session || session.exited) return { ok: false, error: 'not running' };
   // Marks the exit as deliberate so the renderer doesn't report it as a crash.
   session._stoppedByUser = true;
+  // On a Remote Host, killing the local ssh PTY would only detach — Claude would keep running inside
+  // tmux. Stop means gone: kill the tmux session on the Host first, then drop the ssh client (VIN-155).
+  if (session.remote && session.sshTarget) {
+    try {
+      const args = remoteLaunch.buildStopArgs({ sshTarget: session.sshTarget, sessionId: session.remoteTmuxId || sessionId });
+      execFile('ssh', args, { env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' } }, (err) => {
+        if (err) log.warn(`[remote-stop] kill-session for ${sessionId} failed: ${err.message}`);
+      });
+    } catch (e) {
+      log.warn(`[remote-stop] could not build kill for ${sessionId}: ${e.message}`);
+    }
+  }
   session.pty.kill();
   return { ok: true };
 });
@@ -2074,8 +2093,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     return { ok: true, reattached: true, mcpActive: !!session.mcpServer };
   }
 
+  // A Remote Project (ssh://<hostId>/<path>) runs its Session on the Remote Host inside tmux, not a
+  // local PTY. Resolve the Host, its active Account and the Host-side cwd up front; a missing Host
+  // is the one error we can surface before spawning anything.
+  const remoteCtx = remoteLaunchContext(projectPath);
+  if (remoteCtx && remoteCtx.error) return { ok: false, error: remoteCtx.error };
+
   // Spawn new PTY
-  if (!fs.existsSync(hostPath(projectPath))) {
+  if (!remoteCtx && !fs.existsSync(hostPath(projectPath))) {
     return { ok: false, error: `project directory no longer exists: ${projectPath}` };
   }
 
@@ -2125,9 +2150,12 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   let projectFolder = null;
 
   if (!isPlainTerminal) {
-    // Snapshot existing .jsonl files before spawning (for new session + fork/plan detection)
-    projectFolder = encodeProjectPath(projectPath);
-    const claudeProjectDir = path.join(getProjectsDir(activeAccount), projectFolder);
+    // Snapshot existing .jsonl files before spawning (for new session + fork/plan detection). A
+    // remote Session is detected against the Host's mirror, not the local Account's projects dir.
+    projectFolder = remoteCtx ? remoteCtx.folder : encodeProjectPath(projectPath);
+    const claudeProjectDir = remoteCtx
+      ? path.join(remoteCtx.descriptor.projectsDir, remoteCtx.folder)
+      : path.join(getProjectsDir(activeAccount), projectFolder);
     if (fs.existsSync(claudeProjectDir)) {
       try {
         knownJsonlFiles = new Set(
@@ -2184,6 +2212,33 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
           } catch {}
         }
       }, 300);
+    } else if (remoteCtx) {
+      // A Remote Session: ssh -tt into the Host and run Claude inside tmux under the active Account,
+      // the launch shape ADR 0016 fixed (remote-launch.js owns the quoting). IDE emulation is off
+      // (ADR 0015): no MCP server, no --ide — `done` is set from the row only. The whole terminal is
+      // the ssh client's PTY, so OSC titles / notifications cross tmux exactly as for a local Session.
+      const launchArgs = remoteLaunch.buildRemoteLaunchArgs({
+        sshTarget: remoteCtx.host.sshTarget,
+        sessionId, isNew, forkFrom: sessionOptions?.forkFrom || null,
+        account: remoteCtx.account, options: sessionOptions || {},
+        remotePath: remoteCtx.remotePath,
+      });
+      log.info(`[remote-launch] session=${sessionId} host=${remoteCtx.host.sshTarget} args=${JSON.stringify(launchArgs)}`);
+      ptyProcess = pty.spawn('ssh', launchArgs, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 30,
+        cwd: os.homedir(),
+        env: {
+          ...cleanPtyEnv,
+          TERM: 'xterm-256color', COLORTERM: 'truecolor',
+          // Spoof Warp so Claude emits OSC 9 (needsInput), same reason the local spawn does — these
+          // reach the remote claude as TERM is forwarded; OSC 0 titles (the working state) cross via
+          // tmux set-titles regardless.
+          TERM_PROGRAM: 'WarpTerminal', TERM_PROGRAM_VERSION: 'v0.2026.07.30.08.12.stable_01', FORCE_COLOR: '3',
+          SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
+        },
+      });
     } else {
       // Build claude command with session options
       let claudeCmd;
@@ -2335,6 +2390,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     projectFolder, knownJsonlFiles, sessionSlug,
     isPlainTerminal, sessionType, forkFrom: sessionOptions?.forkFrom || null,
     mcpServer, focusToken, _openedAt: Date.now(),
+    // Remote Session bookkeeping: the Source it was launched against (so the mirror's fork detection
+    // only considers it), the Host target (for a later tmux rename / kill), and the id its tmux
+    // session currently carries, so a re-key can rename the far side from this to the real id.
+    remote: !!remoteCtx,
+    hostId: remoteCtx ? remoteCtx.host.id : null,
+    sshTarget: remoteCtx ? remoteCtx.host.sshTarget : null,
+    sourceId: remoteCtx ? remoteCtx.descriptor.id : null,
+    remoteTmuxId: remoteCtx ? sessionId : null,
   };
   activeSessions.set(sessionId, session);
   // Binds this Project to its one Run Terminal, and survives the PTY's exit.
@@ -2447,6 +2510,22 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       `[pty-exit] session=${sessionId} code=${exitCode} signal=${signal ?? 'none'} ` +
       `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
     );
+    // A Remote Session's PTY is the ssh client: an early non-zero exit the user did not ask for is a
+    // spawn failure (unreachable Host, missing tmux/claude, an unauthenticated Account). Run the
+    // Host's prerequisite diagnostic and write its clear message into the terminal instead of
+    // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
+    if (session.remote && !session._stoppedByUser && exitCode !== 0) {
+      const realId0 = session.realSessionId || sessionId;
+      Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
+        if (d && d.ok) return;
+        const msg = (d && d.message) || 'The Remote Host could not start the Session.';
+        const fix = d && d.command ? `\r\n\x1b[2mTry: ${d.command}\x1b[0m` : '';
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('terminal-data', realId0, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
+        }
+      }).catch(() => {});
+    }
+
     // Clean up MCP server
     const mcpId = session.realSessionId || sessionId;
     shutdownMcpServer(mcpId);
@@ -2527,6 +2606,62 @@ ipcMain.on('close-terminal', (_event, sessionId) => {
 const sessionTransitions = require('./session-transitions');
 sessionTransitions.init({ PROJECTS_DIR: activeProjectsDir(), activeSessions, getMainWindow: () => mainWindow, log, rekeyMcpServer });
 const { detectSessionTransitions } = sessionTransitions;
+
+// --- Remote Session launch (VIN-155) ---
+// Resolve a Remote Project path (ssh://<hostId>/<path>) to everything the pure launch builder needs:
+// the Host's sshTarget, its active Account (CLAUDE_CONFIG_DIR), the Host-side cwd, and the mirror
+// Source the launched Session belongs to (so fork detection and the JSONL viewer find its .jsonl).
+function remoteLaunchContext(projectPath) {
+  const parsed = remoteLaunch.parseRemoteProjectPath(projectPath);
+  if (!parsed) return null;
+  const host = remoteHostsIpc.getHosts().find(h => h.id === parsed.hostId);
+  if (!host) return { error: `Remote Host for ${projectPath} is no longer configured.` };
+  const descriptor = remoteMirror.sourceDescriptorFor(host, MIRROR_ROOT);
+  return {
+    host,
+    account: remoteMirror.activeAccount(host),
+    remotePath: parsed.remotePath,
+    descriptor,
+    // The on-disk folder under the mirror whose .jsonl files back this Project's Sessions. Claude
+    // names it by encoding the Host-side cwd, exactly as encodeProjectPath mirrors locally.
+    folder: encodeProjectPath(parsed.remotePath),
+  };
+}
+
+// Rename the tmux session on the Host so it follows the real id after a fork / plan-accept re-key,
+// letting a later re-attach find it. Best-effort: a dropped Host just means the rename lands on the
+// next re-attach's `new -A` miss; the diagnostic path covers a genuinely broken Host.
+function renameRemoteTmux(session, oldId, newId) {
+  if (!session.sshTarget) return;
+  try {
+    const args = remoteLaunch.buildRenameArgs({ sshTarget: session.sshTarget, oldSessionId: oldId, newSessionId: newId });
+    execFile('ssh', args, { env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' } }, (err) => {
+      if (err) log.warn(`[remote-rename] ${oldId} → ${newId} failed: ${err.message}`);
+      else log.info(`[remote-rename] tmux ${remoteLaunch.tmuxSessionName(oldId)} → ${remoteLaunch.tmuxSessionName(newId)}`);
+    });
+  } catch (e) {
+    log.warn(`[remote-rename] could not build rename for ${oldId} → ${newId}: ${e.message}`);
+  }
+}
+
+// Re-run fork / plan-accept detection over a Host's live remote Sessions after its mirror changed,
+// then rename any tmux session whose Session just re-keyed so the far side follows its real id.
+function runRemoteTransitions(descriptor) {
+  const source = createSource({
+    id: descriptor.id, projectsDir: descriptor.projectsDir,
+    accountId: descriptor.accountId, hostId: descriptor.hostId,
+  });
+  const sessions = [...activeSessions.values()].filter(s => s.remote && !s.exited && s.sourceId === descriptor.id);
+  const folders = new Set(sessions.map(s => s.projectFolder).filter(Boolean));
+  for (const folder of folders) detectSessionTransitions(folder, source);
+  for (const s of sessions) {
+    const current = s.realSessionId || s.remoteTmuxId;
+    if (current && current !== s.remoteTmuxId) {
+      renameRemoteTmux(s, s.remoteTmuxId, current);
+      s.remoteTmuxId = current;
+    }
+  }
+}
 
 // --- fs.watch on projects directory ---
 let projectsWatcher = null;
