@@ -2077,9 +2077,11 @@ ipcMain.handle('stop-session', (_event, sessionId) => {
   if (!session || session.exited) return { ok: false, error: 'not running' };
   // Marks the exit as deliberate so the renderer doesn't report it as a crash.
   session._stoppedByUser = true;
-  // On a Remote Host, killing the local ssh PTY would only detach — Claude would keep running inside
-  // tmux. Stop means gone: kill the tmux session on the Host first, then drop the ssh client (VIN-155).
-  if (session.remote && session.sshTarget) {
+  // On a Remote Host, killing the local ssh PTY would only detach a Session — Claude would keep
+  // running inside tmux. Stop means gone: kill the tmux session on the Host first, then drop the ssh
+  // client (VIN-155). A remote Plain Terminal runs in no tmux (VIN-156), so dropping its ssh client
+  // already ends the shell on the Host — there is nothing to kill.
+  if (session.remote && session.sshTarget && !session.isPlainTerminal) {
     try {
       const args = remoteLaunch.buildStopArgs({ sshTarget: session.sshTarget, sessionId: session.remoteTmuxId || sessionId });
       runRemoteSsh(args, (err) => {
@@ -2266,7 +2268,30 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   let mcpServer = null;
   let focusToken = null;
   try {
-    if (isPlainTerminal) {
+    if (remoteCtx && isPlainTerminal) {
+      // A Plain Terminal on a Remote Project: ssh -tt into the Host and open an interactive login
+      // shell in the Project's Host-side path, with the Host's login PATH (VIN-156). No tmux — a
+      // Plain Terminal is ephemeral (CONTEXT.md): when this tab closes or the app quits the ssh
+      // client dies, the remote shell takes SIGHUP and is gone, leaving nothing behind on the Host.
+      // The whole terminal is the ssh client's PTY. remote-launch owns the quoting; a missing Host
+      // was already surfaced by remoteLaunchContext above.
+      const termArgs = remoteLaunch.buildRemoteTerminalArgs({
+        sshTarget: remoteCtx.host.sshTarget,
+        remotePath: remoteCtx.remotePath,
+      });
+      log.info(`[remote-terminal] host=${remoteCtx.host.sshTarget} path=${remoteCtx.remotePath}`);
+      ptyProcess = pty.spawn('ssh', termArgs, {
+        name: 'xterm-256color',
+        cols: 120,
+        rows: 30,
+        cwd: os.homedir(),
+        env: {
+          ...cleanPtyEnv,
+          TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
+          SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
+        },
+      });
+    } else if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
       // Inject a shell function to override `claude` with a helpful message
       const claudeShim = 'claude() { echo "\\033[33mTo start a Claude session, use the + button in the sidebar.\\033[0m"; return 1; }; export -f claude 2>/dev/null;';
@@ -2479,12 +2504,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     mcpServer, focusToken, _openedAt: Date.now(),
     // Remote Session bookkeeping: the Source it was launched against (so the mirror's fork detection
     // only considers it), the Host target (for a later tmux rename / kill), and the id its tmux
-    // session currently carries, so a re-key can rename the far side from this to the real id.
+    // session currently carries, so a re-key can rename the far side from this to the real id. A
+    // remote Plain Terminal runs in no tmux and backs no Session (VIN-156): it keeps `remote` and the
+    // Host target (its ssh client dying ends the shell) but carries no Source and no tmux id.
     remote: !!remoteCtx,
     hostId: remoteCtx ? remoteCtx.host.id : null,
     sshTarget: remoteCtx ? remoteCtx.host.sshTarget : null,
-    sourceId: remoteCtx ? remoteCtx.descriptor.id : null,
-    remoteTmuxId: remoteCtx ? sessionId : null,
+    sourceId: remoteCtx && !isPlainTerminal ? remoteCtx.descriptor.id : null,
+    remoteTmuxId: remoteCtx && !isPlainTerminal ? sessionId : null,
   };
   activeSessions.set(sessionId, session);
   // Binds this Project to its one Run Terminal, and survives the PTY's exit.
