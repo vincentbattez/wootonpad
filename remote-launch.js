@@ -157,6 +157,19 @@ function buildRemoteLaunchArgs({ sshTarget, sessionId, isNew, forkFrom, account,
   return sshInvoke(sshTarget, loginShell(inner), { tty: true });
 }
 
+// ── A Plain Terminal on a Remote Host ────────────────────────────────
+// The Plain Terminal button on a Remote Project opens an interactive login shell on the Host, in the
+// Project's directory (VIN-156). Unlike a Session it uses NO tmux: a Plain Terminal is ephemeral
+// (CONTEXT.md), so closing the tab or quitting WootonPad drops the ssh client, the remote shell takes
+// SIGHUP and dies — nothing is left behind on the Host. `-tt` gives it a real terminal; `$SHELL -lc`
+// supplies the Host's login PATH; inside it `cd`s into the Host-side path and exec's a fresh login
+// shell, which the PTY makes interactive — so the user lands at a normal prompt in the Project
+// directory with the login PATH. The path is single-quoted exactly as the tmux launch quotes its -c.
+function buildRemoteTerminalArgs({ sshTarget, remotePath }) {
+  const inner = `cd ${q(remotePath)} && exec $SHELL -l`;
+  return sshInvoke(sshTarget, loginShell(inner), { tty: true });
+}
+
 // Stop kills the tmux session on the Host (Close tab only detaches). No PTY needed.
 function buildStopArgs({ sshTarget, sessionId }) {
   const name = tmuxSessionName(sessionId);
@@ -200,6 +213,7 @@ function planRemoteTmuxRenames(sessions) {
 module.exports = {
   TMUX_SOCKET, tmuxSessionName, assertSafeSessionId, parseRemoteProjectPath,
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
+  buildRemoteTerminalArgs,
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
 };
