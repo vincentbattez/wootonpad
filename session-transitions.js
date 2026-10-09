@@ -1,5 +1,6 @@
 const path = require('path');
 const fs = require('fs');
+const { createSource } = require('./session-source');
 
 /**
  * Fork / plan-accept detection for active PTY sessions.
@@ -19,7 +20,9 @@ function init(ctx) {
   getMainWindow = ctx.getMainWindow;
   log = ctx.log;
   rekeyMcpServer = ctx.rekeyMcpServer;
-  localSource = { id: ctx.accountId || 'default', projectsDir: ctx.PROJECTS_DIR, hostId: null };
+  // One Source shape across the codebase — build the local source through
+  // createSource rather than hand-rolling a partial literal of it.
+  localSource = createSource({ id: ctx.accountId || 'default', projectsDir: ctx.PROJECTS_DIR, accountId: ctx.accountId || 'default' });
 }
 
 /** The source a session belongs to — the Local Host unless it carries a sourceId. */

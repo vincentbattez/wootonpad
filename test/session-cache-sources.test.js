@@ -126,6 +126,14 @@ test('the two sources keep separate folder-meta and search entries', () => {
   assert.equal(db._search.length, 2);
 });
 
+test('refreshing a folder on an unregistered source id throws a named error, not an opaque NPE', () => {
+  const { FOLDER } = setup();
+  assert.throws(
+    () => sessionCache.refreshFolder(FOLDER, 'ssh://never-registered'),
+    (err) => err instanceof sessionCache.UnknownSourceError && err.sourceId === 'ssh://never-registered',
+  );
+});
+
 test('unregistering a source evicts only its rows, meta and search entries', () => {
   const { db, local, remote, FOLDER } = setup();
   sessionCache.refreshFolder(FOLDER, local);
@@ -142,4 +150,23 @@ test('unregistering a source evicts only its rows, meta and search entries', () 
   assert.equal(db._search[0].id, 'local-sess-1');
   // The remote Account's cached rows are gone.
   assert.equal(db.getAllCached('mac-mini').length, 0);
+});
+
+test('unregistering a source mid-scan cancels it so the worker cannot resurrect evicted rows', async () => {
+  const { db, remote } = setup();
+  // Kick off a background scan of the remote source, then pull it out of the
+  // registry before the worker reports — the resurrection window. The scan runs
+  // on a worker thread, so both synchronous calls complete before any worker
+  // message can be processed on this thread.
+  sessionCache.populateCacheViaWorker(remote);
+  sessionCache.unregisterSource(remote.id);
+
+  // Give any in-flight worker time to finish and (wrongly) post its results.
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  // Nothing came back for the evicted source — not in session_cache, cache_meta
+  // or the search map.
+  assert.equal(db.getAllCached('mac-mini').length, 0);
+  assert.equal(db._meta.size, 0);
+  assert.equal(db._search.length, 0);
 });

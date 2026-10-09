@@ -38,6 +38,14 @@ function createSource({ id, projectsDir, accountId, hostId = null } = {}) {
     },
     // A folder identifier belongs to this source. Lets eviction find a remote
     // source's folders in the Account-agnostic cache_meta / search tables.
+    //
+    // A local source (hostId null) claims every folder it is shown. That is only
+    // sound because callers scope the folder set by Account first — getAllCached
+    // is Account-scoped, and local and remote sources carry distinct accountIds —
+    // so a local source never sees a remote folder to mis-claim. The invariant
+    // this rests on: no two sources share an accountId. If one were ever reused
+    // (e.g. a second source also defaulting to 'default'), a local ownsFolder
+    // would swallow the other's folders on eviction. Keep accountIds distinct.
     ownsFolder(folderKey) {
       return resolvedHostId ? String(folderKey).startsWith(`ssh://${resolvedHostId}/`) : true;
     },

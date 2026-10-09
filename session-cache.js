@@ -15,9 +15,17 @@ const { createSource } = require('./session-source');
  * single projects directory. Call init(ctx) once with the shared context object:
  * it binds the database and registers the Local Host's active Account as the one
  * source. Remote Hosts register further sources at runtime (VIN-150); each is
- * refreshed, watched and evicted independently, and folders of the same name on
- * different sources never collide because every database identifier is qualified
- * through its source.
+ * refreshed (refreshFolder / populateCacheViaWorker per source) and evicted
+ * (unregisterSource) independently, and folders of the same name on different
+ * sources never collide because every database identifier is qualified through
+ * its source.
+ *
+ * Per-source *watching* is not wired here. main.js runs a single filesystem
+ * watcher over the Local Host's projects directory; driving a watcher per
+ * registered source belongs to the VIN-150 integration that introduces Remote
+ * Host mirrors and their sync, and is deliberately deferred to it. Until then no
+ * Source but the local one is registered, so nothing is left unwatched in this
+ * branch.
  */
 let activeSessions, getMainWindow, log;
 let deleteCachedFolder, getCachedByFolder, upsertCachedSessions, deleteCachedSession;
@@ -78,10 +86,32 @@ function localSource() {
   return sources.get(localSourceId) || null;
 }
 
-/** Resolve a source argument: a Source, a source id, or undefined (→ local). */
+/** Raised when a source id names no registered source. */
+class UnknownSourceError extends Error {
+  constructor(id) {
+    super(`Unknown source: ${id}`);
+    this.name = 'UnknownSourceError';
+    this.sourceId = id;
+  }
+}
+
+/**
+ * Resolve a source argument: a Source, a source id, or undefined (→ local).
+ * The result is dereferenced straight away (source.projectsDir, …), so an id
+ * that names no registered source throws here with a clear message rather than
+ * NPE-ing downstream with an opaque TypeError.
+ */
 function resolveSource(sourceOrId) {
-  if (!sourceOrId) return localSource();
-  if (typeof sourceOrId === 'string') return sources.get(sourceOrId) || null;
+  if (!sourceOrId) {
+    const local = localSource();
+    if (!local) throw new UnknownSourceError(localSourceId);
+    return local;
+  }
+  if (typeof sourceOrId === 'string') {
+    const source = sources.get(sourceOrId);
+    if (!source) throw new UnknownSourceError(sourceOrId);
+    return source;
+  }
   return sourceOrId;
 }
 
@@ -89,8 +119,12 @@ function resolveSource(sourceOrId) {
 function unregisterSource(id) {
   const source = sources.get(id);
   if (!source) return;
-  evictSource(source);
+  // Drop it from the registry first, then cancel any in-flight scan: a late
+  // worker message checks the registry and bails rather than resurrecting rows
+  // evictSource is about to delete.
   sources.delete(id);
+  cancelScan(id);
+  evictSource(source);
 }
 
 function evictSource(source) {
@@ -408,9 +442,23 @@ function sendStatus(text, type) {
 // --- Worker-based cache population (non-blocking) ---
 // One in-flight scan per source, so Remote Hosts refresh without blocking local.
 const populatingSources = new Set();
+// The live Worker for each in-flight scan, so an unregister can cancel it.
+const sourceWorkers = new Map();
+
+/**
+ * Stop an in-flight scan for a source. Without this, a source unregistered
+ * mid-scan would have the worker's later `message` write qualified rows and
+ * folder-meta back into the DB — a resurrection eviction can't catch.
+ */
+function cancelScan(id) {
+  const worker = sourceWorkers.get(id);
+  if (worker) worker.terminate();
+  sourceWorkers.delete(id);
+  populatingSources.delete(id);
+}
 
 function populateCacheViaWorker(sourceOrId) {
-  const targets = sourceOrId ? [resolveSource(sourceOrId)].filter(Boolean) : getSources();
+  const targets = sourceOrId ? [resolveSource(sourceOrId)] : getSources();
   for (const source of targets) populateSourceViaWorker(source);
 }
 
@@ -422,6 +470,7 @@ function populateSourceViaWorker(source) {
   const worker = new Worker(path.join(__dirname, 'workers', 'scan-projects.js'), {
     workerData: { projectsDir: source.projectsDir, accountId: source.accountId },
   });
+  sourceWorkers.set(source.id, worker);
 
   worker.on('message', (msg) => {
     // Progress updates from worker
@@ -430,10 +479,19 @@ function populateSourceViaWorker(source) {
       return;
     }
 
+    // The source was unregistered while this scan was running: its rows have
+    // already been evicted, so writing these results back would resurrect them.
+    if (!sources.has(source.id)) {
+      populatingSources.delete(source.id);
+      sourceWorkers.delete(source.id);
+      return;
+    }
+
     if (!msg.ok) {
       console.error('Worker scan error:', msg.error);
       sendStatus('Scan failed: ' + msg.error, 'error');
       populatingSources.delete(source.id);
+      sourceWorkers.delete(source.id);
       return;
     }
 
@@ -468,6 +526,7 @@ function populateSourceViaWorker(source) {
     }
 
     populatingSources.delete(source.id);
+    sourceWorkers.delete(source.id);
     sendStatus(`Indexed ${sessionCount} sessions across ${msg.results.length} projects`, 'done');
     // Clear status after a few seconds
     setTimeout(() => sendStatus(''), 5000);
@@ -478,6 +537,7 @@ function populateSourceViaWorker(source) {
     console.error('Worker error:', err);
     sendStatus('Worker error: ' + err.message, 'error');
     populatingSources.delete(source.id);
+    sourceWorkers.delete(source.id);
   });
 
   // If the worker exits abnormally (SIGSEGV, OOM, uncaught exception) without
@@ -485,6 +545,7 @@ function populateSourceViaWorker(source) {
   // Reset the flag here to prevent a permanent lockout where the session list
   // stays empty because populateCacheViaWorker() returns immediately.
   worker.on('exit', (code) => {
+    sourceWorkers.delete(source.id);
     if (populatingSources.has(source.id)) {
       populatingSources.delete(source.id);
       if (code !== 0) {
@@ -500,6 +561,7 @@ module.exports = {
   unregisterSource,
   getSource,
   getSources,
+  UnknownSourceError,
   readSessionFile,
   readFolderFromFilesystem,
   refreshFolder,

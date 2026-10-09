@@ -10,6 +10,7 @@ const os = require('os');
 const path = require('path');
 
 const sessionTransitions = require('../session-transitions');
+const { createSource } = require('../session-source');
 
 function writeForkFile(dir, newId, forkedFrom) {
   fs.mkdirSync(dir, { recursive: true });
@@ -49,8 +50,8 @@ test('a fork on one source rekeys only that source\'s active session', () => {
     rekeyMcpServer: (from, to) => rekeyed.push([from, to]),
   });
 
-  const local = { id: 'default', projectsDir: localDir, hostId: null };
-  const remote = { id: 'ssh://h', projectsDir: remoteDir, hostId: 'h' };
+  const local = createSource({ id: 'default', projectsDir: localDir, accountId: 'default' });
+  const remote = createSource({ id: 'ssh://h', projectsDir: remoteDir, accountId: 'h-default', hostId: 'h' });
 
   // A fork lands on the local source only.
   writeForkFile(path.join(localDir, FOLDER), 'local-new', 'parent');
