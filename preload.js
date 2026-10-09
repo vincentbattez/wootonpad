@@ -63,6 +63,9 @@ contextBridge.exposeInMainWorld('api', {
   removeRemoteAccount: (hostId, accountId) => ipcRenderer.invoke('remove-remote-account', hostId, accountId),
   testHostConnection: (hostId) => ipcRenderer.invoke('test-host-connection', hostId),
   getHostReachability: () => ipcRenderer.invoke('get-host-reachability'),
+  // Add a Remote Project by hand (VIN-157): the native folder picker can't browse another machine,
+  // so the user picks a Host and types a path, validated on the Host before it is added.
+  addRemoteProject: (hostId, projectPath) => ipcRenderer.invoke('add-remote-project', hostId, projectPath),
   onHostReachability: (callback) => {
     // Drop any previous subscriber first, so a re-mount of HostsContainer can't stack duplicate
     // listeners that each fire the callback on one push.

@@ -4053,6 +4053,33 @@ body { display: flex; flex-direction: column; }
   line-height: 1.4;
 }
 
+.add-project-dialog .add-project-host-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.add-project-dialog .add-project-host-row label {
+  color: var(--text-disabled);
+  font-size: 12px;
+}
+
+.add-project-dialog .add-project-host-row select {
+  flex: 1;
+  background: var(--neutral-a2);
+  border: 1px solid var(--neutral-a4);
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.add-project-dialog .add-project-host-row select:focus {
+  border-color: var(--border-focus);
+}
+
 .add-project-dialog .folder-input-row {
   display: flex;
   gap: 8px;
