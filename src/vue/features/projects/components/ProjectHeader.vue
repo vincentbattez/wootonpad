@@ -54,9 +54,9 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   hasActiveSession: { type: Boolean, default: false },
   renaming: { type: Boolean, default: false },
-  // Whether this Project can launch a Session. A Remote Project declares `launch: false` (it cannot
-  // run a Session yet, next ticket), so its New-session button is hidden. Defaults true so a local
-  // Project — which declares no capabilities — keeps its button.
+  // Whether this Project can launch a Session. A Remote Project declares `launch: true` (Sessions
+  // run on the Host inside tmux, VIN-155); the button only hides if a Project declares `launch:
+  // false`. Defaults true so a local Project — which declares no capabilities — keeps its button.
   canLaunch: { type: Boolean, default: true },
 });
 

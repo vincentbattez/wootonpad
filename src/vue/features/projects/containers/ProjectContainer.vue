@@ -194,10 +194,10 @@ const folderId = computed(() => 'project-' + props.project.projectPath.replace(/
 // shows. A Remote Project carries explicit `false`s for what it cannot do yet (VIN-154).
 const caps = computed(() => props.project.capabilities || {});
 
-// Whether a Session can be launched on this Project. A Remote Project declares `launch: false` —
-// a Session cannot run on a Remote Host yet (next ticket) — so the New-session button is hidden and
-// every session-start gesture (resume, fork, launch config) is swallowed before it reaches the
-// start-session flow. Absent (a local Project) means allowed, so local launch paths are unchanged.
+// Whether a Session can be launched on this Project. A Remote Project declares `launch: true` —
+// Sessions start, resume and fork on the Remote Host inside tmux (VIN-155) — so its New-session
+// button and session-start gestures (resume, fork, launch config) flow through like a local
+// Project's. Only an explicit `launch: false` swallows them. Absent (a local Project) means allowed.
 const canLaunch = computed(() => caps.value.launch !== false);
 
 // A user-set label wins over the path; clearing it falls back to the last two segments.
