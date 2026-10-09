@@ -1,5 +1,11 @@
 <template>
-  <div :class="isWorktree ? 'worktree-group' : 'project-group'" :id="folderId">
+  <div
+    :class="[
+      isWorktree ? 'worktree-group' : 'project-group',
+      { 'remote-project': project.remote, 'remote-unreachable': project.greyed },
+    ]"
+    :id="folderId"
+  >
 
     <WorktreeHeader
       v-if="isWorktree"
@@ -30,15 +36,18 @@
          would clip it. Open/close/positioning come from the shared context-menu composable. -->
     <Teleport to="body">
       <div v-if="menu.open.value" class="project-menu" :style="menu.style.value" @click.stop>
-        <button class="project-menu-item project-run-btn" :title="runTooltip" @click="runFromMenu">
+        <!-- A Project declares what it can do; the UI shows only what it declares (ADR 0014 spirit).
+             A Remote Project lists Sessions and nothing more yet, so Run / External IDE / Project
+             Folder are hidden on it. A local Project declares no gate, so all three show as before. -->
+        <button v-if="caps.run !== false" class="project-menu-item project-run-btn" :title="runTooltip" @click="runFromMenu">
           <span class="project-menu-icon" v-html="playSvg"></span>
           <span class="project-menu-label">Run Project</span>
         </button>
-        <button class="project-menu-item project-ide-btn" :title="ideTooltip" @click="ideFromMenu">
+        <button v-if="caps.externalIde !== false" class="project-menu-item project-ide-btn" :title="ideTooltip" @click="ideFromMenu">
           <span class="project-menu-icon" v-html="codeSvg"></span>
           <span class="project-menu-label">Open in External IDE</span>
         </button>
-        <button class="project-menu-item project-folder-btn" @click="folderFromMenu">
+        <button v-if="caps.projectFolder !== false" class="project-menu-item project-folder-btn" @click="folderFromMenu">
           <span class="project-menu-icon" v-html="folderSvg"></span>
           <span class="project-menu-label">Open Project Folder</span>
         </button>
@@ -178,6 +187,10 @@ const emit = defineEmits([
 const bridge = createProjectsBridge(store);
 
 const folderId = computed(() => 'project-' + props.project.projectPath.replace(/[^a-zA-Z0-9_-]/g, '_'));
+
+// The Project's declared capabilities. Absent (a local Project) means unrestricted: every button
+// shows. A Remote Project carries explicit `false`s for what it cannot do yet (VIN-154).
+const caps = computed(() => props.project.capabilities || {});
 
 // A user-set label wins over the path; clearing it falls back to the last two segments.
 const shortName = computed(() =>
