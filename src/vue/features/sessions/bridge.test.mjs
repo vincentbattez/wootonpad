@@ -11,7 +11,8 @@ function makeStore() {
     activeSessionId: null,
     sessionBusyState: new Map(),
     attentionSessions: new Set(),
-    responseReadySessions: new Set(),
+    needsInputSessions: new Set(),
+    unreadSessions: new Set(),
     headerSession: null,
     headerPtyTitle: null,
     headerShellProfile: null,
@@ -36,23 +37,23 @@ test('setActivePtyIds replaces the running set', () => {
   assert.deepEqual([...store.activePtyIds], ['p1', 'p2']);
 });
 
-test('setResponseReady marks ready and clears busy in one move', () => {
+test('setUnread marks the row unread and clears busy in one move', () => {
   const store = makeStore();
   const bridge = createSessionsBridge(store);
   bridge.setBusy('s1', true);
-  bridge.setResponseReady('s1');
-  assert.equal(store.responseReadySessions.has('s1'), true);
+  bridge.setUnread('s1');
+  assert.equal(store.unreadSessions.has('s1'), true);
   assert.equal(store.sessionBusyState.has('s1'), false);
 });
 
-test('clearNotifications clears attention and response-ready together', () => {
+test('clearNotifications clears attention and unread together', () => {
   const store = makeStore();
   const bridge = createSessionsBridge(store);
   bridge.addAttention('s2');
-  bridge.setResponseReady('s2');
+  bridge.setUnread('s2');
   bridge.clearNotifications('s2');
   assert.equal(store.attentionSessions.has('s2'), false);
-  assert.equal(store.responseReadySessions.has('s2'), false);
+  assert.equal(store.unreadSessions.has('s2'), false);
 });
 
 test('the header setters normalise empty values to null', () => {
@@ -80,4 +81,27 @@ test('clearHeader empties every header field', () => {
   assert.equal(store.headerPtyTitle, null);
   assert.equal(store.headerShellProfile, null);
   assert.equal(store.headerAccount, null);
+});
+
+// VIN-148 — the turn ending and the human reading are two different edges. Opening a Session
+// clears what it is fair to clear by looking; it never takes the ball back.
+test('opening a Session clears Unread but leaves needsInput standing', () => {
+  const store = makeStore();
+  const bridge = createSessionsBridge(store);
+
+  bridge.setNeedsInput('s9');
+  bridge.setUnread('s9');
+  bridge.clearNotifications('s9');
+
+  assert.equal(store.unreadSessions.has('s9'), false, 'reading clears Unread');
+  assert.equal(store.needsInputSessions.has('s9'), true, 'reading is not replying');
+});
+
+test('needsInput is lifted explicitly, by work resuming or a declared done', () => {
+  const store = makeStore();
+  const bridge = createSessionsBridge(store);
+
+  bridge.setNeedsInput('s10');
+  bridge.clearNeedsInput('s10');
+  assert.equal(store.needsInputSessions.has('s10'), false);
 });
