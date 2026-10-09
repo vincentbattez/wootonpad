@@ -4,15 +4,27 @@ const fs = require('fs');
 /**
  * Fork / plan-accept detection for active PTY sessions.
  * Call init(ctx) once with shared context.
+ *
+ * Detection runs per Source: it reads one source's projects directory and only
+ * considers the active sessions belonging to that source, so a fork landing on
+ * one Host never rekeys a same-named folder's session on another (VIN-152). The
+ * Local Host is the default source for the no-argument call the local watcher
+ * makes, which keeps existing behaviour unchanged.
  */
-let PROJECTS_DIR, activeSessions, getMainWindow, log, rekeyMcpServer;
+let activeSessions, getMainWindow, log, rekeyMcpServer;
+let localSource = null;
 
 function init(ctx) {
-  PROJECTS_DIR = ctx.PROJECTS_DIR;
   activeSessions = ctx.activeSessions;
   getMainWindow = ctx.getMainWindow;
   log = ctx.log;
   rekeyMcpServer = ctx.rekeyMcpServer;
+  localSource = { id: ctx.accountId || 'default', projectsDir: ctx.PROJECTS_DIR, hostId: null };
+}
+
+/** The source a session belongs to — the Local Host unless it carries a sourceId. */
+function sessionSourceId(session) {
+  return session.sourceId || (localSource && localSource.id) || 'default';
 }
 
 // --- Fork / plan-accept detection ---
@@ -77,15 +89,16 @@ function readOldSessionTail(filePath) {
 }
 
 /** Detect fork or plan-accept transitions for active PTY sessions in a folder */
-function detectSessionTransitions(folder) {
-  const folderPath = path.join(PROJECTS_DIR, folder);
+function detectSessionTransitions(folder, source) {
+  const src = source || localSource;
+  const folderPath = path.join(src.projectsDir, folder);
   let currentFiles;
   try {
     currentFiles = fs.readdirSync(folderPath).filter(f => f.endsWith('.jsonl'));
   } catch { return; }
 
   for (const [sessionId, session] of [...activeSessions]) {
-    if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder) {
+    if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder || sessionSourceId(session) !== src.id) {
       if (!session.exited && !session.isPlainTerminal && session.forkFrom) {
         log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : 'folderMismatch('+session.projectFolder+' vs '+folder+')'}`);
       }
