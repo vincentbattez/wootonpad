@@ -14,6 +14,7 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const { randomUUID } = require('crypto');
 const remoteHosts = require('./remote-hosts');
+const { qualifyRemoteProjectPath } = require('./session-source');
 
 const HOSTS_CONTROL_DIR = path.join(os.homedir(), '.wootonpad', 'ssh');
 const HOST_PROBE_MS = 30 * 1000; // reachability reflects reality within one interval (CONTEXT.md)
@@ -119,7 +120,52 @@ function createRemoteHostsIpc({
     const hosts = remoteHosts.removeHost(getHosts(), hostId);
     setHosts(hosts);
     delete hostReachability[hostId];
+    // Drop the Host's hand-added Remote Projects (VIN-157), so a removed Host leaves no ghost row
+    // that can never be reached, un-greyed or re-added.
+    const global = getSetting('global') || {};
+    if (Array.isArray(global.remoteProjects) && global.remoteProjects.some(rp => rp.hostId === hostId)) {
+      global.remoteProjects = global.remoteProjects.filter(rp => rp.hostId !== hostId);
+      setSetting('global', global);
+    }
     return hosts;
+  }
+
+  // Add a Remote Project by hand (VIN-157). A Project where Claude never ran has no folder in the
+  // Account's projects dir, so the rsync mirror can't discover it; the user picks the Host and types
+  // a path (the native folder picker can't browse another machine). The path is validated on the
+  // Host as an existing directory, then persisted keyed ssh://<hostId>/<path> so it shows in the
+  // sidebar at once and survives both app restart (it is in settings) and the next mirror sync (the
+  // mirror's --delete only touches the mirror dir, never this record). Hidden Remote Projects are
+  // un-hidden by re-adding, exactly like local ones.
+  async function addRemoteProject(hostId, rawPath) {
+    const host = getHosts().find(h => h.id === hostId);
+    if (!host) return { error: 'Host not found. It may have been removed.' };
+
+    let diag;
+    try {
+      diag = await remoteHosts.checkRemoteDir({ host, path: rawPath }, step => run(host, step));
+    } catch (err) {
+      return { error: err.message };
+    }
+    if (!diag.ok) return { error: diag.message, step: diag.step };
+
+    const projectPath = qualifyRemoteProjectPath(hostId, rawPath);
+    const global = getSetting('global') || {};
+
+    // Un-hide, like the local add-project flow: re-adding a removed Project brings it back.
+    if (Array.isArray(global.hiddenProjects) && global.hiddenProjects.includes(projectPath)) {
+      global.hiddenProjects = global.hiddenProjects.filter(p => p !== projectPath);
+    }
+
+    const records = Array.isArray(global.remoteProjects) ? global.remoteProjects : [];
+    if (!records.some(rp => rp.projectPath === projectPath)) {
+      global.remoteProjects = [...records, { hostId, projectPath }];
+    } else {
+      global.remoteProjects = records;
+    }
+    setSetting('global', global);
+
+    return { ok: true, projectPath };
   }
   function removeRemoteAccount(hostId, accountId) {
     const hosts = remoteHosts.removeRemoteAccount(getHosts(), hostId, accountId);
@@ -137,6 +183,7 @@ function createRemoteHostsIpc({
     getHosts, setHosts,
     probeHostsOnce, startHostProbe, stopHostProbe, getReachability,
     addHost, addRemoteAccount, removeHost, removeRemoteAccount, testConnection,
+    addRemoteProject,
   };
 }
 

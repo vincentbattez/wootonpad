@@ -1773,6 +1773,16 @@ ipcMain.handle('remove-remote-account', (_event, hostId, accountId) => remoteHos
 ipcMain.handle('test-host-connection', (_event, hostId) => remoteHostsIpc.testConnection(hostId));
 ipcMain.handle('get-host-reachability', () => remoteHostsIpc.getReachability());
 
+// Add a Remote Project by hand (VIN-157): validate the typed path on the Host as an existing
+// directory, then persist it so it shows in the sidebar at once (keyed ssh://<hostId>/<path>). The
+// adapter owns the validation and persistence; main.js only nudges the sidebar to re-fetch on a
+// successful add so the new Project appears without waiting on the next mirror poll.
+ipcMain.handle('add-remote-project', async (_event, hostId, projectPath) => {
+  const result = await remoteHostsIpc.addRemoteProject(hostId, projectPath);
+  if (result && result.ok) notifyRendererProjectsChanged();
+  return result;
+});
+
 // --- Remote Project mirroring (VIN-154) ---
 // Each Remote Host's active Account projects dir is rsync'd into the app data dir and registered as
 // one more session-cache Source, so its Claude Projects appear in the sidebar as Remote Projects.

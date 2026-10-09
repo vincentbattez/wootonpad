@@ -3,10 +3,10 @@ const assert = require('node:assert/strict');
 
 const {
   sshArgs,
-  reachStep, toolStep, accountStep,
-  diagnoseReach, diagnoseTool, diagnoseAccount,
+  reachStep, toolStep, accountStep, dirStep,
+  diagnoseReach, diagnoseTool, diagnoseAccount, diagnoseDir,
   classifyReachability,
-  testConnection,
+  testConnection, checkRemoteDir,
   normalizeHost, addHost, addRemoteAccount, removeHost, removeRemoteAccount,
 } = require('../remote-hosts');
 
@@ -79,6 +79,62 @@ test('tmux and claude are probed through a login shell', () => {
   assert.match(toolStep('tmux').command, /\$SHELL -lc/);
   assert.match(toolStep('tmux').command, /command -v tmux/);
   assert.match(toolStep('claude').command, /command -v claude/);
+});
+
+// ── Remote directory validation (Add a Remote Project by hand, VIN-157) ──
+// A hand-added Remote Project has no folder on the Host, so discovery can't see it. The path the
+// user types is validated on the Host as an existing directory before the Project is created.
+
+test('dirStep refuses to build a script around a path with shell metacharacters', () => {
+  // The path is spliced into a remote shell test; a double-quote or $() would break out and run on
+  // the Host. It is validated in the main process rather than trusted from the sidebar.
+  assert.throws(() => dirStep('/home/me"; rm -rf ~; echo "'), /Invalid remote path/);
+  assert.throws(() => dirStep('/home/$(touch /tmp/pwned)'), /Invalid remote path/);
+});
+
+test('dirStep builds a test that distinguishes a directory, a file and a missing path', () => {
+  const step = dirStep('/home/me/work/proj');
+  assert.equal(step.id, 'dir');
+  assert.match(step.command, /-d "\/home\/me\/work\/proj"/);
+  assert.match(step.command, /NO_DIR/);
+  assert.match(step.command, /NOT_DIR/);
+  assert.match(step.command, /OK/);
+});
+
+test('diagnoseDir accepts an existing directory', () => {
+  assert.deepEqual(diagnoseDir({ code: 0, stdout: 'OK\n' }, { path: '/p', sshTarget: 'mac-mini' }), { ok: true });
+});
+
+test('a missing path is refused with a clear message', () => {
+  const d = diagnoseDir({ code: 0, stdout: 'NO_DIR\n' }, { path: '/nope', sshTarget: 'mac-mini' });
+  assert.equal(d.ok, false);
+  assert.equal(d.step, 'path-missing');
+  assert.match(d.message, /\/nope/);
+  assert.match(d.message, /mac-mini/);
+});
+
+test('a path that is a file, not a directory, is refused with a clear message', () => {
+  const d = diagnoseDir({ code: 0, stdout: 'NOT_DIR\n' }, { path: '/etc/hosts', sshTarget: 'mac-mini' });
+  assert.equal(d.ok, false);
+  assert.equal(d.step, 'path-not-dir');
+  assert.match(d.message, /file/i);
+});
+
+test('checkRemoteDir reports the SSH failure first when the Host is Unreachable — nothing to validate', async () => {
+  // Unreachable Host → the reachability diagnosis, so the caller adds nothing (VIN-157 AC).
+  const run = async (step) => (step.id === 'reach' ? { code: 255, stderr: '' } : { code: 0, stdout: 'OK' });
+  const d = await checkRemoteDir({ host: { sshTarget: 'mac-mini' }, path: '/home/me/p' }, run);
+  assert.equal(d.ok, false);
+  assert.equal(d.step, 'ssh');
+});
+
+test('checkRemoteDir validates the path on a Reachable Host', async () => {
+  const run = async (step) => (step.id === 'reach' ? { code: 0 } : { code: 0, stdout: 'OK' });
+  assert.deepEqual(await checkRemoteDir({ host: { sshTarget: 'mac-mini' }, path: '/home/me/p' }, run), { ok: true });
+
+  const miss = async (step) => (step.id === 'reach' ? { code: 0 } : { code: 0, stdout: 'NO_DIR' });
+  const d = await checkRemoteDir({ host: { sshTarget: 'mac-mini' }, path: '/home/me/p' }, miss);
+  assert.equal(d.step, 'path-missing');
 });
 
 // ── Diagnostic mapping (one clear message + fix command per failure) ──

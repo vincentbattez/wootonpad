@@ -21,7 +21,7 @@ function makeDb() {
   const search = [];             // { id, type, folder }
   const settings = new Map();
   return {
-    _cache: cache, _meta: meta, _search: search,
+    _cache: cache, _meta: meta, _search: search, _settings: settings,
     getCachedByFolder: (folder, accountId = 'default') =>
       [...cache.values()].filter(r => r.folder === folder && r.accountId === accountId)
         .map(r => ({ sessionId: r.sessionId, modified: r.modified })),
@@ -215,6 +215,54 @@ test('a remote Project group carries remote/hostId and a capability set that hid
   // A Session can be started, resumed and forked on a Remote Host inside tmux (VIN-155), so
   // launching is declared — the renderer shows the New-session button and allows resume/fork.
   assert.equal(remoteProj.capabilities.launch, true);
+});
+
+// ── Hand-added Remote Projects with no Session (VIN-157) ────────────────
+// A Remote Project where Claude never ran has no folder in the mirror, so discovery can't see it.
+// Adding it by hand persists a record (global.remoteProjects) that buildProjectsFromCache injects
+// as an empty remote group, so the Project shows at once and survives the mirror sync (--delete
+// never touches this record) with no Session in it.
+
+test('a persisted hand-added Remote Project with no Session shows as an empty remote group', () => {
+  const { db } = setup();
+  db._settings.set('global', {
+    remoteProjects: [{ hostId: 'mac-mini', projectPath: 'ssh://mac-mini/home/me/fresh' }],
+  });
+
+  const projects = sessionCache.buildProjectsFromCache();
+  const added = projects.find(p => p.projectPath === 'ssh://mac-mini/home/me/fresh');
+  assert.ok(added, 'the hand-added Remote Project is in the payload before any Session exists');
+  assert.equal(added.remote, true);
+  assert.equal(added.hostId, 'mac-mini');
+  assert.deepEqual(added.sessions, []);
+  // It declares the same remote capability gate as a discovered Remote Project.
+  assert.equal(added.capabilities.launch, true);
+  assert.equal(added.capabilities.projectViewer, false);
+});
+
+test('a hand-added Remote Project that is hidden stays hidden until re-added', () => {
+  const { db } = setup();
+  db._settings.set('global', {
+    hiddenProjects: ['ssh://mac-mini/home/me/fresh'],
+    remoteProjects: [{ hostId: 'mac-mini', projectPath: 'ssh://mac-mini/home/me/fresh' }],
+  });
+  const projects = sessionCache.buildProjectsFromCache();
+  assert.equal(projects.find(p => p.projectPath === 'ssh://mac-mini/home/me/fresh'), undefined);
+});
+
+test('a hand-added Remote Project merges with its Sessions once they are mirrored, not a duplicate row', () => {
+  const { local, remote, FOLDER, db } = setup();
+  sessionCache.refreshFolder(FOLDER, local);
+  sessionCache.refreshFolder(FOLDER, remote);
+  // The user had added this exact Project by hand before its first Session arrived.
+  db._settings.set('global', {
+    remoteProjects: [{ hostId: 'mac-mini', projectPath: 'ssh://mac-mini/home/me/work/proj' }],
+  });
+
+  const projects = sessionCache.buildProjectsFromCache();
+  const rows = projects.filter(p => p.projectPath === 'ssh://mac-mini/home/me/work/proj');
+  assert.equal(rows.length, 1, 'one row, not a duplicate');
+  assert.equal(rows[0].sessions.length, 1, 'the mirrored Session is attached');
 });
 
 test('sessionFilePath resolves a remote session file to the mirror dir, a local one to the local dir', () => {

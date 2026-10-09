@@ -96,6 +96,32 @@ function accountStep(account) {
   return { id: 'account', account, command: script };
 }
 
+// A Remote Project path the user types by hand (VIN-157). It is spliced into a double-quoted remote
+// shell test, so a double-quote, $(…), backtick or backslash in it would break out and run on the
+// Host. We restrict it to a plain path — absolute, no shell metacharacters — in the main process
+// rather than trust what the sidebar sent (CODING_STANDARDS), so the expansion below stays inert.
+const REMOTE_PATH_RE = /^\/[^"'`$\\\n]*$/;
+function assertSafeRemotePath(remotePath) {
+  if (!REMOTE_PATH_RE.test(remotePath)) {
+    throw new Error(
+      `Invalid remote path "${remotePath}": expected an absolute POSIX path (leading /) without `
+      + `shell metacharacters.`);
+  }
+}
+
+// A one-round-trip check of whether a path is an existing directory on the Host: OK for a directory,
+// NOT_DIR when it exists but is a file, NO_DIR when it does not exist, so the diagnosis can tell the
+// two refusals apart (VIN-157: "a non-existent path or a file is refused with a clear message").
+function dirStep(remotePath) {
+  assertSafeRemotePath(remotePath);
+  const p = remotePath;
+  const script =
+    `if [ -d "${p}" ]; then echo OK; ` +
+    `elif [ -e "${p}" ]; then echo NOT_DIR; ` +
+    `else echo NO_DIR; fi`;
+  return { id: 'dir', path: remotePath, command: script };
+}
+
 // ── Diagnostics ──────────────────────────────────────────────────────
 // A failure is { ok:false, step, message, command } — the step that broke, what the user sees, and
 // the exact command they should run to fix it. Success is { ok:true }.
@@ -167,6 +193,24 @@ function diagnoseAccount(result, { account, sshTarget }) {
     `ssh ${sshTarget}`);
 }
 
+function diagnoseDir(result, { path: remotePath, sshTarget }) {
+  const out = String((result && result.stdout) || '').trim();
+  if (out === 'OK') return { ok: true };
+  if (out === 'NOT_DIR') {
+    return fail('path-not-dir',
+      `"${remotePath}" on ${sshTarget} is a file, not a directory. Pick a folder to add as a Project.`,
+      `ssh ${sshTarget} ${singleQuote(`ls -ld ${remotePath}`)}`);
+  }
+  if (out === 'NO_DIR') {
+    return fail('path-missing',
+      `"${remotePath}" doesn't exist on ${sshTarget}. Check the path — it must already exist there.`,
+      `ssh ${sshTarget} ${singleQuote(`ls -ld ${remotePath}`)}`);
+  }
+  return fail('path',
+    `Couldn't check "${remotePath}" on ${sshTarget} — the connection may have dropped mid-check.`,
+    `ssh ${sshTarget}`);
+}
+
 // ── Reachability ─────────────────────────────────────────────────────
 // Reachable is exactly a zero exit of the (multiplexed, BatchMode) probe. Nothing softer: a
 // timeout, a refused key or a dropped link are all Unreachable (CONTEXT.md, Reachable).
@@ -195,6 +239,17 @@ async function testConnection({ host, accounts = [] }, run) {
   }
 
   return { ok: true, message: `${host.sshTarget} is ready.` };
+}
+
+// Validate a hand-typed path for a new Remote Project (VIN-157): reach the Host, then check the
+// path is an existing directory. Reachability is checked first so an Unreachable Host surfaces its
+// own clear message and nothing is added, rather than a confusing path error. `run(step)` is
+// injected exactly as in testConnection.
+async function checkRemoteDir({ host, path: remotePath }, run) {
+  const ctx = { sshTarget: host.sshTarget };
+  const d = diagnoseReach(await run(reachStep()), ctx);
+  if (!d.ok) return d;
+  return diagnoseDir(await run(dirStep(remotePath)), { ...ctx, path: remotePath });
 }
 
 // ── Host store transforms ────────────────────────────────────────────
@@ -244,10 +299,10 @@ function removeRemoteAccount(hosts, hostId, accountId) {
 
 module.exports = {
   sshArgs, sshOptions, loginShell, singleQuote,
-  assertSafeSshTarget, assertSafeConfigDir,
-  reachStep, toolStep, accountStep, remoteConfigDir,
-  diagnoseReach, diagnoseTool, diagnoseAccount,
+  assertSafeSshTarget, assertSafeConfigDir, assertSafeRemotePath,
+  reachStep, toolStep, accountStep, dirStep, remoteConfigDir,
+  diagnoseReach, diagnoseTool, diagnoseAccount, diagnoseDir,
   classifyReachability,
-  testConnection,
+  testConnection, checkRemoteDir,
   defaultRemoteAccount, normalizeHost, addHost, addRemoteAccount, removeHost, removeRemoteAccount,
 };

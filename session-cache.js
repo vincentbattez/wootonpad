@@ -420,6 +420,21 @@ function buildProjectsFromCache() {
     } catch {}
   }
 
+  // Inject hand-added Remote Projects (VIN-157). A Remote Project where Claude never ran has no
+  // folder in the mirror, so the source loops above can't surface it; the user added it by path and
+  // it persists in global.remoteProjects (keyed ssh://<hostId>/<path>). We materialise an empty
+  // remote group for any not already produced from a mirrored Session, so it shows before its first
+  // Session and survives the next mirror sync (--delete never touches this record). newProjectGroup
+  // only reads source.hostId, so a minimal { hostId } stand-in gives it the remote flag, the remote
+  // icon and the capability gate — no mirror source needed for a Project that has none yet.
+  for (const rp of (Array.isArray(global.remoteProjects) ? global.remoteProjects : [])) {
+    if (!rp || !rp.projectPath || !rp.hostId) continue;
+    if (hiddenProjects.has(rp.projectPath)) continue;
+    if (!projectMap.has(rp.projectPath)) {
+      projectMap.set(rp.projectPath, newProjectGroup(rp.projectPath, { hostId: rp.hostId }));
+    }
+  }
+
   // Inject active plain terminal sessions so they participate in sorting
   for (const [sessionId, session] of activeSessions) {
     if (session.exited || !session.isPlainTerminal) continue;

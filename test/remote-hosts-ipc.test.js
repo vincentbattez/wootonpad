@@ -6,7 +6,7 @@ const { createRemoteHostsIpc } = require('../remote-hosts-ipc');
 // A fake over every injected boundary: an in-memory settings store, a recorder for renderer pushes,
 // a scriptable SSH runner keyed by sshTarget, and a hand-driven timer so the probe interval is
 // observable without real time.
-function harness({ reachable = {} } = {}) {
+function harness({ reachable = {}, dirOut = {} } = {}) {
   const store = {};
   const sent = [];
   let refreshes = 0;
@@ -16,7 +16,14 @@ function harness({ reachable = {} } = {}) {
     setSetting: (k, v) => { store[k] = v; },
     send: (...args) => sent.push(args),
     onReachabilityChange: () => { refreshes++; },
-    run: async (host) => ({ code: reachable[host.sshTarget] ? 0 : 255 }),
+    run: async (host, step) => {
+      // The dir check (VIN-157) answers from a per-host, per-path table; every other step is the
+      // reachability probe, which is a zero exit exactly when the host is reachable.
+      if (step && step.id === 'dir') {
+        return { code: 0, stdout: (dirOut[host.sshTarget] || {})[step.path] || 'NO_DIR' };
+      }
+      return { code: reachable[host.sshTarget] ? 0 : 255 };
+    },
     setIntervalFn: (fn) => { tick = fn; return 'timer'; },
     clearIntervalFn: () => { tick = null; },
   });
@@ -96,4 +103,82 @@ test('testing an unknown Host answers a not-found diagnosis rather than throwing
   const res = await ipc.testConnection('nope');
   assert.equal(res.ok, false);
   assert.equal(res.step, 'unknown');
+});
+
+// ── Add a Remote Project by hand (VIN-157) ──────────────────────────────
+// Validate a hand-typed path on the Host as an existing directory, then persist the Remote Project
+// so it shows in the sidebar (keyed ssh://<hostId>/<path>) and survives restart and mirror sync.
+
+test('adding an existing remote directory persists the Project keyed ssh://<hostId>/<path>', async () => {
+  const { ipc, store } = harness({
+    reachable: { 'mac-mini': true },
+    dirOut: { 'mac-mini': { '/home/me/work/proj': 'OK' } },
+  });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  const res = await ipc.addRemoteProject('h1', '/home/me/work/proj');
+  assert.equal(res.ok, true);
+  assert.equal(res.projectPath, 'ssh://h1/home/me/work/proj');
+  assert.deepEqual(store.global.remoteProjects, [{ hostId: 'h1', projectPath: 'ssh://h1/home/me/work/proj' }]);
+});
+
+test('a non-existent path is refused with a clear message and nothing is persisted', async () => {
+  const { ipc, store } = harness({
+    reachable: { 'mac-mini': true },
+    dirOut: { 'mac-mini': {} }, // every unseen path answers NO_DIR
+  });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  const res = await ipc.addRemoteProject('h1', '/does/not/exist');
+  assert.equal(res.ok, undefined);
+  assert.match(res.error, /doesn't exist/);
+  assert.equal(store.global, undefined, 'nothing persisted on a refused add');
+});
+
+test('an Unreachable Host is refused and nothing is persisted', async () => {
+  const { ipc, store } = harness({ reachable: { 'mac-mini': false } });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  const res = await ipc.addRemoteProject('h1', '/home/me/work/proj');
+  assert.equal(res.ok, undefined);
+  assert.ok(res.error, 'a clear error is returned');
+  assert.equal(store.global, undefined, 'nothing persisted');
+});
+
+test('adding against an unknown Host answers an error, not a throw', async () => {
+  const { ipc } = harness();
+  const res = await ipc.addRemoteProject('ghost', '/home/me/p');
+  assert.equal(res.ok, undefined);
+  assert.match(res.error, /not found/i);
+});
+
+test('re-adding a hidden Remote Project un-hides it, like a local one', async () => {
+  const { ipc, store } = harness({
+    reachable: { 'mac-mini': true },
+    dirOut: { 'mac-mini': { '/home/me/work/proj': 'OK' } },
+  });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  const key = 'ssh://h1/home/me/work/proj';
+  store.global = { hiddenProjects: [key, '/some/other'] };
+  await ipc.addRemoteProject('h1', '/home/me/work/proj');
+  assert.deepEqual(store.global.hiddenProjects, ['/some/other'], 'the re-added Project is un-hidden');
+});
+
+test('adding the same Remote Project twice does not duplicate the record', async () => {
+  const { ipc, store } = harness({
+    reachable: { 'mac-mini': true },
+    dirOut: { 'mac-mini': { '/home/me/work/proj': 'OK' } },
+  });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.addRemoteProject('h1', '/home/me/work/proj');
+  await ipc.addRemoteProject('h1', '/home/me/work/proj');
+  assert.equal(store.global.remoteProjects.length, 1);
+});
+
+test('removing a Host drops its hand-added Remote Projects so no ghost row survives', async () => {
+  const { ipc, store } = harness({
+    reachable: { 'mac-mini': true },
+    dirOut: { 'mac-mini': { '/home/me/work/proj': 'OK' } },
+  });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.addRemoteProject('h1', '/home/me/work/proj');
+  ipc.removeHost('h1');
+  assert.deepEqual(store.global.remoteProjects, []);
 });
