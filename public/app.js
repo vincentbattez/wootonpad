@@ -255,6 +255,17 @@ const EXIT_POLICIES = {
   default: { keepTabOnCrash: true, forgetOnExit: 'pendingOnly' },
 };
 
+// A Plain Terminal on a Remote Host (VIN-156) is the one 'terminal' that must keep its tab on a
+// crash. Its PTY is an ssh client, so a failed launch (unreachable Host, a bad Project path) exits
+// non-zero, and the Host's diagnostic is written by main.js *asynchronously* (testConnection
+// resolves seconds later). The local 'terminal' policy forgets the tab the instant the process
+// exits, so that late diagnostic would land on a session that no longer exists and be dropped —
+// taking even the raw ssh error with it. Keeping the tab on a crash (like a Claude Session) holds
+// the buffer open long enough for both the raw error and the Host diagnostic to show.
+function isRemotePlainTerminal(session) {
+  return session?.type === 'terminal' && String(session.projectPath || '').startsWith('ssh://');
+}
+
 // The shell reports an interrupt as 128+signal; that is deliberate, not a crash.
 const INTERRUPT_EXIT_CODES = new Set([130, 143]);
 function isCrashExit(exitCode, exitInfo) {
@@ -270,11 +281,16 @@ window.api.onProcessExited((sessionId, exitCode, exitInfo) => {
   }
 
   const policy = EXIT_POLICIES[session?.type] || EXIT_POLICIES.default;
+  const remotePlainTerminal = isRemotePlainTerminal(session);
+  const keepTabOnCrash = policy.keepTabOnCrash || remotePlainTerminal;
 
-  if (entry && policy.keepTabOnCrash && isCrashExit(exitCode, exitInfo)) {
+  if (entry && keepTabOnCrash && isCrashExit(exitCode, exitInfo)) {
     entry.terminal.write(
-      `\r\n\x1b[1;31m── Session ended unexpectedly (exit code ${exitCode}) ──\x1b[0m\r\n` +
-      `\x1b[2mThe error above is the CLI's own. Click this session in the sidebar to start it again.\x1b[0m\r\n`
+      remotePlainTerminal
+        ? `\r\n\x1b[1;31m── Terminal closed unexpectedly (exit code ${exitCode}) ──\x1b[0m\r\n` +
+          `\x1b[2mThe Remote Host could not open the terminal. Click it in the sidebar to try again.\x1b[0m\r\n`
+        : `\r\n\x1b[1;31m── Session ended unexpectedly (exit code ${exitCode}) ──\x1b[0m\r\n` +
+          `\x1b[2mThe error above is the CLI's own. Click this session in the sidebar to start it again.\x1b[0m\r\n`
     );
     refreshSidebar();
     pollActiveSessions();

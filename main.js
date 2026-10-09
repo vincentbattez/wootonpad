@@ -64,6 +64,27 @@ const cleanPtyEnv = Object.fromEntries(
   )
 );
 
+// The node-pty spawn options shared by both ssh-PTY launch sites — a remote Session (Claude in tmux)
+// and a remote Plain Terminal (a login shell, no tmux). In both the whole terminal is the ssh
+// client's own PTY, so they want an identical terminal shape and env: a real xterm with truecolor,
+// and the ssh askpass guard (SSH_ASKPASS_REQUIRE=never + empty DISPLAY) so a passphrase prompt fails
+// fast instead of popping a GUI. ssh forwards TERM but NOT TERM_PROGRAM (what Claude checks before
+// emitting OSC 9), so a Session injects TERM_PROGRAM into the tmux session env in remote-launch, not
+// here; a Plain Terminal runs no Claude and needs none. Extracted so the two sites can't drift.
+function remoteSshSpawnOpts() {
+  return {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    cwd: os.homedir(),
+    env: {
+      ...cleanPtyEnv,
+      TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
+      SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
+    },
+  };
+}
+
 // Shell profiles → shell-profiles.js
 const {
   discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell,
@@ -2280,17 +2301,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         remotePath: remoteCtx.remotePath,
       });
       log.info(`[remote-terminal] host=${remoteCtx.host.sshTarget} path=${remoteCtx.remotePath}`);
-      ptyProcess = pty.spawn('ssh', termArgs, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 30,
-        cwd: os.homedir(),
-        env: {
-          ...cleanPtyEnv,
-          TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
-          SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
-        },
-      });
+      ptyProcess = pty.spawn('ssh', termArgs, remoteSshSpawnOpts());
     } else if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
       // Inject a shell function to override `claude` with a helpful message
@@ -2336,21 +2347,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // preLaunchCmd content, which has no place in the app log.
       const launchVerb = sessionOptions?.forkFrom ? 'fork' : isNew ? 'new' : 'resume';
       log.info(`[remote-launch] session=${sessionId} host=${remoteCtx.host.sshTarget} verb=${launchVerb}`);
-      ptyProcess = pty.spawn('ssh', launchArgs, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 30,
-        cwd: os.homedir(),
-        env: {
-          ...cleanPtyEnv,
-          // ssh forwards TERM, which gives the far side a real terminal type; TERM_PROGRAM (what
-          // Claude checks before emitting OSC 9) is NOT forwarded, so it is injected into the tmux
-          // session env by remote-launch instead. OSC 0 titles (the working state) cross via tmux
-          // set-titles regardless.
-          TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
-          SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
-        },
-      });
+      // Same ssh-PTY spawn options as the remote Plain Terminal (remoteSshSpawnOpts): the terminal
+      // is the ssh client's PTY either way. TERM_PROGRAM, which Claude checks before emitting OSC 9,
+      // is injected into the tmux session env by remote-launch, not here (ssh does not forward it);
+      // OSC 0 titles cross via tmux set-titles regardless.
+      ptyProcess = pty.spawn('ssh', launchArgs, remoteSshSpawnOpts());
     } else {
       // Build claude command with session options
       let claudeCmd;
@@ -2631,9 +2632,20 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     if (session.remote && !session._stoppedByUser && exitCode !== 0) {
       const reportId = session.realSessionId || sessionId;
       Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
-        if (d && d.ok) return;
-        const msg = (d && d.message) || 'The Remote Host could not start the Session.';
-        const fix = d && d.command ? `\r\n\x1b[2mTry: ${d.command}\x1b[0m` : '';
+        let msg, fix = '';
+        if (d && d.ok) {
+          // The Host's prerequisites (reachability, tmux, claude, each Account's token) are all fine,
+          // so testConnection has no complaint — yet this launch still failed. For a Plain Terminal
+          // that typically means a launch-specific fault it does not probe (e.g. a bad Project path
+          // whose remote `cd` exits non-zero), so fall back to a generic message rather than writing
+          // nothing; the raw ssh / shell error is already above (the tab is kept on a crash, VIN-156).
+          // A remote Session keeps the prior behaviour of staying silent when the Host is healthy.
+          if (!session.isPlainTerminal) return;
+          msg = 'The Remote Host is reachable, but the terminal could not be opened — see the error above (often a missing or wrong Project path).';
+        } else {
+          msg = (d && d.message) || 'The Remote Host could not start the Session.';
+          if (d && d.command) fix = `\r\n\x1b[2mTry: ${d.command}\x1b[0m`;
+        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
         }
