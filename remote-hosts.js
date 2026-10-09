@@ -243,7 +243,7 @@ function removeRemoteAccount(hosts, hostId, accountId) {
 }
 
 module.exports = {
-  sshArgs, sshOptions, loginShell,
+  sshArgs, sshOptions, loginShell, singleQuote,
   assertSafeSshTarget, assertSafeConfigDir,
   reachStep, toolStep, accountStep, remoteConfigDir,
   diagnoseReach, diagnoseTool, diagnoseAccount,
