@@ -21,6 +21,19 @@
  * The on-disk folder name is kept raw for filesystem access; only the identifier
  * written to the database is qualified.
  */
+/**
+ * Qualify a raw project path into a Remote Project key: `ssh://<hostId>/<path>`
+ * (ADR 0016). The one definition the key is built from, so a remote source's
+ * qualifyProjectPath and a hand-added Remote Project (VIN-157) can never drift
+ * into keying the same path two different ways. A null/empty path or a missing
+ * host is passed through untouched — an un-derivable key stays un-derivable
+ * rather than becoming `ssh://<hostId>/`.
+ */
+function qualifyRemoteProjectPath(hostId, rawPath) {
+  if (!rawPath || !hostId) return rawPath;
+  return `ssh://${hostId}${rawPath.startsWith('/') ? '' : '/'}${rawPath}`;
+}
+
 function createSource({ id, projectsDir, accountId, hostId = null }) {
   if (!id) throw new Error('createSource: id is required');
   if (!projectsDir) throw new Error('createSource: projectsDir is required');
@@ -32,8 +45,7 @@ function createSource({ id, projectsDir, accountId, hostId = null }) {
     accountId: resolvedAccountId,
     hostId: resolvedHostId,
     qualifyProjectPath(rawPath) {
-      if (!rawPath || !resolvedHostId) return rawPath;
-      return `ssh://${resolvedHostId}${rawPath.startsWith('/') ? '' : '/'}${rawPath}`;
+      return resolvedHostId ? qualifyRemoteProjectPath(resolvedHostId, rawPath) : rawPath;
     },
     qualifyFolder(folder) {
       return resolvedHostId ? `ssh://${resolvedHostId}/${folder}` : folder;
@@ -77,4 +89,4 @@ function localSourceFromCtx(ctx) {
   return createSource({ id, projectsDir: ctx.PROJECTS_DIR, accountId: id });
 }
 
-module.exports = { createSource, localSourceFromCtx };
+module.exports = { createSource, localSourceFromCtx, qualifyRemoteProjectPath };

@@ -1,6 +1,22 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { createSource } = require('../session-source');
+const { createSource, qualifyRemoteProjectPath } = require('../session-source');
+
+test('qualifyRemoteProjectPath keys a raw remote path as ssh://<hostId>/<path> (ADR 0016)', () => {
+  // The one definition a Remote Project key is built from — a hand-added Remote Project
+  // (VIN-157) and a remote source both qualify through here, so they can never drift.
+  assert.equal(qualifyRemoteProjectPath('mac-mini', '/home/me/work/proj'), 'ssh://mac-mini/home/me/work/proj');
+  // A non-absolute path still gets exactly one slash between the host and the path.
+  assert.equal(qualifyRemoteProjectPath('mac-mini', 'rel/path'), 'ssh://mac-mini/rel/path');
+  // An empty path or a missing host is passed through untouched rather than keyed.
+  assert.equal(qualifyRemoteProjectPath('mac-mini', ''), '');
+  assert.equal(qualifyRemoteProjectPath('', '/home/me'), '/home/me');
+});
+
+test('a remote source keys through the same helper as a hand-added Remote Project', () => {
+  const remote = createSource({ id: 'ssh://h', projectsDir: '/m', accountId: 'a', hostId: 'h' });
+  assert.equal(remote.qualifyProjectPath('/home/me/p'), qualifyRemoteProjectPath('h', '/home/me/p'));
+});
 
 test('the local source qualifies a project path and a folder as identity', () => {
   const local = createSource({ id: 'default', projectsDir: '/home/me/.claude/projects', accountId: 'default' });
