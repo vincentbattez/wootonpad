@@ -25,21 +25,24 @@ function newRemoteAccountId() { return 'racc-' + randomUUID().replace(/-/g, '').
 // connection instead of paying a full handshake each time (ADR 0016).
 function controlPathFor(host) { return path.join(HOSTS_CONTROL_DIR, 'cm-' + host.id); }
 
-// Run one prerequisite step on a Host over SSH. BatchMode=yes and a connect timeout come from
-// sshArgs; the child is never written to and SSH_ASKPASS is disabled, so no password or host-key
-// prompt can block the app even if one slipped past BatchMode. The result mirrors the shape the
-// pure diagnostics expect: { code, stdout, stderr }.
-function sshRun(host, step, { connectTimeout = 10 } = {}) {
+// The one place WootonPad shells out over SSH (ADR 0016-remote-hosts-over-ssh: this adapter "is the
+// only part that shells out"). Given a ready `ssh` argv, it makes sure the control-socket dir exists,
+// runs the child with BatchMode's second wall in place — SSH_ASKPASS disabled and no DISPLAY, so no
+// password or host-key prompt can block the app even if one slipped past BatchMode — and resolves the
+// uniform { code, stdout, stderr } shape every caller expects (code 255 when ssh dies without one).
+// Every SSH boundary — the prerequisite/reachability probe and the Remote Project git Snapshot
+// (VIN-159) — runs through here, so the askpass/BatchMode safety story lives in exactly one place
+// and tightening it tightens both.
+function runSsh(args, { timeout, maxBuffer } = {}) {
   return new Promise(resolve => {
     try { fs.mkdirSync(HOSTS_CONTROL_DIR, { recursive: true }); } catch {}
-    const args = remoteHosts.sshArgs(host.sshTarget, step.command, {
-      connectTimeout, controlPath: controlPathFor(host),
-    });
-    execFile('ssh', args, {
+    const execOpts = {
       encoding: 'utf8',
-      timeout: (connectTimeout + 10) * 1000,
       env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' },
-    }, (err, stdout, stderr) => {
+    };
+    if (timeout != null) execOpts.timeout = timeout;
+    if (maxBuffer != null) execOpts.maxBuffer = maxBuffer;
+    execFile('ssh', args, execOpts, (err, stdout, stderr) => {
       resolve({
         code: err ? (typeof err.code === 'number' ? err.code : 255) : 0,
         stdout: stdout || '',
@@ -47,6 +50,16 @@ function sshRun(host, step, { connectTimeout = 10 } = {}) {
       });
     });
   });
+}
+
+// Run one prerequisite step on a Host over SSH. BatchMode=yes and a connect timeout come from
+// sshArgs; the shell-out and its safety come from the shared runSsh. The result mirrors the shape
+// the pure diagnostics expect: { code, stdout, stderr }.
+function sshRun(host, step, { connectTimeout = 10 } = {}) {
+  const args = remoteHosts.sshArgs(host.sshTarget, step.command, {
+    connectTimeout, controlPath: controlPathFor(host),
+  });
+  return runSsh(args, { timeout: (connectTimeout + 10) * 1000 });
 }
 
 // Build the adapter over its injected boundaries. `getSetting`/`setSetting` are the db store, `send`
@@ -141,6 +154,6 @@ function createRemoteHostsIpc({
 }
 
 module.exports = {
-  createRemoteHostsIpc, sshRun, controlPathFor,
+  createRemoteHostsIpc, runSsh, sshRun, controlPathFor,
   HOSTS_CONTROL_DIR, HOST_PROBE_MS,
 };

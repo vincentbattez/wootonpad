@@ -224,25 +224,15 @@ function projectExecFile(argv, cwd, options = {}) {
 }
 
 // A git command against a Remote Project (cwd is an ssh://<hostId>/<path> key) runs on its Host over
-// SSH, through the Host's login shell (VIN-159, ADR 0016). This is the same seam a WSL account
-// redirects — git stays one argv interface (ADR 0007), only where it runs changes. It rides the
-// Host's multiplexed master (resolved.args already carries ControlMaster/ControlPath/ControlPersist,
-// built in remote-hosts.sshOptions), with the same BatchMode safety as every other SSH command:
-// SSH_ASKPASS disabled and DISPLAY cleared so no prompt can ever block the app.
+// SSH, through the Host's login shell (VIN-159, ADR 0016, ADR 0017). This is the same seam a WSL
+// account redirects — git stays one argv interface (ADR 0007), only where it runs changes. It rides
+// the Host's multiplexed master (resolved.args already carries ControlMaster/ControlPath/
+// ControlPersist, built in remote-hosts.sshOptions). The shell-out itself — the control-socket dir,
+// the BatchMode/askpass safety, and the { code, stdout, stderr } shape — is remote-hosts-ipc's one
+// SSH runner (ADR 0016-remote-hosts-over-ssh: that adapter is the only part that shells out), reused
+// here with git's larger output buffer so the boundary is maintained in exactly one place.
 function runRemoteGit(resolved, timeout) {
-  return new Promise(resolve => {
-    try { fs.mkdirSync(remoteHostsIpcModule.HOSTS_CONTROL_DIR, { recursive: true }); } catch {}
-    execFile('ssh', resolved.args, {
-      encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
-      env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' },
-    }, (err, stdout, stderr) => {
-      resolve({
-        code: err ? (typeof err.code === 'number' ? err.code : 255) : 0,
-        stdout,
-        stderr: stderr || (err ? err.message : ''),
-      });
-    });
-  });
+  return remoteHostsIpcModule.runSsh(resolved.args, { timeout, maxBuffer: GIT_MAX_BUFFER });
 }
 
 // projectExecFile decides where git runs locally — inside the distribution for a WSL-backed account.

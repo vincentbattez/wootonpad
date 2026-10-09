@@ -13,11 +13,13 @@
 
 const remoteHosts = require('./remote-hosts');
 
-// A Remote Project key is ssh://<hostId>/<path> (ADR 0016). The scheme is otherwise opaque — code
-// never splits it back — but running git on the Host is the one seam that must, because git has to
-// cd into <path> there. remotePath is always absolute: Claude records an absolute cwd, so that is
-// what the key carries. Returns { hostId, remotePath }, or null for a local (identity) key so a
-// caller can fall straight through to local git.
+// A Remote Project key is ssh://<hostId>/<path> (ADR 0016-remote-project-key-scheme). That scheme is
+// otherwise opaque — code never splits it back — but running the light Git Snapshot on the Host is
+// the one seam that must, because git has to cd into <path> there. ADR 0017 amends 0016 to carve out
+// exactly this seam (and only this one) as allowed to resolve a key to a (hostId, path) endpoint.
+// remotePath is always absolute: Claude records an absolute cwd, so that is what the key carries.
+// Returns { hostId, remotePath }, or null for a local (identity) key so a caller can fall straight
+// through to local git.
 const REMOTE_KEY_RE = /^ssh:\/\/([^/]+)(\/.*)$/;
 function parseRemoteKey(projectKey) {
   const m = REMOTE_KEY_RE.exec(String(projectKey || ''));
@@ -40,7 +42,8 @@ function remoteGitArgs(sshTarget, remotePath, gitArgv, opts = {}) {
 // Resolve a Remote Project key to the ssh argv for a git command, given the current Host list.
 // Returns { host, args }, or null for a local key (the runner runs git locally, unchanged) or a
 // remote key whose Host is unknown — a Host the user removed never dials out. Keeps the one place
-// that turns an opaque key back into a dialable endpoint (ADR 0016) pure and tested.
+// that turns an opaque key back into a dialable endpoint (ADR 0017, the seam 0016 carves out) pure
+// and tested.
 function resolveRemoteGitArgs(projectKey, gitArgv, hosts, opts = {}) {
   const parsed = parseRemoteKey(projectKey);
   if (!parsed) return null;
