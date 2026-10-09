@@ -46,6 +46,35 @@ test('the target comes before the remote command', () => {
   assert.ok(t >= 0 && c > t, 'target precedes the command');
 });
 
+test('options are terminated with -- so a target can never be read as an option', () => {
+  const args = sshArgs('user@host', 'true');
+  const sep = args.indexOf('--');
+  const t = args.indexOf('user@host');
+  assert.ok(sep >= 0 && t === sep + 1, '-- sits immediately before the target');
+});
+
+test('a sshTarget beginning with a dash is rejected before it is stored', () => {
+  assert.throws(
+    () => addHost([], { name: 'Evil', sshTarget: '-oProxyCommand=touch /tmp/pwned' }, idgen),
+    /Invalid SSH target/,
+  );
+});
+
+test('a configDir with shell metacharacters is rejected before it is stored', () => {
+  let hosts = addHost([], { name: 'Mini', sshTarget: 'mac-mini' }, idgen);
+  assert.throws(
+    () => addRemoteAccount(hosts, hosts[0].id, { name: 'Evil', configDir: '~/.c"; touch /tmp/pwned; echo "' }, idgen),
+    /Invalid config dir/,
+  );
+});
+
+test('accountStep refuses to build a script around a hostile configDir', () => {
+  assert.throws(
+    () => accountStep({ id: 'x', name: 'Evil', configDir: '~/.c"; rm -rf ~; echo "' }),
+    /Invalid config dir/,
+  );
+});
+
 test('tmux and claude are probed through a login shell', () => {
   assert.match(toolStep('tmux').command, /\$SHELL -lc/);
   assert.match(toolStep('tmux').command, /command -v tmux/);

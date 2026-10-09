@@ -25,11 +25,25 @@ function sshOptions({ connectTimeout = DEFAULT_CONNECT_TIMEOUT, controlPath } = 
   return opts;
 }
 
-// The argv for `ssh`, target before command, every option behind its own -o.
+// A Host's sshTarget is an ssh_config alias or user@host. It becomes argv for `ssh`, so a value
+// beginning with a dash (e.g. `-oProxyCommand=…`) would be read by ssh as an option and run an
+// arbitrary command on THIS machine. We validate it in the main process rather than trust what the
+// sidebar sent (CODING_STANDARDS), and sshArgs still terminates options with `--` as a second wall.
+const SSH_TARGET_RE = /^[A-Za-z0-9][A-Za-z0-9._@-]*$/;
+function assertSafeSshTarget(sshTarget) {
+  if (!SSH_TARGET_RE.test(sshTarget)) {
+    throw new Error(
+      `Invalid SSH target "${sshTarget}": expected an ssh_config alias or user@host — letters, `
+      + `digits, dot, dash, underscore and @, never a leading dash.`);
+  }
+}
+
+// The argv for `ssh`, target before command, every option behind its own -o. A literal `--`
+// terminates option parsing before the target, so a target can never be mistaken for an option.
 function sshArgs(sshTarget, remoteCommand, opts = {}) {
   const args = [];
   for (const o of sshOptions(opts)) args.push('-o', o);
-  args.push(sshTarget);
+  args.push('--', sshTarget);
   if (remoteCommand) args.push(remoteCommand);
   return args;
 }
@@ -52,6 +66,19 @@ function reachStep() {
 function toolStep(tool) {
   return { id: tool, command: loginShell(`command -v ${tool}`) };
 }
+// A configDir is interpolated into a double-quoted remote shell script, so a double-quote (or any
+// shell metacharacter) in it would break out and run on the Host. We restrict it to a plain path
+// before it ever reaches the script — validated in the main process, not trusted from the sidebar
+// (CODING_STANDARDS) — so the expansion below stays inert.
+const CONFIG_DIR_RE = /^[A-Za-z0-9._/~-]+$/;
+function assertSafeConfigDir(configDir) {
+  if (!CONFIG_DIR_RE.test(configDir)) {
+    throw new Error(
+      `Invalid config dir "${configDir}": expected a path of letters, digits, dot, dash, `
+      + `underscore, slash and ~ — shell metacharacters are rejected.`);
+  }
+}
+
 // The Account check reports which prerequisite is missing in one round trip, so the diagnosis can
 // tell a missing config dir from a missing token. $HOME expands inside the double quotes; a
 // leading ~ is rewritten so the Default Account's ~/.claude resolves on the Host.
@@ -60,6 +87,7 @@ function remoteConfigDir(account) {
   return dir.startsWith('~') ? '$HOME' + dir.slice(1) : dir;
 }
 function accountStep(account) {
+  assertSafeConfigDir(account.configDir || '~/.claude');
   const d = remoteConfigDir(account);
   const script =
     `if [ ! -d "${d}" ]; then echo NO_DIR; ` +
@@ -175,17 +203,21 @@ function normalizeHost(host) {
 }
 
 function addHost(hosts, { name, sshTarget }, idgen) {
+  const target = String(sshTarget || '').trim();
+  assertSafeSshTarget(target);
   const host = normalizeHost({
     id: idgen(),
     name: String(name || '').trim(),
-    sshTarget: String(sshTarget || '').trim(),
+    sshTarget: target,
     accounts: [],
   });
   return [...hosts, host];
 }
 
 function addRemoteAccount(hosts, hostId, { name, configDir }, idgen) {
-  const account = { id: idgen(), name: String(name || '').trim(), configDir: String(configDir || '').trim() };
+  const dir = String(configDir || '').trim();
+  assertSafeConfigDir(dir);
+  const account = { id: idgen(), name: String(name || '').trim(), configDir: dir };
   return hosts.map(h => h.id === hostId ? { ...h, accounts: [...h.accounts, account] } : h);
 }
 
@@ -202,6 +234,7 @@ function removeRemoteAccount(hosts, hostId, accountId) {
 
 module.exports = {
   sshArgs, sshOptions, loginShell,
+  assertSafeSshTarget, assertSafeConfigDir,
   reachStep, toolStep, accountStep, remoteConfigDir,
   diagnoseReach, diagnoseTool, diagnoseAccount,
   classifyReachability,

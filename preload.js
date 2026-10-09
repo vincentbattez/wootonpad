@@ -64,6 +64,9 @@ contextBridge.exposeInMainWorld('api', {
   testHostConnection: (hostId) => ipcRenderer.invoke('test-host-connection', hostId),
   getHostReachability: () => ipcRenderer.invoke('get-host-reachability'),
   onHostReachability: (callback) => {
+    // Drop any previous subscriber first, so a re-mount of HostsContainer can't stack duplicate
+    // listeners that each fire the callback on one push.
+    ipcRenderer.removeAllListeners('host-reachability');
     ipcRenderer.on('host-reachability', (_event, hostId, reachable) => callback(hostId, reachable));
   },
 
