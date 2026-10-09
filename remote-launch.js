@@ -151,6 +151,20 @@ function sshInvoke(sshTarget, remoteCommand, { tty = false } = {}) {
   return args;
 }
 
+// The PTY-side companion to sshInvoke's argv safety: the env a remote ssh client is spawned under,
+// layered over the caller's cleaned base env. TERM/COLORTERM/FORCE_COLOR give the far side a real
+// colour terminal; SSH_ASKPASS_REQUIRE=never + empty DISPLAY keep ssh non-interactive so a missing
+// key fails fast instead of popping an askpass GUI (the PTY half of ADR 0016's BatchMode safety).
+// Shared by the foreground launch (main.js) and the background re-attach (remote-reattach.js) so the
+// one safe shape lives in one place (VIN-160).
+function remotePtyEnv(baseEnv = {}) {
+  return {
+    ...baseEnv,
+    TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
+    SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
+  };
+}
+
 function buildRemoteLaunchArgs({ sshTarget, sessionId, isNew, forkFrom, account, options, remotePath }) {
   const claudeCommand = buildClaudeCommand({ sessionId, isNew, forkFrom, account, options });
   const inner = buildTmuxCommand({ sessionId, remotePath, claudeCommand });
@@ -285,5 +299,5 @@ module.exports = {
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
-  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit,
+  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit, remotePtyEnv,
 };

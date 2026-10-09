@@ -55,14 +55,22 @@ function createRemoteReattach({
 
   // Spawn a headless ssh PTY that re-attaches one Session's tmux on the Host. It parses OSC for the
   // State Dot and buffers output exactly like a foreground launch (wirePtyHandlers), so clicking the
-  // row later replays the buffer and streams live — no restart of Claude. Reviving a Session that had
-  // dropped reuses its object (and its last buffered State) rather than starting a second row.
+  // row later replays the buffer and streams live — no restart of Claude. Reviving an existing (dropped)
+  // Session reuses its object (and its last buffered State) rather than starting a second row.
   function reattachRemoteSession(host, sessionId) {
     const existing = activeSessions.get(sessionId);
     if (existing && !existing.exited && !existing.dropped) return; // already live
+    // The far side's tmux is named by the Session's remoteTmuxId, which diverges from sessionId on the
+    // revive-in-place path: there sessionId is the activeSessions key (the realSessionId after a fork/
+    // plan-accept re-key) while the tmux session still carries its original name until the rename lands
+    // — or forever, if the rename was pending or failed. Target it the way every other tmux path does,
+    // remoteTmuxId || sessionId (main.js buildStopArgs, hasSessionCommand); addressing wp-<realSessionId>
+    // here would miss a tmux that never got renamed, so revival would silently fail (VIN-160). A fresh
+    // attach's sessionId is itself a live tmux id off the list, so it falls through to sessionId.
+    const tmuxId = (existing && existing.remoteTmuxId) || sessionId;
     let args;
     try {
-      args = remoteLaunch.buildAttachArgs({ sshTarget: host.sshTarget, sessionId });
+      args = remoteLaunch.buildAttachArgs({ sshTarget: host.sshTarget, sessionId: tmuxId });
     } catch (e) {
       log.warn(`[remote-reattach] skipping ${sessionId}: ${e.message}`);
       return;
@@ -71,28 +79,27 @@ function createRemoteReattach({
     try {
       ptyProcess = pty.spawn('ssh', args, {
         name: 'xterm-256color', cols: 120, rows: 30, cwd: os.homedir(),
-        env: {
-          ...cleanPtyEnv,
-          TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
-          SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
-        },
+        env: remoteLaunch.remotePtyEnv(cleanPtyEnv),
       });
     } catch (e) {
       log.warn(`[remote-reattach] spawn for ${sessionId} failed: ${e.message}`);
       return;
     }
 
-    if (existing && existing.dropped) {
-      // Revive in place: keep the buffered output and last State, swap in the fresh PTY. It is now an
-      // attach, not a launch — mark it re-attached so a pre-connect death reads as a drop, not an exit.
+    if (existing) {
+      // Revive in place: keep the buffered output and last State, swap in the fresh PTY. Past the early
+      // return `existing` is dropped (the common case) or exited (defensive — a real exit drops the
+      // tmux id from the live list, so it is never re-attached, but reusing the object still beats
+      // discarding its buffer). It is now an attach, not a launch — mark it re-attached so a pre-connect
+      // death reads as a drop, not an exit.
       existing.pty = ptyProcess;
       existing.dropped = false;
       existing.exited = false;
       existing.firstResize = true;
       existing._reattached = true;
-      log.info(`[remote-reattach] revived dropped session=${sessionId} on ${host.sshTarget}`);
+      log.info(`[remote-reattach] revived session=${sessionId} on ${host.sshTarget}`);
       wirePtyHandlers(ptyProcess, existing, sessionId);
-      seedRemoteDot(host, existing, sessionId);
+      seedRemoteDot(host, existing, sessionId, tmuxId);
       return;
     }
 
@@ -114,7 +121,7 @@ function createRemoteReattach({
     activeSessions.set(sessionId, session);
     log.info(`[remote-reattach] background attach session=${sessionId} on ${host.sshTarget}`);
     wirePtyHandlers(ptyProcess, session, sessionId);
-    seedRemoteDot(host, session, sessionId);
+    seedRemoteDot(host, session, sessionId, tmuxId);
   }
 
   // A live Remote Session's ssh PTY died: tell a real exit from a dropped link (VIN-160). An
@@ -149,9 +156,18 @@ function createRemoteReattach({
   // Seed a re-attached Session's live State Dot from the pane title tmux still holds — the CLI's last
   // OSC 0, which is the authoritative busy signal — so a busy Session reads as working at once rather
   // than waiting for the CLI's next spinner repaint, and an idle one keeps its mirrored State
-  // (VIN-160). Fire-and-forget: a failed probe simply leaves the Dot where it was.
-  function seedRemoteDot(host, session, sessionId) {
-    Promise.resolve(sshRun(host, { command: remoteLaunch.paneTitleCommand(sessionId) }, { connectTimeout: 10 }))
+  // (VIN-160). `sessionId` is the renderer/store key the Dot is pushed under; `tmuxId` names the far
+  // side (they diverge after a re-key — see reattachRemoteSession). Fire-and-forget: a failed probe
+  // simply leaves the Dot where it was.
+  //
+  // KNOWN LIMITATION (VIN-160): this recovers only `working`, never `needs input`. The OSC 0 title is
+  // busy-or-idle; a Session paused at a prompt shows the idle title, indistinguishable from a finished
+  // turn, and Claude's `needs input` signal is OSC 9, emitted live and not re-derivable from tmux
+  // state. So a re-attached Session sitting at a prompt keeps its mirrored `done`/`sleeping` Dot until
+  // the CLI's next OSC 9 repaint flips it to `needs input`. The busy case — the one that matters while
+  // Claude thinks — is seeded here; the prompt case waits for the live stream.
+  function seedRemoteDot(host, session, sessionId, tmuxId = sessionId) {
+    Promise.resolve(sshRun(host, { command: remoteLaunch.paneTitleCommand(tmuxId) }, { connectTimeout: 10 }))
       .then(res => {
         if (!res || res.code !== 0) return;
         seedBusyFromTitle(session, sessionId, String(res.stdout || '').trim());

@@ -15,7 +15,7 @@ const {
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
-  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit,
+  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit, remotePtyEnv,
 } = require('../remote-launch');
 
 // --- an independent single-quote oracle -------------------------------------------------------
@@ -439,4 +439,20 @@ test('classifyRemotePtyExit — ssh could not connect (255) is a dropped link ev
 
 test('classifyRemotePtyExit — reachable Host, tmux session gone (probe 1): Claude really exited', () => {
   assert.equal(classifyRemotePtyExit({ stoppedByUser: false, reachable: true, hasSessionCode: 1 }), 'exited');
+});
+
+test('remotePtyEnv layers the colour + non-interactive ssh env over the cleaned base, base first', () => {
+  const env = remotePtyEnv({ PATH: '/usr/bin', TERM: 'dumb' });
+  assert.equal(env.PATH, '/usr/bin', 'the base env is carried through');
+  assert.equal(env.TERM, 'xterm-256color', 'a real colour terminal overrides the base TERM');
+  assert.equal(env.COLORTERM, 'truecolor');
+  assert.equal(env.FORCE_COLOR, '3');
+  assert.equal(env.SSH_ASKPASS_REQUIRE, 'never', 'ssh stays non-interactive — no askpass GUI');
+  assert.equal(env.DISPLAY, '');
+});
+
+test('remotePtyEnv defaults to a bare env when no base is given', () => {
+  const env = remotePtyEnv();
+  assert.equal(env.TERM, 'xterm-256color');
+  assert.equal(env.DISPLAY, '');
 });

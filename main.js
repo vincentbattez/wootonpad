@@ -2524,20 +2524,17 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // preLaunchCmd content, which has no place in the app log.
       const launchVerb = sessionOptions?.forkFrom ? 'fork' : isNew ? 'new' : 'resume';
       log.info(`[remote-launch] session=${sessionId} host=${remoteCtx.host.sshTarget} verb=${launchVerb}`);
+      // ssh forwards TERM, which gives the far side a real terminal type; TERM_PROGRAM (what Claude
+      // checks before emitting OSC 9) is NOT forwarded, so it is injected into the tmux session env by
+      // remote-launch instead. OSC 0 titles (the working state) cross via tmux set-titles regardless.
+      // The spawn env (colour + non-interactive ssh) is remote-launch.remotePtyEnv, shared with the
+      // background re-attach so the one safe shape lives in one place (VIN-160).
       ptyProcess = pty.spawn('ssh', launchArgs, {
         name: 'xterm-256color',
         cols: 120,
         rows: 30,
         cwd: os.homedir(),
-        env: {
-          ...cleanPtyEnv,
-          // ssh forwards TERM, which gives the far side a real terminal type; TERM_PROGRAM (what
-          // Claude checks before emitting OSC 9) is NOT forwarded, so it is injected into the tmux
-          // session env by remote-launch instead. OSC 0 titles (the working state) cross via tmux
-          // set-titles regardless.
-          TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
-          SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
-        },
+        env: remoteLaunch.remotePtyEnv(cleanPtyEnv),
       });
     } else {
       // Build claude command with session options

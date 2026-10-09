@@ -127,6 +127,27 @@ test('reviving a dropped Session reuses its object and keeps its buffer', async 
   assert.equal(wired[0].session, dropped);
 });
 
+test('reviving a re-keyed dropped Session targets the far-side tmux by remoteTmuxId, not the map key', async () => {
+  // After a fork/plan-accept re-key the Session lives under its realSessionId while its tmux still
+  // carries the original name (the rename was pending or failed). Attach and seed must address the
+  // tmux that exists — wp-<remoteTmuxId> — not wp-<map key>, or revival silently fails (VIN-160).
+  const { reattach, activeSessions, sshCalls } = setup({
+    sshResponder: (command) =>
+      command.includes('display-message') ? { code: 0, stdout: '  ✶ Working…  \n' } : { code: 0, stdout: '' },
+  });
+  const dropped = { remote: true, hostId: 'h1', remoteTmuxId: 'old', realSessionId: 'new',
+    dropped: true, exited: false, outputBuffer: [], pty: null };
+  activeSessions.set('new', dropped);
+
+  reattach.reattachRemoteSession(HOST, 'new');
+  await settle(); await settle();
+
+  const paneProbe = sshCalls.find(c => c.command.includes('display-message'));
+  assert.ok(paneProbe, 'the pane-title probe is attempted');
+  assert.ok(paneProbe.command.includes('wp-old'), 'the pane-title probe targets the original tmux name');
+  assert.ok(!paneProbe.command.includes('wp-new'), 'and not the re-keyed map key');
+});
+
 test('an already-live Session is left alone when asked to re-attach it', () => {
   const { reattach, activeSessions, spawned } = setup();
   const live = { remote: true, hostId: 'h1', remoteTmuxId: 'a', dropped: false, exited: false };
