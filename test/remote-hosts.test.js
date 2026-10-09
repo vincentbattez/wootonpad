@@ -6,7 +6,7 @@ const {
   reachStep, toolStep, accountStep, dirStep,
   diagnoseReach, diagnoseTool, diagnoseAccount, diagnoseDir,
   classifyReachability,
-  testConnection, checkRemoteDir,
+  testConnection, testReachability, checkRemoteDir,
   normalizeHost, addHost, addRemoteAccount, removeHost, removeRemoteAccount,
 } = require('../remote-hosts');
 
@@ -310,6 +310,27 @@ test('account checks stop at the first bad account', async () => {
   assert.equal(res.ok, false);
   assert.equal(res.step, 'account-token');
   assert.match(res.message, /Work/);
+});
+
+// ── Reachability-only probe (a Plain Terminal's failure path, VIN-156) ──
+// A Plain Terminal uses no tmux, no claude and no Account token, so its failure is diagnosed by
+// reachability alone — never the Session prerequisites — so the surfaced message matches the launch.
+
+test('testReachability — a reachable Host is ok and no prerequisite step is probed', async () => {
+  const probed = [];
+  const run = async (step) => { probed.push(step.id); return step.id === 'reach' ? { code: 0 } : { code: 0, stdout: 'OK' }; };
+  const res = await testReachability({ host: HOST }, run);
+  assert.equal(res.ok, true);
+  assert.deepEqual(probed, ['reach'], 'only the reach step runs — never tmux, claude or an account');
+});
+
+test('testReachability — an unreachable Host surfaces its reachability diagnosis, not a tmux/token fix', async () => {
+  const run = async () => ({ code: 255, stderr: 'ssh: connect to host mac-mini port 22: Connection refused' });
+  const res = await testReachability({ host: HOST }, run);
+  assert.equal(res.ok, false);
+  assert.equal(res.step, 'ssh');
+  assert.match(res.message, /Can't reach mac-mini/);
+  assert.ok(!/tmux|claude|\.oauth-token/.test(res.message), 'a Plain Terminal never sees a Session-prerequisite fix');
 });
 
 // ── Host store transforms (persistence shape, Default Account invariant) ──

@@ -184,6 +184,32 @@ function buildRenameArgs({ sshTarget, oldSessionId, newSessionId }) {
   return sshInvoke(sshTarget, loginShell(`tmux -L ${TMUX_SOCKET} rename-session -t ${from} ${to}`));
 }
 
+// ── A failed remote launch's diagnostic ──────────────────────────────
+// An early non-zero exit of a remote PTY the user did not ask for is a spawn failure, and the user
+// should see why rather than be left with a raw ssh error (VIN-155/156). The adapter (main.js) runs
+// the Host probe — the full Session prerequisite probe for a Session, the reachability-only probe for
+// a Plain Terminal (which uses none of those prerequisites) — and passes its result here. This turns
+// that result into the line to write, or null to stay silent:
+//   • probe failed             → its own message (+ the exact fix command), for either launch type.
+//   • probe ok, Session        → null: every prerequisite is fine, so stay silent as before.
+//   • probe ok, Plain Terminal → a generic "Host reachable, terminal couldn't open" line, since the
+//                                reachability probe has no complaint yet the launch still failed
+//                                (typically a bad Project path whose remote `cd` exits non-zero); the
+//                                raw ssh / shell error is already above it in the terminal.
+function remoteExitDiagnostic({ probe, isPlainTerminal }) {
+  if (probe && probe.ok) {
+    if (!isPlainTerminal) return null;
+    return {
+      message: 'The Remote Host is reachable, but the terminal could not be opened — see the error above (often a missing or wrong Project path).',
+      command: '',
+    };
+  }
+  return {
+    message: (probe && probe.message) || 'The Remote Host could not start the Session.',
+    command: (probe && probe.command) || '',
+  };
+}
+
 // ── The re-key decision ──────────────────────────────────────────────
 // After a Host's mirror changes, fork / plan-accept detection may have re-keyed some of its live
 // remote Sessions. These two pure functions are the decision the adapter wires around its I/O: what
@@ -215,5 +241,6 @@ module.exports = {
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildRemoteTerminalArgs,
   buildStopArgs, buildRenameArgs,
+  remoteExitDiagnostic,
   remoteTransitionFolders, planRemoteTmuxRenames,
 };

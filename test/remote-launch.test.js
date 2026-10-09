@@ -14,6 +14,7 @@ const {
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildRemoteTerminalArgs,
   buildStopArgs, buildRenameArgs,
+  remoteExitDiagnostic,
   remoteTransitionFolders, planRemoteTmuxRenames,
 } = require('../remote-launch');
 
@@ -313,6 +314,39 @@ test('buildRemoteTerminalArgs — the Host-side path round-trips intact (an apos
 
 test('buildRemoteTerminalArgs — a hostile sshTarget (leading dash) is rejected before it reaches argv', () => {
   assert.throws(() => terminal({ sshTarget: '-oProxyCommand=evil' }), /SSH target/i);
+});
+
+// --- a failed remote launch's diagnostic (VIN-155/156) ----------------------------------------
+// The adapter runs the Host probe (full prerequisites for a Session, reachability only for a Plain
+// Terminal) and passes its result; remoteExitDiagnostic turns it into the line to write, or null.
+
+test('remoteExitDiagnostic — a reachable Host + a failed Plain Terminal writes the generic fallback', () => {
+  // The reachability probe said ok (d.ok true), yet the launch still failed: a Plain Terminal must
+  // not be left silent, so a generic Host-reachable line is surfaced above the raw ssh error.
+  const diag = remoteExitDiagnostic({ probe: { ok: true, message: 'mac-mini is ready.' }, isPlainTerminal: true });
+  assert.ok(diag, 'a failed Plain Terminal on a reachable Host must surface a message');
+  assert.match(diag.message, /reachable, but the terminal could not be opened/i);
+  assert.equal(diag.command, '', 'the generic fallback carries no fix command');
+});
+
+test('remoteExitDiagnostic — a healthy Host + a remote Session stays silent (prior behaviour)', () => {
+  const diag = remoteExitDiagnostic({ probe: { ok: true, message: 'mac-mini is ready.' }, isPlainTerminal: false });
+  assert.equal(diag, null, 'a remote Session on a healthy Host writes nothing');
+});
+
+test('remoteExitDiagnostic — a failed probe surfaces its own message and fix, for either launch type', () => {
+  const probe = { ok: false, step: 'ssh', message: "Can't reach mac-mini over SSH.", command: 'ssh mac-mini' };
+  for (const isPlainTerminal of [true, false]) {
+    const diag = remoteExitDiagnostic({ probe, isPlainTerminal });
+    assert.equal(diag.message, "Can't reach mac-mini over SSH.");
+    assert.equal(diag.command, 'ssh mac-mini');
+  }
+});
+
+test('remoteExitDiagnostic — a probe with no message falls back to a safe default, with no fix', () => {
+  const diag = remoteExitDiagnostic({ probe: { ok: false }, isPlainTerminal: true });
+  assert.match(diag.message, /could not start the Session/i);
+  assert.equal(diag.command, '');
 });
 
 // --- stop (kill the tmux session) -------------------------------------------------------------

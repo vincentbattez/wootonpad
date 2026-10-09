@@ -2626,28 +2626,24 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
     );
     // A Remote Session's PTY is the ssh client: an early non-zero exit the user did not ask for is a
-    // spawn failure (unreachable Host, missing tmux/claude, an unauthenticated Account). Run the
-    // Host's prerequisite diagnostic and write its clear message into the terminal instead of
-    // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
+    // spawn failure, and the user should see why rather than a raw ssh error (VIN-155). Run the Host
+    // probe and write its clear message into the terminal. A Session probes its full prerequisites
+    // (reachability, tmux, claude, each Account's token); a Plain Terminal uses none of tmux/claude/
+    // token, so it probes reachability only — otherwise a reachable Host that merely lacks tmux would
+    // surface an irrelevant "install tmux" fix for a shell that never runs it (VIN-156). The pure
+    // remoteExitDiagnostic turns the probe result into the line to write (or null to stay silent for a
+    // healthy remote Session). Fire-and-forget — the exit is reported below.
     if (session.remote && !session._stoppedByUser && exitCode !== 0) {
       const reportId = session.realSessionId || sessionId;
-      Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
-        let msg, fix = '';
-        if (d && d.ok) {
-          // The Host's prerequisites (reachability, tmux, claude, each Account's token) are all fine,
-          // so testConnection has no complaint — yet this launch still failed. For a Plain Terminal
-          // that typically means a launch-specific fault it does not probe (e.g. a bad Project path
-          // whose remote `cd` exits non-zero), so fall back to a generic message rather than writing
-          // nothing; the raw ssh / shell error is already above (the tab is kept on a crash, VIN-156).
-          // A remote Session keeps the prior behaviour of staying silent when the Host is healthy.
-          if (!session.isPlainTerminal) return;
-          msg = 'The Remote Host is reachable, but the terminal could not be opened — see the error above (often a missing or wrong Project path).';
-        } else {
-          msg = (d && d.message) || 'The Remote Host could not start the Session.';
-          if (d && d.command) fix = `\r\n\x1b[2mTry: ${d.command}\x1b[0m`;
-        }
+      const probe = session.isPlainTerminal
+        ? remoteHostsIpc.testReachability(session.hostId)
+        : remoteHostsIpc.testConnection(session.hostId);
+      Promise.resolve(probe).then(d => {
+        const diag = remoteLaunch.remoteExitDiagnostic({ probe: d, isPlainTerminal: !!session.isPlainTerminal });
+        if (!diag) return;
+        const fix = diag.command ? `\r\n\x1b[2mTry: ${diag.command}\x1b[0m` : '';
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
+          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${diag.message}\x1b[0m${fix}\r\n`);
         }
       }).catch(() => {});
     }
@@ -2658,7 +2654,16 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     session.mcpServer = null;
 
     const realId = session.realSessionId || sessionId;
-    const exitInfo = { stoppedByUser: !!session._stoppedByUser, signal: signal ?? null };
+    // The renderer's crash-keep policy must treat a remote Plain Terminal like a Session (keep its
+    // tab so the async Host diagnostic can land), but it must NOT re-derive "remote Plain Terminal"
+    // from the (forgeable) Project key in the renderer — ADR 0017 keeps key-scheme reading in named
+    // main-process seams. main owns these facts, so propagate them on the exit event (VIN-156).
+    const exitInfo = {
+      stoppedByUser: !!session._stoppedByUser,
+      signal: signal ?? null,
+      remote: !!session.remote,
+      isPlainTerminal: !!session.isPlainTerminal,
+    };
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
       // If a fork/plan-accept transition re-keyed this session under realId
