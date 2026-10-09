@@ -13,6 +13,7 @@ const {
   TMUX_SOCKET, tmuxSessionName, assertSafeSessionId, parseRemoteProjectPath,
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildStopArgs, buildRenameArgs,
+  remoteTransitionFolders, planRemoteTmuxRenames,
 } = require('../remote-launch');
 
 // --- an independent single-quote oracle -------------------------------------------------------
@@ -282,4 +283,39 @@ test('buildRenameArgs — rejects an unsafe new id (it is spliced into the remot
   assert.throws(
     () => buildRenameArgs({ sshTarget: 'mac-mini', oldSessionId: 'temp-1', newSessionId: "x'y" }),
     /session id/i);
+});
+
+// --- the re-key decision (what to re-detect, what to rename) ----------------------------------
+
+test('remoteTransitionFolders — the distinct folders of the live remote Sessions', () => {
+  const sessions = [
+    { projectFolder: 'a' }, { projectFolder: 'b' }, { projectFolder: 'a' }, { projectFolder: null },
+  ];
+  assert.deepEqual(remoteTransitionFolders(sessions), ['a', 'b']);
+});
+
+test('remoteTransitionFolders — no Sessions means nothing to re-detect', () => {
+  assert.deepEqual(remoteTransitionFolders([]), []);
+});
+
+test('planRemoteTmuxRenames — a Session whose real id now differs from its tmux id must rename', () => {
+  const reKeyed = { realSessionId: 'real-9', remoteTmuxId: 'temp-1' };
+  const renames = planRemoteTmuxRenames([reKeyed]);
+  assert.deepEqual(renames, [{ session: reKeyed, oldId: 'temp-1', newId: 'real-9' }]);
+});
+
+test('planRemoteTmuxRenames — a Session that never re-keyed yields no rename', () => {
+  // no realSessionId yet (current falls back to the tmux id → unchanged), and the steady state
+  // where the tmux id already equals the real id.
+  const pending = { realSessionId: null, remoteTmuxId: 'temp-1' };
+  const settled = { realSessionId: 'real-9', remoteTmuxId: 'real-9' };
+  assert.deepEqual(planRemoteTmuxRenames([pending, settled]), []);
+});
+
+test('planRemoteTmuxRenames — only the re-keyed Sessions, in order, from a mixed set', () => {
+  const settled = { realSessionId: 's', remoteTmuxId: 's' };
+  const forked = { realSessionId: 'r2', remoteTmuxId: 't2' };
+  assert.deepEqual(
+    planRemoteTmuxRenames([settled, forked]),
+    [{ session: forked, oldId: 't2', newId: 'r2' }]);
 });

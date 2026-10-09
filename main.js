@@ -2223,7 +2223,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         account: remoteCtx.account, options: sessionOptions || {},
         remotePath: remoteCtx.remotePath,
       });
-      log.info(`[remote-launch] session=${sessionId} host=${remoteCtx.host.sshTarget} args=${JSON.stringify(launchArgs)}`);
+      // The verb only — never the assembled argv: it carries the user's appendSystemPrompt and
+      // preLaunchCmd content, which has no place in the app log.
+      const launchVerb = sessionOptions?.forkFrom ? 'fork' : isNew ? 'new' : 'resume';
+      log.info(`[remote-launch] session=${sessionId} host=${remoteCtx.host.sshTarget} verb=${launchVerb}`);
       ptyProcess = pty.spawn('ssh', launchArgs, {
         name: 'xterm-256color',
         cols: 120,
@@ -2652,14 +2655,10 @@ function runRemoteTransitions(descriptor) {
     accountId: descriptor.accountId, hostId: descriptor.hostId,
   });
   const sessions = [...activeSessions.values()].filter(s => s.remote && !s.exited && s.sourceId === descriptor.id);
-  const folders = new Set(sessions.map(s => s.projectFolder).filter(Boolean));
-  for (const folder of folders) detectSessionTransitions(folder, source);
-  for (const s of sessions) {
-    const current = s.realSessionId || s.remoteTmuxId;
-    if (current && current !== s.remoteTmuxId) {
-      renameRemoteTmux(s, s.remoteTmuxId, current);
-      s.remoteTmuxId = current;
-    }
+  for (const folder of remoteLaunch.remoteTransitionFolders(sessions)) detectSessionTransitions(folder, source);
+  for (const { session, oldId, newId } of remoteLaunch.planRemoteTmuxRenames(sessions)) {
+    renameRemoteTmux(session, oldId, newId);
+    session.remoteTmuxId = newId;
   }
 }
 

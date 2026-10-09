@@ -52,6 +52,9 @@ function tmuxSessionName(sessionId) {
 
 // A Remote Project's path is its Project key, `ssh://<hostId>/<Host-side path>` (ADR 0016). Split it
 // into the Host it runs on and the path claude's cwd must be on that Host. A local path returns null.
+// This is the one sanctioned inverse of the Source's qualification (ADR 0017): launch needs both
+// parts and they live only in the key, so it reads them back here and nowhere else. hostId is an
+// identity — the dialable sshTarget is resolved from it through the Host store, never from the key.
 function parseRemoteProjectPath(projectPath) {
   const m = /^ssh:\/\/([^/]+)(\/.*)$/.exec(String(projectPath || ''));
   if (!m) return null;
@@ -137,37 +140,64 @@ function buildTmuxCommand({ sessionId, remotePath, claudeCommand }) {
 // A launch forces a PTY (`-tt`): Claude is a TUI and needs a terminal on the far side. Every other
 // safety (BatchMode=yes, never accept-new) comes from remote-hosts.sshOptions, asserted by its own
 // tests and re-asserted here. A literal `--` terminates options before the (validated) target.
-function sshInvoke(sshTarget, remoteCommand, { tty = false, connectTimeout = 10, controlPath } = {}) {
+function sshInvoke(sshTarget, remoteCommand, { tty = false } = {}) {
   remoteHosts.assertSafeSshTarget(sshTarget);
   const args = [];
   if (tty) args.push('-tt');
-  for (const o of remoteHosts.sshOptions({ connectTimeout, controlPath })) args.push('-o', o);
+  for (const o of remoteHosts.sshOptions()) args.push('-o', o);
   args.push('--', sshTarget, remoteCommand);
   return args;
 }
 
-function buildRemoteLaunchArgs({ sshTarget, sessionId, isNew, forkFrom, account, options, remotePath, connectTimeout, controlPath }) {
+function buildRemoteLaunchArgs({ sshTarget, sessionId, isNew, forkFrom, account, options, remotePath }) {
   const claudeCommand = buildClaudeCommand({ sessionId, isNew, forkFrom, account, options });
   const inner = buildTmuxCommand({ sessionId, remotePath, claudeCommand });
-  return sshInvoke(sshTarget, loginShell(inner), { tty: true, connectTimeout, controlPath });
+  return sshInvoke(sshTarget, loginShell(inner), { tty: true });
 }
 
 // Stop kills the tmux session on the Host (Close tab only detaches). No PTY needed.
-function buildStopArgs({ sshTarget, sessionId, connectTimeout, controlPath }) {
+function buildStopArgs({ sshTarget, sessionId }) {
   const name = tmuxSessionName(sessionId);
-  return sshInvoke(sshTarget, loginShell(`tmux -L ${TMUX_SOCKET} kill-session -t ${name}`), { connectTimeout, controlPath });
+  return sshInvoke(sshTarget, loginShell(`tmux -L ${TMUX_SOCKET} kill-session -t ${name}`));
 }
 
 // After a fork or plan-accept re-keys the Session (detected through the mirror), the tmux session is
 // renamed to follow the real id, so a later re-attach finds it (VIN-155).
-function buildRenameArgs({ sshTarget, oldSessionId, newSessionId, connectTimeout, controlPath }) {
+function buildRenameArgs({ sshTarget, oldSessionId, newSessionId }) {
   const from = tmuxSessionName(oldSessionId);
   const to = tmuxSessionName(newSessionId);
-  return sshInvoke(sshTarget, loginShell(`tmux -L ${TMUX_SOCKET} rename-session -t ${from} ${to}`), { connectTimeout, controlPath });
+  return sshInvoke(sshTarget, loginShell(`tmux -L ${TMUX_SOCKET} rename-session -t ${from} ${to}`));
+}
+
+// ── The re-key decision ──────────────────────────────────────────────
+// After a Host's mirror changes, fork / plan-accept detection may have re-keyed some of its live
+// remote Sessions. These two pure functions are the decision the adapter wires around its I/O: what
+// to re-detect, and — once detection has run — which tmux sessions must follow a new id. The adapter
+// (main.js) runs the detection and the execFile rename; it makes no decision of its own.
+
+// The on-disk folders whose transitions the adapter must re-detect: one per distinct folder across
+// the given live remote Sessions (an un-derivable folder is skipped).
+function remoteTransitionFolders(sessions) {
+  return [...new Set(sessions.map(s => s.projectFolder).filter(Boolean))];
+}
+
+// The tmux renames to apply after detection: one `{ session, oldId, newId }` for each Session whose
+// real id (discovered by detection) now differs from the id its tmux session still carries. A
+// Session that did not re-key yields nothing.
+function planRemoteTmuxRenames(sessions) {
+  const renames = [];
+  for (const s of sessions) {
+    const current = s.realSessionId || s.remoteTmuxId;
+    if (current && current !== s.remoteTmuxId) {
+      renames.push({ session: s, oldId: s.remoteTmuxId, newId: current });
+    }
+  }
+  return renames;
 }
 
 module.exports = {
   TMUX_SOCKET, tmuxSessionName, assertSafeSessionId, parseRemoteProjectPath,
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildStopArgs, buildRenameArgs,
+  remoteTransitionFolders, planRemoteTmuxRenames,
 };

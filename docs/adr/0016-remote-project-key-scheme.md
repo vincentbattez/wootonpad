@@ -41,6 +41,11 @@ identity; it never splits `ssh://<hostId>/<path>` back into a Host and a path. A
 raw path is passed through untouched on any Source, so an un-derivable folder stays un-derivable
 rather than becoming `ssh://<hostId>/`.
 
+> **Amended by ADR 0017** (`0017-remote-launch-reads-host-and-cwd-from-the-project-key.md`): the
+> VIN-155 launch adapter is the one sanctioned inverse. Launching a Session needs the Host and the
+> Host-side cwd, both of which live only in the key, so `parseRemoteProjectPath` splits it there —
+> and nowhere else. The cache, the folder key and the search index keep treating it as opaque.
+
 Because the Local Host qualifies as identity, this decision is invisible until the first Remote
 Host registers a Source. That is deliberate: it is the seam VIN-150 builds on, shipped and tested
 (`session-source.js`, `test/session-source.test.js`) ahead of the integration that exercises it.
