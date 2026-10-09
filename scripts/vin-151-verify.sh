@@ -35,10 +35,17 @@ mkdir -p "$OUT"
 # checks against the ADR. $REMOTE_CMD is substituted as the session's command.
 tmux_launch() {
   local session="$1" remote_cmd="$2"
+  # SOCKET and session are spliced into the REMOTE command text (inside
+  # `$SHELL -lc '…'`), so unlike $remote_cmd they are not protected by the
+  # env-passing in the callers — that only guards the LOCAL `bash -c` program
+  # text. Validate them as bare tokens here so a quote/metachar cannot break out
+  # of the remote single-quoting and the "passed safely" claim actually holds.
+  case "$SOCKET" in ''|*[!A-Za-z0-9_-]*) echo "!! SOCKET must be a bare token [A-Za-z0-9_-]: '$SOCKET'" >&2; return 2 ;; esac
+  case "$session" in ''|*[!A-Za-z0-9_-]*) echo "!! session must be a bare token [A-Za-z0-9_-]: '$session'" >&2; return 2 ;; esac
   # NOTE: $remote_cmd is spliced UNQUOTED into the tmux command line on purpose,
   # so a multi-word command word-splits into new-session's argv. Every caller
-  # passes a hardcoded single token ('claude', '/tmp/vin151-emit.sh'), so this
-  # is safe here; do not feed it untrusted input without quoting first.
+  # passes a hardcoded command ('claude', '/tmp/vin151-emit.sh', 'claude -p ok'),
+  # so this is safe here; do not feed it untrusted input without quoting first.
   # tmux options are set inline with `\; set -g`, after new-session.
   local tmux_cmd
   tmux_cmd=$(cat <<TMUX
@@ -65,12 +72,35 @@ capture() {
   if ! have_script; then
     # Without script(1) there is no capture file, and scan() would then cat -v a
     # missing file and report every marker `absent` — a fabricated clean result
-    # for a spike whose whole point is evidence, not assertion. Hard-fail instead.
-    echo "!! script(1) not found; cannot capture client-side bytes. Install it or" >&2
-    echo "   run the launch by hand under script/tee, then re-run scan." >&2
-    exit 3
+    # for a spike whose whole point is evidence, not assertion. So we refuse to
+    # scan. But RETURN non-zero rather than `exit`: an `exit` here would abort the
+    # whole `all` run at the first capture check (osc9) and silently drop the
+    # remaining, capture-INDEPENDENT ACs (osc9-real shares this, but path/detach/
+    # scrollback do not need script(1) and must still run). Callers treat a
+    # non-zero return as "skip just this capture-dependent check" and continue.
+    echo "!! script(1) not found; cannot capture client-side bytes for this check." >&2
+    echo "   Skipping it. Install script(1) or run the launch by hand under" >&2
+    echo "   script/tee, then re-run this subcommand." >&2
+    return 3
   fi
   script -q "$file" "$@" </dev/null
+}
+
+# kill_session <session> — tear down a session on the wootonpad socket. The one
+# place the kill shape lives; osc9_real and detach both go through it.
+kill_session() {
+  ssh -o BatchMode=yes "$HOST" -- "\$SHELL -lc 'tmux -L ${SOCKET} kill-session -t $1'" 2>/dev/null || true
+}
+
+# run_launch <rawfile> <session> <remote_cmd> — capture ONE ADR launch under
+# script(1). HOST/SOCKET go through the ENVIRONMENT (not spliced into the local
+# `bash -c` program text), so a metachar in either cannot break or inject into
+# it; tmux_launch then validates SOCKET/session before splicing them remotely.
+# The single source of the capture+launch shape, shared by osc9 and osc9_real.
+run_launch() {
+  local raw="$1" session="$2" remote_cmd="$3"
+  capture "$raw" env HOST="$HOST" SOCKET="$SOCKET" \
+    bash -c "$(declare -f tmux_launch); tmux_launch $session '$remote_cmd'"
 }
 
 scan() { # scan <rawfile> <label> <grep-pattern-for-cat-v>
@@ -114,18 +144,16 @@ EMIT
 osc9() {
   echo "== AC1/AC2: OSC 0 + OSC 9 through ssh -tt + tmux (SYNTHETIC emitter) =="
   push_emitter || { echo "!! could not push emitter (host unreachable?)"; return 1; }
-  # The stub now exists in the Mini's shared /tmp. Remove it on ANY exit path —
-  # capture() hard-exits (exit 3) when script(1) is missing, which would skip a
-  # trailing rm and leave the world-readable stub behind. An EXIT trap covers
-  # both the normal return and that hard-exit.
+  # The stub now exists in the Mini's shared /tmp. Remove it on ANY exit path
+  # (an interrupt during capture, an early return below, or normal completion)
+  # so no world-readable stub is left behind in the shared /tmp. An EXIT trap is
+  # the one cleanup that fires regardless of which path we leave by.
   trap 'ssh -o BatchMode=yes "$HOST" "rm -f /tmp/vin151-emit.sh" 2>/dev/null || true' EXIT
   local raw="$OUT/osc.raw"
-  # Pass HOST/SOCKET to tmux_launch through the ENVIRONMENT, not by splicing
-  # their values into the bash -c program text — a quote or shell metachar in
-  # either var would otherwise break or inject into the command. (They are
-  # self-set here, so this is defensive hygiene rather than a live exploit.)
-  capture "$raw" env HOST="$HOST" SOCKET="$SOCKET" \
-    bash -c "$(declare -f tmux_launch); tmux_launch wp-osc '/tmp/vin151-emit.sh'"
+  if ! run_launch "$raw" wp-osc '/tmp/vin151-emit.sh'; then
+    echo "   (AC1/AC2 synthetic check skipped — see message above; other ACs continue)"
+    return 0
+  fi
   echo "raw bytes -> $raw"
   scan "$raw" "OSC0 title (bare)"      'VIN151-OSC0-TITLE'
   scan "$raw" "OSC9 notify (bare)"     'VIN151-OSC9-NOTIFY'
@@ -159,9 +187,10 @@ osc9_real() {
   esac
   local raw="$OUT/osc-claude.raw"
   echo "-- launching: claude -p $prompt  (non-interactive; ends on its own) --"
-  # Same env-not-splice hygiene as osc9(); the command word is a single token.
-  capture "$raw" env HOST="$HOST" SOCKET="$SOCKET" \
-    bash -c "$(declare -f tmux_launch); tmux_launch wp-osc-claude 'claude -p $prompt'"
+  if ! run_launch "$raw" wp-osc-claude "claude -p $prompt"; then
+    echo "   (AC1/AC2 real-Claude check skipped — see message above; other ACs continue)"
+    return 0
+  fi
   echo "raw bytes -> $raw"
   # cat -v renders ESC as ^[ ; match Claude's real OSC 0 / OSC 9 introducers.
   scan "$raw" "OSC 0 title (real claude)"  '\^\[]0;'
@@ -170,7 +199,7 @@ osc9_real() {
   echo "         to end (claude → tmux → ssh -tt → client), not just transport."
   echo "   NOTE: print mode (-p) may emit fewer sequences than an interactive"
   echo "         session; if absent, also observe an interactive run by hand."
-  ssh -o BatchMode=yes "$HOST" -- "\$SHELL -lc 'tmux -L ${SOCKET} kill-session -t wp-osc-claude'" 2>/dev/null || true
+  kill_session wp-osc-claude
 }
 
 # -----------------------------------------------------------------------------
@@ -194,22 +223,36 @@ detach() {
   # NOTE: tmux_launch is a multi-command function, so `&` backgrounds a SUBSHELL
   # and $! is that subshell's PID, NOT the ssh client's. Killing the subshell
   # would orphan the ssh — it would stay attached, the drop would never happen,
-  # and `tmux ls` would still show wp-detach, fabricating a clean pass. So we
-  # instead kill the real ssh CLIENT process by matching its command line
-  # (the session name wp-detach is in its argv), which actually drops the
-  # attached connection, then confirm the session survived server-side.
+  # and `tmux ls` would still show wp-detach, fabricating a clean pass. We must
+  # kill the real ssh CLIENT process. An unanchored `pkill -f 'ssh .*wp-detach'`
+  # would do that, but the pattern is a loose substring match: any OTHER ssh to
+  # the Mini from this same dev machine whose argv merely contains "wp-detach"
+  # (a path, another session, a scrollback buffer passed as an arg) would be
+  # culled too. So we target THIS launch precisely: find the ssh that is a child
+  # of our backgrounded subshell and kill it by PID. Only if that lookup finds
+  # nothing do we fall back to a pattern anchored to this exact socket + session.
   tmux_launch wp-detach 'claude' >"$OUT/detach-start.txt" 2>&1 &
   local launch_pid=$!
   sleep 5   # let the attached session start claude inside tmux
-  echo "-- drop the attached client: pkill the real ssh process (argv has wp-detach) --"
-  pkill -f 'ssh .*wp-detach' 2>/dev/null || true
+  echo "-- drop the attached client: kill THIS launch's ssh by PID --"
+  local ssh_pid
+  ssh_pid=$(pgrep -P "$launch_pid" -f 'ssh ' | head -n1)
+  if [ -n "$ssh_pid" ]; then
+    echo "   ssh client pid=$ssh_pid"
+    kill "$ssh_pid" 2>/dev/null || true
+  else
+    # Fallback: anchor to the socket AND session so an unrelated ssh to the Mini
+    # (different socket/session) cannot match. Still narrower than 'ssh .*wp-detach'.
+    echo "   (no child ssh found; falling back to an anchored pattern)"
+    pkill -f "ssh .*-L ${SOCKET} new-session -A -s wp-detach" 2>/dev/null || true
+  fi
   wait "$launch_pid" 2>/dev/null || true
   echo "-- list sessions on the socket; wp-detach (running claude) must survive --"
   ssh -o BatchMode=yes "$HOST" -- "\$SHELL -lc 'tmux -L ${SOCKET} ls'" | tee "$OUT/detach-list.txt"
   echo "-- re-attach with new -A and confirm the pane redraws claude's transcript --"
   echo "   RUN BY HAND (interactive): ssh -tt $HOST -- \$SHELL -lc 'tmux -L ${SOCKET} new -A -s wp-detach'"
   echo "-- clean up --"
-  ssh -o BatchMode=yes "$HOST" -- "\$SHELL -lc 'tmux -L ${SOCKET} kill-session -t wp-detach'" 2>/dev/null || true
+  kill_session wp-detach
 }
 
 # -----------------------------------------------------------------------------

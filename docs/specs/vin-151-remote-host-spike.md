@@ -1,6 +1,22 @@
 # VIN-151 — Spike runbook: SSH + tmux + Claude on a Remote Host
 
-Status: **prepared, not yet run against the real Remote Host.**
+Status: **tooling prepared; verification UNFINISHED — not one AC is closed.**
+
+This branch delivers only the harness and this runbook. The spike's actual deliverable — the
+by-hand run on `ssh mac-mini`, the captured raw output, the recorded recommendations, and a
+verdict per criterion — is **still outstanding**. Concretely, what remains to be done (and cannot
+be done from the cloud-agent sandbox, which has no route to the private Mini — see the blocker
+note below):
+
+- **AC1–AC4:** run `./scripts/vin-151-verify.sh all` on the MacBook, paste the raw captures, and
+  fill each `Observed:` / `Verdict:` slot below from what the bytes actually show.
+- **AC5 (Keychain/token auth) and AC6 (`--chrome`):** explicitly **outside** the harness — run the
+  by-hand commands in those sections and record the results.
+- **AC7:** blocked on the ADR 0016 merge (see that section).
+
+Until those are done every `Observed`/`Verdict` below remains blank by necessity, not by
+oversight. Do not read "prepared" as "verified": nothing here has been observed against the real
+Remote Host yet.
 
 This spike verifies by hand, on `ssh mac-mini`, the assumptions ADR 0016 rests on, before any
 remote PTY code is written. It is pure verification: no app code. Each acceptance criterion is
@@ -127,6 +143,13 @@ The Working / Needs Input vocabulary these map to is already fixed in
 
 ### AC7 — any change to the launch command
 - Record every deviation from the shape in `tmux_launch()` here and in ADR 0016 Consequences: _____
+- **Status: BLOCKED (open, not satisfiable on this branch).** ADR 0016 is absent
+  from `sandcastle/issue-VIN-151` / `feature/vin-150` — it lives only on
+  `docs/vin-150-remote-hosts` (see "Blocker found before running" above). With no
+  `docs/adr/0016-*.md` to amend, AC7's directive ("amend ADR 0016 wherever it turns
+  out wrong") cannot be carried out here. This stays **open** until the VIN-150
+  integrator merges that doc commit into `feature/vin-150`; it must not be left a
+  silent blank that reads as "nothing to record".
 
 ---
 
