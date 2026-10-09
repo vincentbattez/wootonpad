@@ -108,9 +108,19 @@ function diagnoseReach(result, { sshTarget }) {
   if (result && result.code === 0) return { ok: true };
   const stderr = (result && result.stderr) || '';
   const connect = `ssh ${sshTarget}`;
-  if (/host key verification failed/i.test(stderr)
-    || /remote host identification has changed/i.test(stderr)
-    || /no matching host key/i.test(stderr)) {
+  // A CHANGED key is checked first: ssh prints both this warning AND "Host key verification
+  // failed", so the unknown-key test below would otherwise swallow it. This is the possible-MITM
+  // case — the stored key no longer matches — and `ssh <target>` will keep refusing until the
+  // stale known_hosts entry is removed, so the fix is to drop it and reconnect by hand to review
+  // the new key (ADR 0016: trusting a key stays the user's call).
+  if (/remote host identification has changed/i.test(stderr)) {
+    return fail('hostkey-changed',
+      `The host key for ${sshTarget} has CHANGED since you last connected. This can mean the Host `
+      + `was rebuilt — or that something is impersonating it. WootonPad won't decide which. `
+      + `Remove the stale key, then connect once by hand to review and accept the new one.`,
+      `ssh-keygen -R ${sshTarget}`);
+  }
+  if (/host key verification failed/i.test(stderr)) {
     return fail('hostkey',
       `The host key for ${sshTarget} isn't known yet — WootonPad never accepts one for you. `
       + `Connect once by hand to review and accept it, then test again.`,

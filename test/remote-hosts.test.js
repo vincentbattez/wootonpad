@@ -98,6 +98,32 @@ test('an unknown host key tells the user to connect once by hand', () => {
   assert.match(d.message, /host key/i);
 });
 
+test('a changed host key is its own diagnosis with a key-removal fix, not the unknown-key one', () => {
+  // ssh prints the CHANGED warning *and* "Host key verification failed"; the changed case must win,
+  // and `ssh <target>` would keep refusing, so the fix clears the stale entry instead.
+  const d = diagnoseReach(
+    {
+      code: 255,
+      stderr: 'WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!\nHost key verification failed.',
+    },
+    { sshTarget: 'mac-mini' },
+  );
+  assert.equal(d.ok, false);
+  assert.equal(d.step, 'hostkey-changed');
+  assert.notEqual(d.step, 'hostkey');
+  assert.equal(d.command, 'ssh-keygen -R mac-mini');
+  assert.match(d.message, /changed/i);
+});
+
+test('a host-key algorithm mismatch is a plain unreachable failure, not a verification problem', () => {
+  const d = diagnoseReach(
+    { code: 255, stderr: 'Unable to negotiate with 10.0.0.2 port 22: no matching host key type found.' },
+    { sshTarget: 'mac-mini' },
+  );
+  assert.equal(d.step, 'ssh');
+  assert.equal(d.command, 'ssh mac-mini');
+});
+
 test('key auth refused is its own message, distinct from host key', () => {
   const d = diagnoseReach(
     { code: 255, stderr: 'user@mac-mini: Permission denied (publickey).' },

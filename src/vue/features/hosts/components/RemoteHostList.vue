@@ -2,7 +2,7 @@
   <div class="host-tree">
     <div class="project-group">
       <div class="project-header">
-        <span class="project-name" v-html="serverSvg"></span>
+        <span class="project-name" v-html="hostSvg"></span>
         <span class="project-name">Remote Hosts</span>
       </div>
       <div class="project-sessions">
@@ -45,7 +45,7 @@ import { ref } from 'vue';
 import RemoteHostItem from './RemoteHostItem.vue';
 import { hostsIcons } from '../../../shared/lib/icons.js';
 
-const { serverSvg } = hostsIcons;
+const { hostSvg } = hostsIcons;
 
 defineProps({
   hosts: { type: Array, required: true },

@@ -4,7 +4,7 @@
        the Local Host is simply there (CONTEXT.md, Local Host). -->
   <div class="project-group host-group">
     <div class="project-header host-header">
-      <span class="project-name" v-html="serverSvg"></span>
+      <span class="project-name" v-html="hostSvg"></span>
       <span class="project-name">Local Host</span>
     </div>
     <div class="project-sessions">
@@ -30,7 +30,7 @@
 import AccountItem from './AccountItem.vue';
 import { hostsIcons } from '../../../shared/lib/icons.js';
 
-const { serverSvg } = hostsIcons;
+const { hostSvg } = hostsIcons;
 
 defineProps({
   accounts: { type: Array, required: true },
