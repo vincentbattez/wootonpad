@@ -11,7 +11,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-const { parseRemoteKey, resolveRemoteGitArgs } = require('../remote-git');
+const { parseRemoteKey, resolveRemoteGitArgs, planRemoteSnapshot } = require('../remote-git');
 
 function host(extra = {}) {
   return { id: 'host-abc', name: 'Mac Mini', sshTarget: 'mac-mini', ...extra };
@@ -93,4 +93,38 @@ test('the remote command runs git as argv: a Project dir containing a space is o
     env: { ...process.env, PATH: bin + ':' + process.env.PATH, SHELL: fakeShell },
   });
   assert.deepEqual(out.trim().split('\n'), ['status', '--porcelain']);
+});
+
+// --- stale-while-unreachable policy -----------------------------------------------------------
+// planRemoteSnapshot owns the two acceptance-criteria rules for a Remote Project's light badge:
+// never dial a Host known Unreachable, and keep the last good Snapshot when a fresh read's git
+// didn't answer. The IPC send/cache wiring stays in main.js; the decision is tested here.
+
+const STALE = { branch: 'main', added: 3, deleted: 1 };
+
+test('planRemoteSnapshot dials a Host that is reachable or not yet probed, never one known Unreachable', () => {
+  assert.equal(planRemoteSnapshot(STALE, true).dial, true);
+  assert.equal(planRemoteSnapshot(STALE, undefined).dial, true); // not yet probed may try
+  assert.equal(planRemoteSnapshot(STALE, false).dial, false);    // known down is never dialed
+});
+
+test('planRemoteSnapshot keeps the last good Snapshot when the fresh read has no branch (ssh dropped / no git repository)', () => {
+  for (const read of [null, undefined, { branch: null, added: null, deleted: null }]) {
+    const plan = planRemoteSnapshot(STALE, true, read);
+    assert.equal(plan.updated, false);
+    assert.equal(plan.snapshot, STALE); // the badge keeps its last value rather than blanking
+  }
+});
+
+test('planRemoteSnapshot replaces the badge with the fresh branch and diff counts when git answers', () => {
+  const plan = planRemoteSnapshot(STALE, true, { branch: 'feat/x', added: 10, deleted: 2, extra: 'ignored' });
+  assert.equal(plan.updated, true);
+  assert.deepEqual(plan.snapshot, { branch: 'feat/x', added: 10, deleted: 2 });
+});
+
+test('planRemoteSnapshot keeps the stale Snapshot even on a fresh read when the Host is Unreachable', () => {
+  // base survives with no fresh read at all — the first good Snapshot persists across an outage.
+  const plan = planRemoteSnapshot(STALE, false);
+  assert.equal(plan.dial, false);
+  assert.equal(plan.snapshot, STALE);
 });

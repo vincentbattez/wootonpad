@@ -49,4 +49,20 @@ function resolveRemoteGitArgs(projectKey, gitArgv, hosts, opts = {}) {
   return { host, args: remoteGitArgs(host.sshTarget, parsed.remotePath, gitArgv, opts) };
 }
 
-module.exports = { parseRemoteKey, remoteGitArgs, resolveRemoteGitArgs };
+// The stale-while-unreachable policy for a Remote Project's light badge (VIN-159), kept pure so it
+// can be tested away from Electron and the cache. Two rules the acceptance criteria name:
+//   • dial — a fresh read is attempted only when the Host is not known Unreachable (reachable !==
+//     false); a Host known down is never dialed, so an offline Mini costs nothing and logs nothing.
+//     undefined (not yet probed) may still try.
+//   • snapshot/updated — once a read returns, a null/absent branch (ssh dropped, or no git
+//     repository) keeps the last good Snapshot (`base`), shown stale, rather than blanking the
+//     badge (updated:false); otherwise the fresh branch and diff counts replace it (updated:true).
+// `read` is the fresh light Snapshot, or null/undefined before a read is attempted. The thin IPC
+// send/cache wiring (TTL freshness, containers, setSetting) stays with the caller in main.js.
+function planRemoteSnapshot(base, reachable, read) {
+  const dial = reachable !== false;
+  if (!read || read.branch == null) return { dial, updated: false, snapshot: base };
+  return { dial, updated: true, snapshot: { branch: read.branch, added: read.added, deleted: read.deleted } };
+}
+
+module.exports = { parseRemoteKey, remoteGitArgs, resolveRemoteGitArgs, planRemoteSnapshot };

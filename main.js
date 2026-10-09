@@ -25,7 +25,7 @@ const { isBusyTitle, isIdleTitle } = require('./cli-activity');
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
-const { createProjectGit } = require('./project-git');
+const { createProjectGit, NETWORK_TIMEOUT_MS } = require('./project-git');
 const remoteGit = require('./remote-git');
 const remoteHostsIpcModule = require('./remote-hosts-ipc');
 const { execFile } = require('child_process');
@@ -226,18 +226,13 @@ function projectExecFile(argv, cwd, options = {}) {
 // A git command against a Remote Project (cwd is an ssh://<hostId>/<path> key) runs on its Host over
 // SSH, through the Host's login shell (VIN-159, ADR 0016). This is the same seam a WSL account
 // redirects — git stays one argv interface (ADR 0007), only where it runs changes. It rides the
-// Host's multiplexed master (controlPath), with the same BatchMode safety as every other SSH
-// command: SSH_ASKPASS disabled and DISPLAY cleared so no prompt can ever block the app.
+// Host's multiplexed master (resolved.args already carries ControlMaster/ControlPath/ControlPersist,
+// built in remote-hosts.sshOptions), with the same BatchMode safety as every other SSH command:
+// SSH_ASKPASS disabled and DISPLAY cleared so no prompt can ever block the app.
 function runRemoteGit(resolved, timeout) {
   return new Promise(resolve => {
-    const controlPath = remoteHostsIpcModule.controlPathFor(resolved.host);
     try { fs.mkdirSync(remoteHostsIpcModule.HOSTS_CONTROL_DIR, { recursive: true }); } catch {}
-    const args = resolved.args.slice();
-    // Splice the multiplexing options in before the ones remote-git already built (target last).
-    const extra = [];
-    for (const o of ['ControlMaster=auto', `ControlPath=${controlPath}`]) extra.push('-o', o);
-    args.unshift(...extra);
-    execFile('ssh', args, {
+    execFile('ssh', resolved.args, {
       encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
       env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' },
     }, (err, stdout, stderr) => {
@@ -255,9 +250,15 @@ function runRemoteGit(resolved, timeout) {
 const projectGit = createProjectGit({
   run: (argv, cwd, { timeout } = {}) => {
     // Only a Remote Project key pays for a Host-store read; a local path is a cheap regex miss.
-    if (remoteGit.parseRemoteKey(cwd)) {
-      const resolved = remoteGit.resolveRemoteGitArgs(cwd, argv, remoteHostsIpc.getHosts());
-      if (resolved) return runRemoteGit(resolved, timeout);
+    const parsed = remoteGit.parseRemoteKey(cwd);
+    if (parsed) {
+      // The multiplexing options (ControlMaster/ControlPath/ControlPersist) are built once, in
+      // remote-hosts.sshOptions, from the Host's control socket path.
+      const controlPath = remoteHostsIpcModule.controlPathFor({ id: parsed.hostId });
+      const resolved = remoteGit.resolveRemoteGitArgs(cwd, argv, remoteHostsIpc.getHosts(), { controlPath });
+      // A remote read crosses SSH, so it rides the network budget (30s), never the 5s local tier a
+      // caller like lightSnapshot passes for on-disk git — a cold master or slow link needs the room.
+      if (resolved) return runRemoteGit(resolved, Math.max(timeout || 0, NETWORK_TIMEOUT_MS));
       // Remote key whose Host was removed: fall through. projectExecFile on an ssh:// path fails
       // fast, which lightSnapshot renders as a null branch — the badge keeps its last value.
     }
@@ -872,17 +873,16 @@ function getRemoteProjectInfo(projectKey, parsed) {
   const gitFresh = cached?.fetchedAt && (Date.now() - cached.fetchedAt) < (cached.ttl || PROJECT_INFO_TTL_MS);
   const reachable = remoteHostsIpc.getReachability()[parsed.hostId];
 
-  // undefined (not yet probed) may try; false (known Unreachable) keeps the stale Snapshot and
-  // never dials, so a down Host costs nothing and logs nothing.
-  if (!gitFresh && reachable !== false) {
+  // The dial/stale decision is the pure planRemoteSnapshot policy; main.js keeps only the wiring.
+  if (!gitFresh && remoteGit.planRemoteSnapshot(base, reachable).dial) {
     send('project-info-loading', projectKey);
     projectGit.lightSnapshot(projectKey).then(snap => {
-      if (!snap || snap.branch == null) {
-        // git did not answer (ssh dropped, not a repo): keep the last good Snapshot, shown stale.
+      const { updated, snapshot } = remoteGit.planRemoteSnapshot(base, reachable, snap);
+      if (!updated) {
         send('project-info-updated', projectKey, base);
         return;
       }
-      const data = { branch: snap.branch, added: snap.added, deleted: snap.deleted, containers: [] };
+      const data = { ...snapshot, containers: [] };
       setSetting(cacheKey, { data, fetchedAt: Date.now(), ttl: infoJitter() });
       send('project-info-updated', projectKey, data);
     }).catch(() => send('project-info-updated', projectKey, base));
