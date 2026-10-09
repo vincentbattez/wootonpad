@@ -1172,7 +1172,13 @@ ipcMain.handle('get-projects', () => {
       return [];
     }
 
-    return buildProjectsFromCache();
+    // Remote Projects carry `remote`/`hostId` from the cache; annotate with the Host name (the
+    // remote icon's tooltip) and reachability (greyed when Unreachable) before the sidebar sees them.
+    return remoteMirror.annotateProjects(
+      buildProjectsFromCache(),
+      remoteHostsIpc.getHosts(),
+      remoteHostsIpc.getReachability(),
+    );
   } catch (err) {
     console.error('Error listing projects:', err);
     return [];
@@ -1762,6 +1768,22 @@ ipcMain.handle('remove-remote-account', (_event, hostId, accountId) => remoteHos
 ipcMain.handle('test-host-connection', (_event, hostId) => remoteHostsIpc.testConnection(hostId));
 ipcMain.handle('get-host-reachability', () => remoteHostsIpc.getReachability());
 
+// --- Remote Project mirroring (VIN-154) ---
+// Each Remote Host's active Account projects dir is rsync'd into the app data dir and registered as
+// one more session-cache Source, so its Claude Projects appear in the sidebar as Remote Projects.
+// The decision layer is remote-mirror.js; the adapter (remote-mirror-ipc.js) shells out rsync on a
+// poll and drives the Source registry. It reads the Host store and the live reachability map off
+// the Remote Hosts adapter, so there is one source of truth for both.
+const remoteMirror = require('./remote-mirror');
+const remoteMirrorIpcModule = require('./remote-mirror-ipc');
+const remoteMirrorIpc = remoteMirrorIpcModule.createRemoteMirrorIpc({
+  getHosts: () => remoteHostsIpc.getHosts(),
+  getReachability: () => remoteHostsIpc.getReachability(),
+  sessionCache,
+  mirrorRoot: path.join(app.getPath('userData'), 'remote-mirrors'),
+  log,
+});
+
 // --- Scheduled tasks ---
 const scheduleIpc = require('./schedule-ipc');
 
@@ -1994,7 +2016,10 @@ ipcMain.handle('rename-session', (_event, sessionId, name) => {
 ipcMain.handle('read-session-jsonl', (_event, sessionId) => {
   const folder = getCachedFolder(sessionId);
   if (!folder) return { error: 'Session not found in cache' };
-  const jsonlPath = path.join(activeProjectsDir(), folder, sessionId + '.jsonl');
+  // Resolve the on-disk directory through the owning Source: a Remote Host's Sessions are read off
+  // its local mirror (folder key ssh://<hostId>/…), a local one off the active Account's dir.
+  const folderDir = sessionCache.folderDiskPath(folder) || path.join(activeProjectsDir(), folder);
+  const jsonlPath = path.join(folderDir, sessionId + '.jsonl');
   try {
     const content = fs.readFileSync(jsonlPath, 'utf-8');
     const entries = [];
@@ -2655,6 +2680,7 @@ app.whenReady().then(() => {
   createWindow();
   startProjectsWatcher();
   remoteHostsIpc.startHostProbe();
+  remoteMirrorIpc.start();
 
   // Both schedule modules resolve their directories per call, so schedules
   // follow the active account instead of the Windows home, and project paths
@@ -2736,6 +2762,8 @@ app.on('before-quit', () => {
 
   // Stop the reachability probe so its interval timer stops firing after quit
   remoteHostsIpc.stopHostProbe();
+  // Stop the Remote Project mirror poll so no rsync fires after quit
+  remoteMirrorIpc.stop();
 
   // Close filesystem watcher
   if (projectsWatcher) {
