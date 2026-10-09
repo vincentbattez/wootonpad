@@ -4904,6 +4904,17 @@ body { display: flex; flex-direction: column; }
   background: color-mix(in srgb, var(--green-500) 8%, transparent);
 }
 
+/* An Unreachable Host has no shell to open: the Plain Terminal option is disabled (VIN-156). */
+.popover-option:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.popover-option:disabled:hover {
+  background: none;
+  color: var(--text-secondary);
+}
+
 /* ========== TERMINAL BADGE ========== */
 .terminal-badge {
   display: inline-flex;

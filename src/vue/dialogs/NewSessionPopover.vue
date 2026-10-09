@@ -7,7 +7,12 @@
       <button class="popover-option" @click="choose('onClaudeConfig')">
         <span class="popover-option-icon claude-icon" v-html="CLAUDE_SVG"></span> Claude (Configure...)
       </button>
-      <button class="popover-option popover-option-terminal" @click="choose('onTerminal')">
+      <button
+        class="popover-option popover-option-terminal"
+        :disabled="terminalDisabled"
+        :title="terminalDisabled ? 'Host Unreachable' : null"
+        @click="choose('onTerminal')"
+      >
         <span class="popover-option-icon terminal-icon" v-html="TERMINAL_SVG"></span> Terminal
       </button>
     </div>
@@ -23,6 +28,13 @@ const { CLAUDE_SVG, TERMINAL_SVG } = newSessionPopoverIcons;
 
 
 const popover = computed(() => dialogStore.popover);
+
+// The Plain Terminal opens an interactive shell on the Project's Host (VIN-156). A Remote Project
+// whose Host is Unreachable is greyed by the sidebar annotation; with nothing to connect to, the
+// Terminal option is disabled. A local Project is never greyed, so it stays enabled — this gate is
+// scoped to the Plain Terminal and leaves the Claude options alone.
+const terminalDisabled = computed(() => !!popover.value?.project?.greyed);
+
 const popoverEl = ref(null);
 const popoverStyle = ref({});
 let outsideHandler = null;
