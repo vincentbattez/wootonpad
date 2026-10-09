@@ -13,7 +13,7 @@
         <SbSwitch v-model="worktree" />
       </div>
     </div>
-    <div class="settings-field">
+    <div class="settings-field" v-if="!isRemote">
       <div class="settings-field-info">
         <span class="settings-label">Chrome</span>
         <div class="settings-description">Enable Chrome browser automation</div>
@@ -59,6 +59,10 @@ import { useDialogKeys } from './use-dialog-keys.js';
 import { useSessionOptions } from './use-session-options.js';
 
 const request = computed(() => dialogStore.newSession);
+// A Remote Session runs on a headless Host inside tmux: Chrome browser automation has no display
+// there, and the VIN-151 spike left its viability unproven, so the toggle is hidden on a Remote
+// Project (VIN-155). IDE emulation is off for remote Sessions regardless of settings (ADR 0015).
+const isRemote = computed(() => !!request.value?.project?.remote);
 const { mode, danger, chrome, preLaunch, addDirs, seed, toOptions } = useSessionOptions();
 const worktree = ref(false);
 const worktreeName = ref('');
@@ -81,6 +85,7 @@ function start() {
   const r = dialogStore.newSession;
   if (!r) return;
   const options = toOptions(r.effective);
+  if (isRemote.value) delete options.chrome; // hidden on remote — never forward a stale global default
   if (worktree.value) { options.worktree = true; options.worktreeName = worktreeName.value.trim(); }
   const cb = r.onStart;
   close();
