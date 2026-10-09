@@ -13,7 +13,21 @@ import {
   formatTokens,
   formatLabel,
   severityFor,
+  gaugeState,
 } from './context-gauge.mjs';
+
+test('gaugeState shows the gauge as soon as there is a usage', () => {
+  assert.equal(gaugeState({ inputTokens: 1 }, false), 'gauge');
+  assert.equal(gaugeState({ inputTokens: 1 }, true), 'gauge');
+});
+
+test('gaugeState shows the empty measuring track for a working Session with no value yet', () => {
+  assert.equal(gaugeState(null, true), 'track');
+});
+
+test('gaugeState shows nothing for a resting Session that never produced a turn', () => {
+  assert.equal(gaugeState(null, false), 'none');
+});
 
 test('windowFor returns the model window for a long-context model', () => {
   assert.equal(windowFor('claude-sonnet-4-5-20250929'), 1000000);

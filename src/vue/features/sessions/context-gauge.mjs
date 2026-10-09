@@ -68,6 +68,18 @@ export function severityFor(used) {
   return 'base';
 }
 
+// What a Session row's gauge slot should render (VIN-149). Three states, no fourth:
+//  - 'gauge': a usage is known — show the bar and its label.
+//  - 'track': the Session is working but no assistant turn has been indexed yet — show the
+//    empty tinted track, no label. It reads "we're measuring", not "nothing to report", and
+//    reserves the slot's width so the first value's arrival shifts nothing. A zero bar is
+//    avoided on purpose: the context already holds the system prompt, tools and memory files.
+//  - 'none': a Session at rest with no value — the slot stays blank, as it always has.
+export function gaugeState(usage, working) {
+  if (usage != null) return 'gauge';
+  return working ? 'track' : 'none';
+}
+
 // The live push's values, re-applied onto a freshly rebuilt Session tree. `projects` comes
 // back from the main process on every folder refresh, its rows rebuilt from the cache — and
 // a row rebuilt before the .jsonl's last turn is indexed carries no usage yet. Without this
