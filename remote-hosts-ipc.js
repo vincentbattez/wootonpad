@@ -74,9 +74,12 @@ function createRemoteHostsIpc({
   if (typeof onReachabilityChange !== 'function') {
     throw new Error('createRemoteHostsIpc: onReachabilityChange callback is required');
   }
-  // Optional: fired with a Host the moment it turns Reachable (undefined/false → true), so the owner
-  // can list and re-attach its live remote Sessions (VIN-160). A noop when not wired.
-  const fireHostReachable = typeof onHostReachable === 'function' ? onHostReachable : () => {};
+  // Fired with a Host the moment it turns Reachable (undefined/false → true), so the owner can list
+  // and re-attach its live remote Sessions (VIN-160). Required, like onReachabilityChange: the one
+  // caller always wires it, so a missing one is a wiring mistake, not a mode to tolerate.
+  if (typeof onHostReachable !== 'function') {
+    throw new Error('createRemoteHostsIpc: onHostReachable callback is required');
+  }
   // Hosts persist under their own setting key, so the Local Accounts store ('accounts') is never
   // touched and there is no migration. Each Host is normalised on read so a Default Account is
   // always present, even for a record written by an older build.
@@ -104,7 +107,7 @@ function createRemoteHostsIpc({
         flipped = true;
         // Turning Reachable (from Unreachable, or from not-yet-probed at startup) is the cue to pick
         // its Sessions back up: list the live tmux sessions and re-attach each (VIN-160).
-        if (reachable) fireHostReachable(host);
+        if (reachable) onHostReachable(host);
       }
     }));
     // A flip changes which Projects are greyed — remote-mirror.annotateProjects reads this map at

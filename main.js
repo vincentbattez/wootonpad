@@ -29,6 +29,7 @@ const { createProjectGit, NETWORK_TIMEOUT_MS } = require('./project-git');
 const remoteGit = require('./remote-git');
 const remoteHostsIpcModule = require('./remote-hosts-ipc');
 const remoteLaunch = require('./remote-launch');
+const { createRemoteReattach } = require('./remote-reattach');
 const { createSource } = require('./session-source');
 const { execFile } = require('child_process');
 
@@ -1839,7 +1840,7 @@ const remoteHostsIpc = remoteHostsIpcModule.createRemoteHostsIpc({
   onReachabilityChange: () => notifyRendererProjectsChanged(),
   // A Host turning Reachable (at startup, or back from a sleep / dropped link) is the cue to pick
   // its Sessions back up: list the live tmux sessions and re-attach each in the background (VIN-160).
-  onHostReachable: (host) => reattachRemoteSessions(host),
+  onHostReachable: (host) => remoteReattach.reattachRemoteSessions(host),
 });
 
 ipcMain.handle('get-hosts', () => remoteHostsIpc.getHosts());
@@ -2262,9 +2263,12 @@ function wirePtyHandlers(ptyProcess, session, sessionId) {
   ptyProcess.onExit(({ exitCode, signal }) => {
     // A live Remote Session whose ssh PTY dies may just have dropped its link (laptop slept, Wi-Fi
     // cut), not exited: don't finalize it as exited until a probe says Claude really ended (VIN-160).
-    // A remote PTY that never connected is a failed launch, not a drop — it falls through to finalize.
-    if (session.remote && !session._stoppedByUser && session._everConnected) {
-      handleRemotePtyExit(session, sessionId, exitCode, signal);
+    // A *foreground launch* that never connected is a failed launch, not a drop — it falls through to
+    // finalize. A background re-attach, though, attaches to a tmux session just listed as live, so a
+    // pre-connect death there is a dropped handshake, never a failed launch: route it through the
+    // drop classifier too (`_reattached`), or a slept laptop would wrongly flip the row to exited.
+    if (session.remote && !session._stoppedByUser && (session._everConnected || session._reattached)) {
+      remoteReattach.handleRemotePtyExit(session, sessionId, exitCode, signal);
       return;
     }
     finalizePtyExit(session, sessionId, exitCode, signal);
@@ -2286,7 +2290,9 @@ function finalizePtyExit(session, sessionId, exitCode, signal) {
     // spawn failure (unreachable Host, missing tmux/claude, an unauthenticated Account). Run the
     // Host's prerequisite diagnostic and write its clear message into the terminal instead of
     // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
-    if (session.remote && !session._stoppedByUser && exitCode !== 0) {
+    // Only for a Session the user actually opened: a background re-attach the user never saw must not
+    // have a red launch-failure diagnostic written into a terminal nobody opened (VIN-160).
+    if (session.remote && !session._stoppedByUser && exitCode !== 0 && session._everOpened) {
       const reportId = session.realSessionId || sessionId;
       Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
         if (d && d.ok) return;
@@ -2319,118 +2325,33 @@ function finalizePtyExit(session, sessionId, exitCode, signal) {
     activeSessions.delete(sessionId);
 }
 
-// --- Picking remote Sessions back up (VIN-160) ---
-// At startup and whenever a Host turns Reachable, list the live tmux sessions on its dedicated
-// socket and re-attach each in the background — a Session whose renderer is detached — so its State
-// Dot is truthful even if nobody opens it and clicking the row reveals the already-attached
-// terminal. The decisions (what to list, what to attach, what a dropped PTY means) are
-// remote-launch's pure core; this is the adapter that shells out and spawns the headless PTYs.
-function reattachRemoteSessions(host) {
-  if (!host || !host.sshTarget) return;
-  Promise.resolve(remoteHostsIpcModule.sshRun(host, { command: remoteLaunch.listSessionsCommand() }, { connectTimeout: 10 }))
-    .then(res => {
-      // No tmux server (nothing was ever launched here) or an unreachable Host: nothing to pick up.
-      if (!res || (res.code !== 0 && !String(res.stdout || '').trim())) return;
-      const liveIds = remoteLaunch.parseTmuxSessionList(res.stdout);
-      if (!liveIds.length) return;
-      // Already-live Sessions of this Host are skipped; a dropped placeholder is eligible for revival.
-      const attached = [];
-      for (const [id, s] of activeSessions) {
-        if (!s.remote || s.hostId !== host.id || s.exited || s.dropped) continue;
-        attached.push(id);
-        if (s.remoteTmuxId) attached.push(s.remoteTmuxId);
-        if (s.realSessionId) attached.push(s.realSessionId);
-      }
-      for (const id of remoteLaunch.sessionsToReattach(liveIds, attached)) {
-        reattachRemoteSession(host, id);
-      }
-    })
-    .catch(e => log.warn(`[remote-reattach] list for ${host.sshTarget} failed: ${e.message}`));
-}
-
-// Spawn a headless ssh PTY that re-attaches one Session's tmux on the Host. It parses OSC for the
-// State Dot and buffers output exactly like a foreground launch (wirePtyHandlers), so clicking the
-// row later replays the buffer and streams live — no restart of Claude. Reviving a Session that had
-// dropped reuses its object (and its last buffered State) rather than starting a second row.
-function reattachRemoteSession(host, sessionId) {
-  const existing = activeSessions.get(sessionId);
-  if (existing && !existing.exited && !existing.dropped) return; // already live
-  let args;
-  try {
-    args = remoteLaunch.buildAttachArgs({ sshTarget: host.sshTarget, sessionId });
-  } catch (e) {
-    log.warn(`[remote-reattach] skipping ${sessionId}: ${e.message}`);
-    return;
+// Seed a re-attached Session's live busy State from a pane title (its CLI's last OSC 0). Shares the
+// OSC 0 busy alphabet with wirePtyHandlers (cli-activity.js), but only ever asserts busy — it never
+// clears a State it cannot positively observe, so an idle re-attach keeps its mirrored `done`/
+// `sleeping` Dot while a busy one reads as working at once rather than waiting on the next repaint.
+function seedBusyFromTitle(session, sessionId, title) {
+  const currentId = session.realSessionId || sessionId;
+  if (isBusyTitle(title) && !session._cliBusy) {
+    session._cliBusy = true;
+    session._oscIdle = false;
+    log.debug(`[remote-reattach] seed session=${currentId} → BUSY from pane title`);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('cli-busy-state', currentId, true);
+    }
   }
-  let ptyProcess;
-  try {
-    ptyProcess = pty.spawn('ssh', args, {
-      name: 'xterm-256color', cols: 120, rows: 30, cwd: os.homedir(),
-      env: {
-        ...cleanPtyEnv,
-        TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
-        SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
-      },
-    });
-  } catch (e) {
-    log.warn(`[remote-reattach] spawn for ${sessionId} failed: ${e.message}`);
-    return;
-  }
-
-  if (existing && existing.dropped) {
-    // Revive in place: keep the buffered output and last State, swap in the fresh PTY.
-    existing.pty = ptyProcess;
-    existing.dropped = false;
-    existing.exited = false;
-    existing.firstResize = true;
-    log.info(`[remote-reattach] revived dropped session=${sessionId} on ${host.sshTarget}`);
-    wirePtyHandlers(ptyProcess, existing, sessionId);
-    return;
-  }
-
-  const descriptor = remoteMirror.sourceDescriptorFor(host, MIRROR_ROOT);
-  const folder = getCachedFolder(sessionId) || null;
-  const session = {
-    pty: ptyProcess, rendererAttached: false, exited: false,
-    outputBuffer: [], outputBufferSize: 0, altScreen: false,
-    projectPath: null, firstResize: true,
-    projectFolder: folder, knownJsonlFiles: new Set(), sessionSlug: null,
-    isPlainTerminal: false, sessionType: 'session', forkFrom: null,
-    mcpServer: null, focusToken: null, _openedAt: Date.now(),
-    remote: true, hostId: host.id, sshTarget: host.sshTarget,
-    sourceId: descriptor.id, remoteTmuxId: sessionId,
-  };
-  activeSessions.set(sessionId, session);
-  log.info(`[remote-reattach] background attach session=${sessionId} on ${host.sshTarget}`);
-  wirePtyHandlers(ptyProcess, session, sessionId);
 }
 
-// A live Remote Session's ssh PTY died: tell a real exit from a dropped link (VIN-160). An
-// Unreachable Host is a drop outright; otherwise probe has-session — a tmux session still there is a
-// dropped client, ssh that couldn't connect is the Host gone, and a connected probe finding no
-// session is Claude's real exit, which finalizes exactly as a local one.
-function handleRemotePtyExit(session, sessionId, exitCode, signal) {
-  const reachable = remoteHostsIpc.getReachability()[session.hostId];
-  const decide = (hasSessionCode) => {
-    const verdict = remoteLaunch.classifyRemotePtyExit({ stoppedByUser: false, reachable, hasSessionCode });
-    if (verdict === 'dropped') markRemoteDropped(session, sessionId);
-    else finalizePtyExit(session, sessionId, exitCode, signal);
-  };
-  if (reachable === false) { decide(null); return; }
-  const host = { id: session.hostId, sshTarget: session.sshTarget };
-  Promise.resolve(remoteHostsIpcModule.sshRun(host, { command: remoteLaunch.hasSessionCommand(session.remoteTmuxId || sessionId) }, { connectTimeout: 10 }))
-    .then(res => decide(res ? res.code : 255))
-    .catch(() => markRemoteDropped(session, sessionId));
-}
-
-// Keep a Session whose link dropped: not exited, not deleted, shown at its last observed State until
-// the Host answers and auto-reattach revives it. No process-exited is sent — that would flip the row
-// to ended (CONTEXT.md, Reachable; VIN-160). The dead PTY is released so input can't hit it.
-function markRemoteDropped(session, sessionId) {
-  session.dropped = true;
-  session.pty = null;
-  log.info(`[remote-drop] session=${sessionId} host=${session.hostId} — link dropped, kept stale for re-attach`);
-}
+// Picking remote Sessions back up (VIN-160) lives in its own adapter; main.js only wires its
+// boundaries. wirePtyHandlers/finalizePtyExit (the PTY lifecycle) and seedBusyFromTitle stay here
+// because they are shared with a foreground launch and reach mainWindow directly.
+const remoteReattach = createRemoteReattach({
+  activeSessions, pty,
+  sshRun: remoteHostsIpcModule.sshRun,
+  getReachability: () => remoteHostsIpc.getReachability(),
+  getHosts: () => remoteHostsIpc.getHosts(),
+  wirePtyHandlers, finalizePtyExit, seedBusyFromTitle,
+  getCachedFolder, cleanPtyEnv, mirrorRoot: MIRROR_ROOT, log,
+});
 
 // --- IPC: open-terminal ---
 ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, sessionOptions) => {
@@ -2444,9 +2365,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // resumes once the fresh attach connects, or the next Reachable flip picks it up.
     if (session.remote && session.dropped) {
       const host = remoteHostsIpc.getHosts().find(h => h.id === session.hostId);
-      if (host) reattachRemoteSession(host, sessionId);
+      if (host) remoteReattach.reattachRemoteSession(host, sessionId);
     }
     session.rendererAttached = true;
+    session._everOpened = true;
     session.firstResize = !session.isPlainTerminal;
 
     // If TUI is in alternate screen mode, send escape to switch into it
@@ -2768,6 +2690,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     projectFolder, knownJsonlFiles, sessionSlug,
     isPlainTerminal, sessionType, forkFrom: sessionOptions?.forkFrom || null,
     mcpServer, focusToken, _openedAt: Date.now(),
+    // The user opened this Session (a foreground launch), so a launch-failure diagnostic is theirs to
+    // see — a background re-attach never sets this, so nothing is written to a terminal nobody opened.
+    _everOpened: true,
     // Remote Session bookkeeping: the Source it was launched against (so the mirror's fork detection
     // only considers it), the Host target (for a later tmux rename / kill), and the id its tmux
     // session currently carries, so a re-key can rename the far side from this to the real id.

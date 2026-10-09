@@ -14,7 +14,7 @@ const {
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
-  listSessionsCommand, parseTmuxSessionList, hasSessionCommand,
+  listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
   buildAttachArgs, sessionsToReattach, classifyRemotePtyExit,
 } = require('../remote-launch');
 
@@ -367,6 +367,17 @@ test('hasSessionCommand — asks the socket whether the Session is still alive, 
 
 test('hasSessionCommand — rejects an unsafe id (it is spliced into the remote command)', () => {
   assert.throws(() => hasSessionCommand("x'y"), /session id/i);
+});
+
+test('paneTitleCommand — reads the Session pane title (the CLI\'s last OSC 0), login-shell wrapped', () => {
+  const cmd = paneTitleCommand('sess-1');
+  assert.match(cmd, /^\$SHELL -lc '/);
+  const inner = unSingleQuote(cmd.slice('$SHELL -lc '.length));
+  assert.match(inner, /^tmux -L wootonpad display-message -p -t wp-sess-1 '#\{pane_title\}'$/);
+});
+
+test('paneTitleCommand — rejects an unsafe id (it is spliced into the remote command)', () => {
+  assert.throws(() => paneTitleCommand("x'y"), /session id/i);
 });
 
 // --- picking Sessions back up: the background re-attach argv -----------------------------------

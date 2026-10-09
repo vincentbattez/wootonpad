@@ -98,15 +98,15 @@ test('a Host going Unreachable does not fire onHostReachable (VIN-160)', async (
   assert.deepEqual(becameReachable, ['h1', 'h1']);
 });
 
-test('createRemoteHostsIpc tolerates no onHostReachable callback', () => {
-  assert.doesNotThrow(() => createRemoteHostsIpc({
-    getSetting: () => {}, setSetting: () => {}, send: () => {}, onReachabilityChange: () => {},
-  }));
-});
-
 test('createRemoteHostsIpc refuses to build without an onReachabilityChange callback', () => {
   assert.throws(() => createRemoteHostsIpc({ getSetting: () => {}, setSetting: () => {}, send: () => {} }),
     /onReachabilityChange/);
+});
+
+test('createRemoteHostsIpc refuses to build without an onHostReachable callback', () => {
+  assert.throws(() => createRemoteHostsIpc({
+    getSetting: () => {}, setSetting: () => {}, send: () => {}, onReachabilityChange: () => {},
+  }), /onHostReachable/);
 });
 
 test('startHostProbe is idempotent and stopHostProbe releases the timer', () => {

@@ -207,6 +207,14 @@ function hasSessionCommand(sessionId) {
   return loginShell(`tmux -L ${TMUX_SOCKET} has-session -t ${tmuxSessionName(sessionId)}`);
 }
 
+// The pane title tmux currently holds for a Session — the CLI's last OSC 0, which is the busy
+// signal the State Dot reads. Printed bare (display-message -p) so a background re-attach can seed
+// the Dot from last-known State without waiting for the CLI's next repaint (VIN-160).
+function paneTitleCommand(sessionId) {
+  return loginShell(
+    `tmux -L ${TMUX_SOCKET} display-message -p -t ${tmuxSessionName(sessionId)} '#{pane_title}'`);
+}
+
 // The ssh argv that re-attaches a Session's tmux in the background. attach-session, never
 // new-session: a re-attach must find the running Claude and never start a new one. Forces a PTY
 // (`-tt`) because tmux attach needs a terminal; the session env (TERM_PROGRAM) and its options were
@@ -276,6 +284,6 @@ module.exports = {
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
-  listSessionsCommand, parseTmuxSessionList, hasSessionCommand,
+  listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
   buildAttachArgs, sessionsToReattach, classifyRemotePtyExit,
 };
