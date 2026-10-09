@@ -26,6 +26,7 @@ const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolveP
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
 const { createProjectGit } = require('./project-git');
+const remoteGit = require('./remote-git');
 const remoteHostsIpcModule = require('./remote-hosts-ipc');
 const { execFile } = require('child_process');
 
@@ -222,22 +223,59 @@ function projectExecFile(argv, cwd, options = {}) {
   return ['wsl.exe', wslExecArgs(distro, cwd, argv), rest];
 }
 
-// projectExecFile decides where git runs — inside the distribution for a WSL-backed account.
-const projectGit = createProjectGit({
-  run: (argv, cwd, { timeout } = {}) => new Promise(resolve => {
-    const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
+// A git command against a Remote Project (cwd is an ssh://<hostId>/<path> key) runs on its Host over
+// SSH, through the Host's login shell (VIN-159, ADR 0016). This is the same seam a WSL account
+// redirects — git stays one argv interface (ADR 0007), only where it runs changes. It rides the
+// Host's multiplexed master (controlPath), with the same BatchMode safety as every other SSH
+// command: SSH_ASKPASS disabled and DISPLAY cleared so no prompt can ever block the app.
+function runRemoteGit(resolved, timeout) {
+  return new Promise(resolve => {
+    const controlPath = remoteHostsIpcModule.controlPathFor(resolved.host);
+    try { fs.mkdirSync(remoteHostsIpcModule.HOSTS_CONTROL_DIR, { recursive: true }); } catch {}
+    const args = resolved.args.slice();
+    // Splice the multiplexing options in before the ones remote-git already built (target last).
+    const extra = [];
+    for (const o of ['ControlMaster=auto', `ControlPath=${controlPath}`]) extra.push('-o', o);
+    args.unshift(...extra);
+    execFile('ssh', args, {
       encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
-    });
-    execFile(file, args, options, (err, stdout, stderr) => {
+      env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' },
+    }, (err, stdout, stderr) => {
       resolve({
-        // A timeout kills the child without an exit code; git's own codes are numbers.
-        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+        code: err ? (typeof err.code === 'number' ? err.code : 255) : 0,
         stdout,
-        // A spawn failure or timeout prints no stderr; its message is all the user gets.
         stderr: stderr || (err ? err.message : ''),
       });
     });
-  }),
+  });
+}
+
+// projectExecFile decides where git runs locally — inside the distribution for a WSL-backed account.
+// A Remote Project key routes to its Host over SSH instead; a local path falls through unchanged.
+const projectGit = createProjectGit({
+  run: (argv, cwd, { timeout } = {}) => {
+    // Only a Remote Project key pays for a Host-store read; a local path is a cheap regex miss.
+    if (remoteGit.parseRemoteKey(cwd)) {
+      const resolved = remoteGit.resolveRemoteGitArgs(cwd, argv, remoteHostsIpc.getHosts());
+      if (resolved) return runRemoteGit(resolved, timeout);
+      // Remote key whose Host was removed: fall through. projectExecFile on an ssh:// path fails
+      // fast, which lightSnapshot renders as a null branch — the badge keeps its last value.
+    }
+    return new Promise(resolve => {
+      const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
+        encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
+      });
+      execFile(file, args, options, (err, stdout, stderr) => {
+        resolve({
+          // A timeout kills the child without an exit code; git's own codes are numbers.
+          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+          stdout,
+          // A spawn failure or timeout prints no stderr; its message is all the user gets.
+          stderr: stderr || (err ? err.message : ''),
+        });
+      });
+    });
+  },
 });
 
 // Build stats in the same format as stats-cache.json using Switchboard's own DB.
@@ -817,8 +855,46 @@ function cacheProjectSize(projectPath) {
   }).catch(() => {});
 }
 
+// A Remote Project's sidebar badge: the light Git Snapshot read from git on its Host over SSH
+// (VIN-159). Docker containers and the Project size are out of a Remote Host's v1 (ADR 0016), so
+// only git runs — no du, no docker compose. Served stale-while-unreachable: the last good Snapshot
+// persists in the same project-info cache and is returned at once, and while the Host is known
+// Unreachable no fresh read is even attempted, so an offline Mini never spams the log (CONTEXT.md,
+// Remote Project). A fresh read whose git did not answer keeps the last Snapshot rather than
+// blanking the badge.
+function getRemoteProjectInfo(projectKey, parsed) {
+  const send = (channel, ...payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...payload);
+  };
+  const cacheKey = 'project-info:' + projectKey;
+  const cached = getSetting(cacheKey);
+  const base = cached?.data ?? null;
+  const gitFresh = cached?.fetchedAt && (Date.now() - cached.fetchedAt) < (cached.ttl || PROJECT_INFO_TTL_MS);
+  const reachable = remoteHostsIpc.getReachability()[parsed.hostId];
+
+  // undefined (not yet probed) may try; false (known Unreachable) keeps the stale Snapshot and
+  // never dials, so a down Host costs nothing and logs nothing.
+  if (!gitFresh && reachable !== false) {
+    send('project-info-loading', projectKey);
+    projectGit.lightSnapshot(projectKey).then(snap => {
+      if (!snap || snap.branch == null) {
+        // git did not answer (ssh dropped, not a repo): keep the last good Snapshot, shown stale.
+        send('project-info-updated', projectKey, base);
+        return;
+      }
+      const data = { branch: snap.branch, added: snap.added, deleted: snap.deleted, containers: [] };
+      setSetting(cacheKey, { data, fetchedAt: Date.now(), ttl: infoJitter() });
+      send('project-info-updated', projectKey, data);
+    }).catch(() => send('project-info-updated', projectKey, base));
+  }
+  return base;
+}
+
 ipcMain.handle('get-project-info', (_event, projectPath) => {
-  if (!projectPath || !fs.existsSync(hostPath(projectPath))) return null;
+  if (!projectPath) return null;
+  const remote = remoteGit.parseRemoteKey(projectPath);
+  if (remote) return getRemoteProjectInfo(projectPath, remote);
+  if (!fs.existsSync(hostPath(projectPath))) return null;
   const cacheKey = 'project-info:' + projectPath;
   const cached = getSetting(cacheKey);
   const cachedSize = getSetting('project-size:' + projectPath);
