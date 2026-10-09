@@ -209,6 +209,8 @@ function buildProjectsFromCache() {
       name: meta?.name || null,
       starred: meta?.starred || 0,
       archived: meta?.archived || 0,
+      // Declared, never inferred (ADR 0015) — user data, carried like starred and archived.
+      done: meta?.done || 0,
       accountId: row.accountId || 'default',
       // Context gauge (VIN-143): the last assistant turn's usage breakdown and model,
       // a property of the Session so every row carries it, running or not.

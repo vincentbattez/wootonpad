@@ -105,6 +105,10 @@ const visibleProjects = computed(() => {
       showStarredOnly: store.showStarredOnly,
       showRunningOnly: store.showRunningOnly,
       showTodayOnly: store.showTodayOnly,
+      busySessionIds: store.sessionBusyState,
+      attentionSessionIds: store.attentionSessions,
+      needsInputSessionIds: store.needsInputSessions,
+      unreadSessionIds: store.unreadSessions,
       now,
     }).length > 0);
   }
@@ -136,7 +140,8 @@ const shared = computed(() => ({
   activeSessionId: store.activeSessionId,
   sessionBusyState: store.sessionBusyState,
   attentionSessions: store.attentionSessions,
-  responseReadySessions: store.responseReadySessions,
+  needsInputSessions: store.needsInputSessions,
+  unreadSessions: store.unreadSessions,
   searchMatchIds: store.searchMatchIds,
   showStarredOnly: store.showStarredOnly,
   showRunningOnly: store.showRunningOnly,
@@ -154,6 +159,7 @@ const listeners = {
   onJsonl: (id) => sb.showJsonl?.(id),
   onLaunchConfig: (id) => sb.launchConfig?.(id),
   onRename: (id, name) => sb.renameSession?.(id, name),
+  onDone: (id) => sb.toggleDone?.(id),
   onNewSession: (project, btn) => sb.newSession?.(project, btn),
   onSettings: (path) => sb.openSettings?.(path),
   onOpenExternalIde: (path) => sb.openExternalIde?.(path),

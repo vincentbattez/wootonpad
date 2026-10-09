@@ -1801,7 +1801,7 @@ body { display: flex; flex-direction: column; }
   flex-wrap: nowrap;
 }
 
-.session-item--row:not(.compact) .session-status-dot {
+.session-item--row:not(.compact) .session-state-dot {
   margin-top: 0;
 }
 
@@ -1842,10 +1842,11 @@ body { display: flex; flex-direction: column; }
   border-left: 2px solid color-mix(in srgb, var(--amber-500) 45%, transparent);
 }
 
-/* ---- Running dot ---- */
-/* A ring, not a dot: padding + background-clip keep every state rule below
-   (running / busy / ready / attention) painting only the inner disc. */
-.session-status-dot {
+/* ---- State Dot ---- */
+/* Renders the Session State and nothing else (VIN-148). Exactly one modifier class is ever
+   set on it, computed upstream in session-state.mjs — no :not() cascade, no !important, and
+   no report on whether a shell happens to be alive. */
+.session-state-dot {
   width: 14px;
   height: 14px;
   box-sizing: border-box;
@@ -1858,43 +1859,45 @@ body { display: flex; flex-direction: column; }
   margin-top: 4px;
 }
 
-.session-status-dot.running {
-  border-color: var(--status-running);
-  background: var(--status-running);
-}
-
 @keyframes pulse-dot {
   0%, 100% { opacity: 1; }
   50% { opacity: 0.5; }
-}
-
-/* ---- CLI busy spinner (braille spinner detected) ---- */
-/* needs-attention takes precedence — when both are set, attention ripple shows */
-.session-item.cli-busy:not(.needs-attention) .session-status-dot,
-.session-item.cli-busy:not(.needs-attention) .session-status-dot.running {
-  background: transparent !important;
-  border-color: var(--blue-9);
-  border-top-color: transparent;
-  animation: spin-dot 0.8s linear infinite !important;
-  box-shadow: none !important;
 }
 
 @keyframes spin-dot {
   to { transform: rotate(360deg); }
 }
 
-.session-item.cli-busy:not(.needs-attention) .session-summary {
-  background: linear-gradient(110deg, var(--neutral-11) 44%, var(--blue-9) 48%, var(--neutral-12) 50%, var(--blue-9) 52%, var(--neutral-11) 56%);
-  background-size: 300% 100%;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  animation: shimmer-text 3s linear infinite;
+/* sleeping — nothing in progress, nobody waiting: the neutral empty ring, the base rule. */
+.session-state-dot--sleeping {
+  border-color: var(--neutral-a6);
 }
 
-@keyframes shimmer-text {
-  0% { background-position: 200% 0; }
-  100% { background-position: -100% 0; }
+/* needsInput — the ball is on the human's side: a dashed amber ring, still empty because
+   nothing is being produced. */
+.session-state-dot--needs-input {
+  border-color: var(--amber-9);
+  border-style: dashed;
+}
+
+/* working — the CLI is producing something: an empty blue ring that breathes. One animation
+   for the state, not two. */
+.session-state-dot--working {
+  border-color: var(--blue-9);
+  animation: breath-dot 2s ease-in-out infinite;
+}
+
+@keyframes breath-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+
+/* done — the subject is closed: a solid green disc. padding: 0 lets the background fill the
+   whole ring rather than the 2px inner dot the padded base leaves. */
+.session-state-dot--done {
+  border-color: var(--green-500);
+  background: var(--green-500);
+  padding: 0;
 }
 
 /* ---- Session info ---- */
@@ -2011,6 +2014,7 @@ body { display: flex; flex-direction: column; }
 }
 
 .session-stop-btn,
+.session-done-btn,
 .session-launch-config-btn,
 .session-fork-btn,
 .session-jsonl-btn,
@@ -2033,6 +2037,14 @@ body { display: flex; flex-direction: column; }
 .session-stop-btn:hover {
   color: var(--red-500);
   background: color-mix(in srgb, var(--red-500) 10%, transparent);
+}
+
+/* Closing the subject, not killing the shell (ADR 0015) — it wears the `done` green, and
+   keeps it once set so the row says which way the next click goes. */
+.session-done-btn:hover,
+.session-done-btn.is-done {
+  color: var(--green-500);
+  background: color-mix(in srgb, var(--green-500) 10%, transparent);
 }
 
 .session-launch-config-btn:hover {
@@ -2067,10 +2079,6 @@ body { display: flex; flex-direction: column; }
   display: none;
 }
 
-.session-item.is-terminal .session-fork-btn {
-  display: none;
-}
-
 .session-item.archived-item {
   opacity: 0.55;
 }
@@ -2083,7 +2091,7 @@ body { display: flex; flex-direction: column; }
   align-items: center;
 }
 
-.session-item.compact .session-status-dot,
+.session-item.compact .session-state-dot,
 .session-item.compact .session-subtitle {
   display: none;
 }
@@ -2120,61 +2128,20 @@ body { display: flex; flex-direction: column; }
   margin-left: 48px;
 }
 
-/* ---- Response ready indicator (Claude finished, unread output) ---- */
-.session-item.response-ready .session-status-dot {
-  border-color: var(--blue-9);
-  background: var(--blue-9);
-  animation: none;
-}
-
-.session-item.response-ready .session-name {
+/* ---- Unread: output the human has not looked at yet ---- */
+/* A reading state, not a Session State — it accents the title and never touches the dot, so a
+   Session can be unread under any of the four states (VIN-148). */
+.session-item.is-unread .session-name {
   color: var(--blue-11);
   font-weight: 600;
 }
 
-.session-item.response-ready .session-summary {
+.session-item.is-unread .session-summary {
   color: var(--blue-11);
 }
 
-.session-item.response-ready .session-time {
+.session-item.is-unread .session-time {
   color: color-mix(in srgb, var(--blue-11) 60%, transparent);
-}
-
-/* ---- Needs attention indicator (ripple) ---- */
-.session-item.needs-attention .session-status-dot,
-.session-item.needs-attention .session-status-dot.running {
-  border-color: var(--orange-9);
-  background: var(--orange-9);
-  box-shadow: none;
-  animation: none;
-  position: relative;
-}
-
-.session-item.needs-attention .session-status-dot::before,
-.session-item.needs-attention .session-status-dot::after {
-  content: '';
-  position: absolute;
-  inset: -2px;
-  border-radius: 50%;
-  border: 1.5px solid color-mix(in srgb, var(--orange-9) 70%, transparent);
-  animation: ripple-out 2s ease-out infinite;
-}
-
-.session-item.needs-attention .session-status-dot::after {
-  animation-delay: 1s;
-}
-
-@keyframes ripple-out {
-  0%   { transform: scale(1); opacity: 0.7; }
-  100% { transform: scale(3.5); opacity: 0; }
-}
-
-.session-item.needs-attention .session-summary {
-  color: var(--orange-500);
-}
-
-.session-item.needs-attention .session-summary::before {
-  display: none;
 }
 
 
@@ -2490,7 +2457,8 @@ body { display: flex; flex-direction: column; }
   box-shadow: 0 0 6px color-mix(in srgb, var(--status-running) 40%, transparent);
 }
 
-/* Arc spinner — same as sidebar .session-item.cli-busy */
+/* Arc spinner. The terminal header dot keeps its own rendering (VIN-148 leaves it alone);
+   the sidebar's State Dot no longer spins. */
 .vsh-status-dot.busy {
   background: transparent !important;
   border: 1.5px solid var(--blue-9);
@@ -4904,10 +4872,30 @@ body { display: flex; flex-direction: column; }
   color: var(--green-500);
 }
 
-/* Terminal sessions: green status dot */
-.session-item.is-terminal .session-status-dot.running {
-  background: var(--status-running);
-  box-shadow: 0 0 6px color-mix(in srgb, var(--status-running) 50%, transparent);
+/* ---- Terminal row: one line, a badge and its own two actions (VIN-148) ---- */
+.session-item.terminal-item .session-row {
+  height: 34px;
+  box-sizing: border-box;
+  padding: 0 14px;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: nowrap;
+}
+
+.session-item.terminal-item .session-summary {
+  flex: 1;
+  min-width: 0;
+}
+
+.session-item.terminal-item .terminal-badge {
+  margin-right: 0;
+  top: 0;
+}
+
+.session-item.terminal-item .session-actions {
+  top: 0;
+  bottom: 0;
+  align-items: center;
 }
 
 /* ========== FILE PANEL (MCP Bridge) ========== */

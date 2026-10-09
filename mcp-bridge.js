@@ -4,6 +4,9 @@
  * Each Claude CLI PTY gets its own MCP server so the CLI can send
  * openDiff / openFile / closeAllDiffTabs / getDiagnostics calls
  * to Switchboard's file panel instead of a VS Code extension.
+ *
+ * It also carries markSessionDone: the agent's way to declare its Session finished
+ * (ADR 0015). One line of description, no parameters, no prompt injection.
  */
 
 const { WebSocketServer } = require('ws');
@@ -116,6 +119,11 @@ const MCP_TOOLS = [
       properties: { uri: { type: 'string' } },
     },
   },
+  {
+    name: 'markSessionDone',
+    description: 'Mark this session as finished — no further human input needed',
+    inputSchema: { type: 'object', properties: {} },
+  },
 ];
 
 // ── JSON-RPC Message Handler ─────────────────────────────────────────
@@ -189,6 +197,8 @@ async function handleToolCall(entry, rpcId, params, log) {
       return handleCloseAllDiffTabs(entry, rpcId, log);
     case 'getDiagnostics':
       return handleGetDiagnostics(entry, rpcId);
+    case 'markSessionDone':
+      return handleMarkSessionDone(entry, rpcId, log);
     default:
       return sendError(entry, rpcId, -32602, `Unknown tool: ${toolName}`);
   }
@@ -324,6 +334,21 @@ async function handleGetDiagnostics(entry, rpcId) {
   });
 }
 
+// The agent declaring its own Session finished (ADR 0015). Not `stop`: the row's Stop button
+// kills the PTY, this closes the subject. The effect is the main process's — persist, then
+// tell the renderer — and it is injected on the entry so the contract stays testable.
+async function handleMarkSessionDone(entry, rpcId, log) {
+  log.info(`[mcp] session=${entry.sessionId} markSessionDone`);
+  try {
+    await entry.onMarkDone?.(entry.sessionId);
+  } catch (err) {
+    log.debug(`[mcp] session=${entry.sessionId} markSessionDone failed: ${err.message}`);
+  }
+  sendResult(entry, rpcId, {
+    content: [{ type: 'text', text: 'ok' }],
+  });
+}
+
 // ── Public API ───────────────────────────────────────────────────────
 
 /**
@@ -370,6 +395,8 @@ async function startMcpServer(sessionId, workspaceFolders, mainWindow, log, opti
     // Translates a path the CLI reports into one this process can open.
     // Identity unless the session runs inside a distribution.
     hostPath: options.hostPath || ((p) => p),
+    // Called when the CLI declares the Session finished; the main process owns the write.
+    onMarkDone: options.onMarkDone || null,
     ws: null,
     pendingDiffs: new Map(),
   };
@@ -509,6 +536,10 @@ function cleanStaleLockFiles(log) {
 }
 
 module.exports = {
+  // Exported for the contract test: what the CLI actually sees is the JSON-RPC handler and the
+  // tool list, not the WebSocket server around them.
+  handleMessage,
+  MCP_TOOLS,
   startMcpServer,
   shutdownMcpServer,
   shutdownAll,
