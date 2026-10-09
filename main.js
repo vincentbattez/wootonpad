@@ -1837,6 +1837,9 @@ const remoteHostsIpc = remoteHostsIpcModule.createRemoteHostsIpc({
   // A Host's reachability flip re-colours its Remote Projects (greyed when Unreachable). Greyed is
   // computed at get-projects time, so nudge the sidebar to re-fetch the moment reachability changes.
   onReachabilityChange: () => notifyRendererProjectsChanged(),
+  // A Host turning Reachable (at startup, or back from a sleep / dropped link) is the cue to pick
+  // its Sessions back up: list the live tmux sessions and re-attach each in the background (VIN-160).
+  onHostReachable: (host) => reattachRemoteSessions(host),
 });
 
 ipcMain.handle('get-hosts', () => remoteHostsIpc.getHosts());
@@ -2148,6 +2151,288 @@ ipcMain.handle('archive-session', (_event, sessionId, archived) => {
   return { archived: val };
 });
 
+
+// Wire a spawned PTY (local or remote) to its Session: parse OSC for the State Dot, buffer and
+// forward output, and on exit decide what the exit means. Shared by a foreground launch
+// (open-terminal) and a background re-attach of a remote Session (VIN-160), so both paths read the
+// same OSC signals and run the same exit decision.
+function wirePtyHandlers(ptyProcess, session, sessionId) {
+  ptyProcess.onData(data => {
+    const currentId = session.realSessionId || sessionId;
+    // The PTY produced output, so it connected: a remote ssh client that never reaches this never
+    // attached to tmux, which is how a failed launch is told from a dropped link later (VIN-160).
+    session._everConnected = true;
+
+    // Parse OSC sequences (title changes, progress, notifications, etc.)
+    if (data.includes('\x1b]')) {
+      const oscMatches = data.matchAll(/\x1b\](\d+);([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
+      for (const m of oscMatches) {
+        const code = m[1];
+        const payload = m[2].slice(0, 120);
+        // Detect Claude CLI busy state from OSC 0 title (spinner chars = busy, ✳ = idle)
+        if (code === '0') {
+          const firstChar = payload.charAt(0);
+          // The spinner alphabet is the CLI's and changes between releases — read it in one
+          // tested place (cli-activity.js), never inline here (VIN-148).
+          const isBusy = isBusyTitle(payload);
+          const isIdle = isIdleTitle(payload);
+          log.debug(`[OSC 0] session=${currentId} char=U+${firstChar.charCodeAt(0).toString(16).toUpperCase()} busy=${isBusy} idle=${isIdle} wasBusy=${!!session._cliBusy}`);
+          if (isBusy && !session._cliBusy) {
+            session._cliBusy = true;
+            session._oscIdle = false;
+            log.debug(`[OSC 0] session=${currentId} → BUSY`);
+            liftSessionDone(currentId);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('cli-busy-state', currentId, true);
+            }
+          } else if (isIdle && session._cliBusy) {
+            session._cliBusy = false;
+            session._oscIdle = true;
+            log.debug(`[OSC 0] session=${currentId} → IDLE`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('cli-busy-state', currentId, false);
+            }
+            // Context gauge fast path (VIN-143): a turn just ended, so the .jsonl's last
+            // assistant usage changed. Read only its tail and push the new context, one
+            // read per turn, exactly when the value moves. Never touches the CLI or
+            // ~/.claude/settings.json.
+            pushSessionContext(session, currentId);
+          }
+        }
+      }
+      // Parse iTerm2 OSC 9 sequences (terminated by BEL \x07 or ST \x1b\\)
+      const osc9Matches = data.matchAll(/\x1b\]9;([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
+      for (const osc9 of osc9Matches) {
+        const payload = osc9[1];
+        // OSC 9;4 progress: 4;0; = clear/done, 4;1;N = running at N%, 4;2;N = error, 4;3; = indeterminate
+        if (payload.startsWith('4;')) {
+          const level = payload.split(';')[1];
+          if (level === '0') continue; // 4;0 is also used for clearing, making it unreliable as an idle signal
+          log.debug(`[OSC 9;4] session=${currentId} level=${level} payload="${payload}" wasBusy=${!!session._cliBusy}`);
+          if ((level === '1' || level === '2' || level === '3') && !session._cliBusy) {
+            session._cliBusy = true;
+            session._oscIdle = false;
+            log.debug(`[OSC 9;4] session=${currentId} → BUSY`);
+            liftSessionDone(currentId);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('cli-busy-state', currentId, true);
+            }
+          }
+        } else {
+          // Regular notification (attention, permission, etc.)
+          log.info(`[OSC 9] session=${currentId} message="${payload}"`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('terminal-notification', currentId, payload);
+          }
+        }
+      }
+    }
+
+    // Standalone BEL (not part of an OSC sequence)
+    if (data.includes('\x07') && !data.includes('\x1b]')) {
+      log.info(`[BEL] session=${currentId}`);
+    }
+
+    // Track alternate screen mode (only if data contains the marker)
+    if (data.includes('\x1b[?')) {
+      if (data.includes('\x1b[?1049h') || data.includes('\x1b[?47h')) {
+        session.altScreen = true;
+        log.info(`[altscreen] session=${currentId} ON`);
+      }
+      if (data.includes('\x1b[?1049l') || data.includes('\x1b[?47l')) {
+        session.altScreen = false;
+        log.info(`[altscreen] session=${currentId} OFF`);
+      }
+    }
+
+    // Buffer output (skip resize-triggered redraws for plain terminals)
+    if (!session._suppressBuffer) {
+      session.outputBuffer.push(data);
+      session.outputBufferSize += data.length;
+      while (session.outputBufferSize > MAX_BUFFER_SIZE && session.outputBuffer.length > 1) {
+        session.outputBufferSize -= session.outputBuffer.shift().length;
+      }
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal-data', currentId, data);
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode, signal }) => {
+    // A live Remote Session whose ssh PTY dies may just have dropped its link (laptop slept, Wi-Fi
+    // cut), not exited: don't finalize it as exited until a probe says Claude really ended (VIN-160).
+    // A remote PTY that never connected is a failed launch, not a drop — it falls through to finalize.
+    if (session.remote && !session._stoppedByUser && session._everConnected) {
+      handleRemotePtyExit(session, sessionId, exitCode, signal);
+      return;
+    }
+    finalizePtyExit(session, sessionId, exitCode, signal);
+  });
+}
+
+// Finalize a PTY exit: mark the Session exited, surface a Remote launch failure's diagnostic, tear
+// down the MCP server and tell the renderer. The exit path shared by local Sessions, Plain/Run
+// Terminals, deliberate Stops, and a Remote Session whose Claude really ended (VIN-160).
+function finalizePtyExit(session, sessionId, exitCode, signal) {
+    session.exited = true;
+    // The tail carries the error of whatever actually failed, which may not be Claude.
+    const tail = stripAnsi((session.outputBuffer || []).join('')).slice(-600);
+    log.info(
+      `[pty-exit] session=${sessionId} code=${exitCode} signal=${signal ?? 'none'} ` +
+      `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
+    );
+    // A Remote Session's PTY is the ssh client: an early non-zero exit the user did not ask for is a
+    // spawn failure (unreachable Host, missing tmux/claude, an unauthenticated Account). Run the
+    // Host's prerequisite diagnostic and write its clear message into the terminal instead of
+    // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
+    if (session.remote && !session._stoppedByUser && exitCode !== 0) {
+      const reportId = session.realSessionId || sessionId;
+      Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
+        if (d && d.ok) return;
+        const msg = (d && d.message) || 'The Remote Host could not start the Session.';
+        const fix = d && d.command ? `\r\n\x1b[2mTry: ${d.command}\x1b[0m` : '';
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
+        }
+      }).catch(() => {});
+    }
+
+    // Clean up MCP server
+    const mcpId = session.realSessionId || sessionId;
+    shutdownMcpServer(mcpId);
+    session.mcpServer = null;
+
+    const realId = session.realSessionId || sessionId;
+    const exitInfo = { stoppedByUser: !!session._stoppedByUser, signal: signal ?? null };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
+      // If a fork/plan-accept transition re-keyed this session under realId
+      // but the PTY exited before transition detection ran, also notify the
+      // renderer for the original sessionId so it doesn't stay stuck as "Running".
+      if (realId !== sessionId && activeSessions.has(sessionId)) {
+        mainWindow.webContents.send('process-exited', sessionId, exitCode, exitInfo);
+      }
+    }
+    activeSessions.delete(realId);
+    // Clean up the original key too in case transition detection hasn't run yet
+    activeSessions.delete(sessionId);
+}
+
+// --- Picking remote Sessions back up (VIN-160) ---
+// At startup and whenever a Host turns Reachable, list the live tmux sessions on its dedicated
+// socket and re-attach each in the background — a Session whose renderer is detached — so its State
+// Dot is truthful even if nobody opens it and clicking the row reveals the already-attached
+// terminal. The decisions (what to list, what to attach, what a dropped PTY means) are
+// remote-launch's pure core; this is the adapter that shells out and spawns the headless PTYs.
+function reattachRemoteSessions(host) {
+  if (!host || !host.sshTarget) return;
+  const account = remoteMirror.activeAccount(host);
+  Promise.resolve(remoteHostsIpcModule.sshRun(host, { command: remoteLaunch.listSessionsCommand() }, { connectTimeout: 10 }))
+    .then(res => {
+      // No tmux server (nothing was ever launched here) or an unreachable Host: nothing to pick up.
+      if (!res || (res.code !== 0 && !String(res.stdout || '').trim())) return;
+      const liveIds = remoteLaunch.parseTmuxSessionList(res.stdout);
+      if (!liveIds.length) return;
+      // Already-live Sessions of this Host are skipped; a dropped placeholder is eligible for revival.
+      const attached = [];
+      for (const [id, s] of activeSessions) {
+        if (!s.remote || s.hostId !== host.id || s.exited || s.dropped) continue;
+        attached.push(id);
+        if (s.remoteTmuxId) attached.push(s.remoteTmuxId);
+        if (s.realSessionId) attached.push(s.realSessionId);
+      }
+      for (const id of remoteLaunch.sessionsToReattach(liveIds, attached)) {
+        reattachRemoteSession(host, account, id);
+      }
+    })
+    .catch(e => log.warn(`[remote-reattach] list for ${host.sshTarget} failed: ${e.message}`));
+}
+
+// Spawn a headless ssh PTY that re-attaches one Session's tmux on the Host. It parses OSC for the
+// State Dot and buffers output exactly like a foreground launch (wirePtyHandlers), so clicking the
+// row later replays the buffer and streams live — no restart of Claude. Reviving a Session that had
+// dropped reuses its object (and its last buffered State) rather than starting a second row.
+function reattachRemoteSession(host, account, sessionId) {
+  const existing = activeSessions.get(sessionId);
+  if (existing && !existing.exited && !existing.dropped) return; // already live
+  let args;
+  try {
+    args = remoteLaunch.buildAttachArgs({ sshTarget: host.sshTarget, sessionId });
+  } catch (e) {
+    log.warn(`[remote-reattach] skipping ${sessionId}: ${e.message}`);
+    return;
+  }
+  let ptyProcess;
+  try {
+    ptyProcess = pty.spawn('ssh', args, {
+      name: 'xterm-256color', cols: 120, rows: 30, cwd: os.homedir(),
+      env: {
+        ...cleanPtyEnv,
+        TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
+        SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
+      },
+    });
+  } catch (e) {
+    log.warn(`[remote-reattach] spawn for ${sessionId} failed: ${e.message}`);
+    return;
+  }
+
+  if (existing && existing.dropped) {
+    // Revive in place: keep the buffered output and last State, swap in the fresh PTY.
+    existing.pty = ptyProcess;
+    existing.dropped = false;
+    existing.exited = false;
+    existing.firstResize = true;
+    log.info(`[remote-reattach] revived dropped session=${sessionId} on ${host.sshTarget}`);
+    wirePtyHandlers(ptyProcess, existing, sessionId);
+    return;
+  }
+
+  const descriptor = remoteMirror.sourceDescriptorFor(host, MIRROR_ROOT);
+  const folder = getCachedFolder(sessionId) || null;
+  const session = {
+    pty: ptyProcess, rendererAttached: false, exited: false,
+    outputBuffer: [], outputBufferSize: 0, altScreen: false,
+    projectPath: null, firstResize: true,
+    projectFolder: folder, knownJsonlFiles: new Set(), sessionSlug: null,
+    isPlainTerminal: false, sessionType: 'session', forkFrom: null,
+    mcpServer: null, focusToken: null, _openedAt: Date.now(),
+    remote: true, hostId: host.id, sshTarget: host.sshTarget,
+    sourceId: descriptor.id, remoteTmuxId: sessionId,
+  };
+  activeSessions.set(sessionId, session);
+  log.info(`[remote-reattach] background attach session=${sessionId} on ${host.sshTarget}`);
+  wirePtyHandlers(ptyProcess, session, sessionId);
+}
+
+// A live Remote Session's ssh PTY died: tell a real exit from a dropped link (VIN-160). An
+// Unreachable Host is a drop outright; otherwise probe has-session — a tmux session still there is a
+// dropped client, ssh that couldn't connect is the Host gone, and a connected probe finding no
+// session is Claude's real exit, which finalizes exactly as a local one.
+function handleRemotePtyExit(session, sessionId, exitCode, signal) {
+  const reachable = remoteHostsIpc.getReachability()[session.hostId];
+  const decide = (hasSessionCode) => {
+    const verdict = remoteLaunch.classifyRemotePtyExit({ stoppedByUser: false, reachable, hasSessionCode });
+    if (verdict === 'dropped') markRemoteDropped(session, sessionId);
+    else finalizePtyExit(session, sessionId, exitCode, signal);
+  };
+  if (reachable === false) { decide(null); return; }
+  const host = { id: session.hostId, sshTarget: session.sshTarget };
+  Promise.resolve(remoteHostsIpcModule.sshRun(host, { command: remoteLaunch.hasSessionCommand(session.remoteTmuxId || sessionId) }, { connectTimeout: 10 }))
+    .then(res => decide(res ? res.code : 255))
+    .catch(() => markRemoteDropped(session, sessionId));
+}
+
+// Keep a Session whose link dropped: not exited, not deleted, shown at its last observed State until
+// the Host answers and auto-reattach revives it. No process-exited is sent — that would flip the row
+// to ended (CONTEXT.md, Reachable; VIN-160). The dead PTY is released so input can't hit it.
+function markRemoteDropped(session, sessionId) {
+  session.dropped = true;
+  session.pty = null;
+  log.info(`[remote-drop] session=${sessionId} host=${session.hostId} — link dropped, kept stale for re-attach`);
+}
+
 // --- IPC: open-terminal ---
 ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, sessionOptions) => {
   if (!mainWindow) return { ok: false, error: 'no window' };
@@ -2155,6 +2440,13 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   // Reattach to existing session
   if (activeSessions.has(sessionId)) {
     const session = activeSessions.get(sessionId);
+    // A Remote Session whose link dropped while away: revive its PTY now the user wants it, if the
+    // Host answers (VIN-160). The buffered last State is replayed below either way; the live stream
+    // resumes once the fresh attach connects, or the next Reachable flip picks it up.
+    if (session.remote && session.dropped) {
+      const host = remoteHostsIpc.getHosts().find(h => h.id === session.hostId);
+      if (host) reattachRemoteSession(host, remoteMirror.activeAccount(host), sessionId);
+    }
     session.rendererAttached = true;
     session.firstResize = !session.isPlainTerminal;
 
@@ -2490,149 +2782,7 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   // Binds this Project to its one Run Terminal, and survives the PTY's exit.
   if (sessionType === RUN_TERMINAL_TYPE) runTerminals.set(projectPath, sessionId);
 
-  ptyProcess.onData(data => {
-    const currentId = session.realSessionId || sessionId;
-
-    // Parse OSC sequences (title changes, progress, notifications, etc.)
-    if (data.includes('\x1b]')) {
-      const oscMatches = data.matchAll(/\x1b\](\d+);([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
-      for (const m of oscMatches) {
-        const code = m[1];
-        const payload = m[2].slice(0, 120);
-        // Detect Claude CLI busy state from OSC 0 title (spinner chars = busy, ✳ = idle)
-        if (code === '0') {
-          const firstChar = payload.charAt(0);
-          // The spinner alphabet is the CLI's and changes between releases — read it in one
-          // tested place (cli-activity.js), never inline here (VIN-148).
-          const isBusy = isBusyTitle(payload);
-          const isIdle = isIdleTitle(payload);
-          log.debug(`[OSC 0] session=${currentId} char=U+${firstChar.charCodeAt(0).toString(16).toUpperCase()} busy=${isBusy} idle=${isIdle} wasBusy=${!!session._cliBusy}`);
-          if (isBusy && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            log.debug(`[OSC 0] session=${currentId} → BUSY`);
-            liftSessionDone(currentId);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('cli-busy-state', currentId, true);
-            }
-          } else if (isIdle && session._cliBusy) {
-            session._cliBusy = false;
-            session._oscIdle = true;
-            log.debug(`[OSC 0] session=${currentId} → IDLE`);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('cli-busy-state', currentId, false);
-            }
-            // Context gauge fast path (VIN-143): a turn just ended, so the .jsonl's last
-            // assistant usage changed. Read only its tail and push the new context, one
-            // read per turn, exactly when the value moves. Never touches the CLI or
-            // ~/.claude/settings.json.
-            pushSessionContext(session, currentId);
-          }
-        }
-      }
-      // Parse iTerm2 OSC 9 sequences (terminated by BEL \x07 or ST \x1b\\)
-      const osc9Matches = data.matchAll(/\x1b\]9;([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
-      for (const osc9 of osc9Matches) {
-        const payload = osc9[1];
-        // OSC 9;4 progress: 4;0; = clear/done, 4;1;N = running at N%, 4;2;N = error, 4;3; = indeterminate
-        if (payload.startsWith('4;')) {
-          const level = payload.split(';')[1];
-          if (level === '0') continue; // 4;0 is also used for clearing, making it unreliable as an idle signal
-          log.debug(`[OSC 9;4] session=${currentId} level=${level} payload="${payload}" wasBusy=${!!session._cliBusy}`);
-          if ((level === '1' || level === '2' || level === '3') && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            log.debug(`[OSC 9;4] session=${currentId} → BUSY`);
-            liftSessionDone(currentId);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('cli-busy-state', currentId, true);
-            }
-          }
-        } else {
-          // Regular notification (attention, permission, etc.)
-          log.info(`[OSC 9] session=${currentId} message="${payload}"`);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('terminal-notification', currentId, payload);
-          }
-        }
-      }
-    }
-
-    // Standalone BEL (not part of an OSC sequence)
-    if (data.includes('\x07') && !data.includes('\x1b]')) {
-      log.info(`[BEL] session=${currentId}`);
-    }
-
-    // Track alternate screen mode (only if data contains the marker)
-    if (data.includes('\x1b[?')) {
-      if (data.includes('\x1b[?1049h') || data.includes('\x1b[?47h')) {
-        session.altScreen = true;
-        log.info(`[altscreen] session=${currentId} ON`);
-      }
-      if (data.includes('\x1b[?1049l') || data.includes('\x1b[?47l')) {
-        session.altScreen = false;
-        log.info(`[altscreen] session=${currentId} OFF`);
-      }
-    }
-
-    // Buffer output (skip resize-triggered redraws for plain terminals)
-    if (!session._suppressBuffer) {
-      session.outputBuffer.push(data);
-      session.outputBufferSize += data.length;
-      while (session.outputBufferSize > MAX_BUFFER_SIZE && session.outputBuffer.length > 1) {
-        session.outputBufferSize -= session.outputBuffer.shift().length;
-      }
-    }
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal-data', currentId, data);
-    }
-  });
-
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    session.exited = true;
-    // The tail carries the error of whatever actually failed, which may not be Claude.
-    const tail = stripAnsi((session.outputBuffer || []).join('')).slice(-600);
-    log.info(
-      `[pty-exit] session=${sessionId} code=${exitCode} signal=${signal ?? 'none'} ` +
-      `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
-    );
-    // A Remote Session's PTY is the ssh client: an early non-zero exit the user did not ask for is a
-    // spawn failure (unreachable Host, missing tmux/claude, an unauthenticated Account). Run the
-    // Host's prerequisite diagnostic and write its clear message into the terminal instead of
-    // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
-    if (session.remote && !session._stoppedByUser && exitCode !== 0) {
-      const reportId = session.realSessionId || sessionId;
-      Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
-        if (d && d.ok) return;
-        const msg = (d && d.message) || 'The Remote Host could not start the Session.';
-        const fix = d && d.command ? `\r\n\x1b[2mTry: ${d.command}\x1b[0m` : '';
-        if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
-        }
-      }).catch(() => {});
-    }
-
-    // Clean up MCP server
-    const mcpId = session.realSessionId || sessionId;
-    shutdownMcpServer(mcpId);
-    session.mcpServer = null;
-
-    const realId = session.realSessionId || sessionId;
-    const exitInfo = { stoppedByUser: !!session._stoppedByUser, signal: signal ?? null };
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
-      // If a fork/plan-accept transition re-keyed this session under realId
-      // but the PTY exited before transition detection ran, also notify the
-      // renderer for the original sessionId so it doesn't stay stuck as "Running".
-      if (realId !== sessionId && activeSessions.has(sessionId)) {
-        mainWindow.webContents.send('process-exited', sessionId, exitCode, exitInfo);
-      }
-    }
-    activeSessions.delete(realId);
-    // Clean up the original key too in case transition detection hasn't run yet
-    activeSessions.delete(sessionId);
-  });
+  wirePtyHandlers(ptyProcess, session, sessionId);
 
   if (sessionOptions?.forkFrom) {
     log.info(`[fork-spawn] tempId=${sessionId} forkFrom=${sessionOptions.forkFrom} folder=${projectFolder} knownFiles=${knownJsonlFiles.size}`);
@@ -2644,7 +2794,8 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 // --- IPC: terminal-input (fire-and-forget) ---
 ipcMain.on('terminal-input', (_event, sessionId, data) => {
   const session = activeSessions.get(sessionId);
-  if (session && !session.exited) {
+  // A dropped Remote Session has no live PTY (its link went away): swallow input until it re-attaches.
+  if (session && !session.exited && !session.dropped) {
     session.pty.write(data);
   }
 });
@@ -2652,7 +2803,7 @@ ipcMain.on('terminal-input', (_event, sessionId, data) => {
 // --- IPC: terminal-resize (fire-and-forget) ---
 ipcMain.on('terminal-resize', (_event, sessionId, cols, rows) => {
   const session = activeSessions.get(sessionId);
-  if (session && !session.exited) {
+  if (session && !session.exited && !session.dropped) {
     // For plain terminals, suppress buffering during resize to avoid
     // accumulating prompt redraws that pollute reattach replay
     if (session.isPlainTerminal) session._suppressBuffer = true;

@@ -9,6 +9,7 @@ const { createRemoteHostsIpc } = require('../remote-hosts-ipc');
 function harness({ reachable = {}, dirOut = {} } = {}) {
   const store = {};
   const sent = [];
+  const becameReachable = [];
   let refreshes = 0;
   let tick = null;
   const ipc = createRemoteHostsIpc({
@@ -16,6 +17,7 @@ function harness({ reachable = {}, dirOut = {} } = {}) {
     setSetting: (k, v) => { store[k] = v; },
     send: (...args) => sent.push(args),
     onReachabilityChange: () => { refreshes++; },
+    onHostReachable: (host) => { becameReachable.push(host.id); },
     run: async (host, step) => {
       // The dir check (VIN-157) answers from a per-host, per-path table; every other step is the
       // reachability probe, which is a zero exit exactly when the host is reachable.
@@ -28,7 +30,7 @@ function harness({ reachable = {}, dirOut = {} } = {}) {
     clearIntervalFn: () => { tick = null; },
   });
   return {
-    ipc, store, sent,
+    ipc, store, sent, becameReachable,
     refreshCount: () => refreshes,
     runTick: () => tick && tick(), hasTimer: () => tick !== null,
   };
@@ -73,6 +75,33 @@ test('a reachability flip refreshes the sidebar so greying lands within one prob
   assert.equal(refreshCount(), 1, 'the undefined→reachable flip nudged a projects refresh');
   await ipc.probeHostsOnce();
   assert.equal(refreshCount(), 1, 'a steady reachability does not re-fetch projects');
+});
+
+test('a Host turning Reachable fires onHostReachable so its live Sessions can be re-attached (VIN-160)', async () => {
+  const { ipc, store, becameReachable } = harness({ reachable: { 'mac-mini': true } });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.probeHostsOnce();
+  assert.deepEqual(becameReachable, ['h1'], 'the first (undefined→reachable) flip fires it');
+  await ipc.probeHostsOnce();
+  assert.deepEqual(becameReachable, ['h1'], 'a steady-reachable probe does not re-fire');
+});
+
+test('a Host going Unreachable does not fire onHostReachable (VIN-160)', async () => {
+  const reachable = { 'mac-mini': true };
+  const { ipc, store, becameReachable } = harness({ reachable });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.probeHostsOnce();              // undefined → reachable → fires
+  reachable['mac-mini'] = false;
+  await ipc.probeHostsOnce();              // reachable → unreachable → must not fire
+  reachable['mac-mini'] = true;
+  await ipc.probeHostsOnce();              // unreachable → reachable → fires again
+  assert.deepEqual(becameReachable, ['h1', 'h1']);
+});
+
+test('createRemoteHostsIpc tolerates no onHostReachable callback', () => {
+  assert.doesNotThrow(() => createRemoteHostsIpc({
+    getSetting: () => {}, setSetting: () => {}, send: () => {}, onReachabilityChange: () => {},
+  }));
 });
 
 test('createRemoteHostsIpc refuses to build without an onReachabilityChange callback', () => {
