@@ -38,6 +38,16 @@ function createSource({ id, projectsDir, accountId, hostId = null }) {
     qualifyFolder(folder) {
       return resolvedHostId ? `ssh://${resolvedHostId}/${folder}` : folder;
     },
+    // The inverse of qualifyFolder: a database folder key back to the on-disk folder name, so a
+    // reader (the JSONL viewer) can find the file under this source's projectsDir. Identity
+    // locally; a remote source strips exactly its own host prefix, and leaves a key that is not
+    // its own untouched rather than mangling it.
+    rawFolder(folderKey) {
+      if (!resolvedHostId) return folderKey;
+      const prefix = `ssh://${resolvedHostId}/`;
+      const key = String(folderKey);
+      return key.startsWith(prefix) ? key.slice(prefix.length) : folderKey;
+    },
     // A folder identifier belongs to this source. Lets eviction find a source's
     // folders in the Account-agnostic cache_meta / search tables.
     //

@@ -190,3 +190,41 @@ test('unregistering a source mid-scan cancels it so the worker cannot resurrect 
   assert.equal(db._meta.size, 0);
   assert.equal(db._search.length, 0);
 });
+
+test('a remote Project group carries remote/hostId and a capability set that hides unsupported buttons', () => {
+  const { local, remote, FOLDER } = setup();
+  sessionCache.refreshFolder(FOLDER, local);
+  sessionCache.refreshFolder(FOLDER, remote);
+
+  const projects = sessionCache.buildProjectsFromCache();
+  const localProj = projects.find(p => p.projectPath === '/home/me/work/proj');
+  const remoteProj = projects.find(p => p.projectPath === 'ssh://mac-mini/home/me/work/proj');
+
+  // Local is unchanged — not remote, no capability gate (the renderer treats absent as allowed).
+  assert.equal(localProj.remote, false);
+  assert.equal(localProj.hostId, null);
+
+  // Remote declares its Host and only Sessions listing; Run / External IDE / Project Folder /
+  // Project Viewer are not declared, so the UI hides them (ADR 0014 spirit).
+  assert.equal(remoteProj.remote, true);
+  assert.equal(remoteProj.hostId, 'mac-mini');
+  assert.equal(remoteProj.capabilities.run, false);
+  assert.equal(remoteProj.capabilities.externalIde, false);
+  assert.equal(remoteProj.capabilities.projectFolder, false);
+  assert.equal(remoteProj.capabilities.projectViewer, false);
+});
+
+test('folderDiskPath resolves a remote session file to the mirror dir, a local one to the local dir', () => {
+  const { local, remote, FOLDER } = setup();
+  sessionCache.refreshFolder(FOLDER, local);
+  sessionCache.refreshFolder(FOLDER, remote);
+
+  const localKey = local.qualifyFolder(FOLDER);
+  const remoteKey = remote.qualifyFolder(FOLDER);
+
+  assert.equal(sessionCache.sourceForFolder(remoteKey).id, remote.id);
+  assert.equal(sessionCache.sourceForFolder(localKey).id, local.id);
+
+  assert.equal(sessionCache.folderDiskPath(localKey), path.join(local.projectsDir, FOLDER));
+  assert.equal(sessionCache.folderDiskPath(remoteKey), path.join(remote.projectsDir, FOLDER));
+});

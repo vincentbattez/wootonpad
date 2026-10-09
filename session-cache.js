@@ -285,6 +285,50 @@ function populateCacheFromFilesystem(sourceOrId) {
   }
 }
 
+// The capabilities a Remote Project declares (ADR 0014 spirit): Sessions are listed and their
+// JSONL is readable from the mirror, but nothing else is wired yet. The renderer hides what is not
+// declared — no Run, External IDE, Project Folder or Project Viewer button. A local Project carries
+// no gate; the renderer treats an absent capability as allowed, so local behaviour is unchanged.
+function remoteProjectCapabilities() {
+  return { run: false, externalIde: false, projectFolder: false, projectViewer: false };
+}
+
+// A fresh sidebar Project group, carrying the Host facts of the Source it came from so the renderer
+// can draw the remote icon (hostId), hide unsupported buttons (capabilities) and — once the payload
+// is annotated with the Host store — grey it when Unreachable. A local Source leaves `remote` false
+// and `hostId` null, so every persisted local row renders exactly as before.
+function newProjectGroup(projectPath, source) {
+  const remote = !!(source && source.hostId);
+  return {
+    folder: encodeProjectPath(projectPath),
+    projectPath,
+    sessions: [],
+    remote,
+    hostId: (source && source.hostId) || null,
+    capabilities: remote ? remoteProjectCapabilities() : null,
+  };
+}
+
+/** The registered source that owns a database folder key (ssh://… remote, bare local), or null. */
+function sourceForFolder(folderKey) {
+  for (const source of sources.values()) {
+    if (source.ownsFolder(folderKey)) return source;
+  }
+  return null;
+}
+
+/**
+ * The on-disk directory a folder key's `.jsonl` files live in: the mirror for a Remote Host,
+ * the local projects dir for the Local Host. Lets a reader (the JSONL viewer) reach a remote
+ * Session's transcript off the mirror instead of the local Account's dir. Falls back to the local
+ * source for an unqualified key whose source is gone, so local reads never break.
+ */
+function folderDiskPath(folderKey) {
+  const source = sourceForFolder(folderKey) || localSource();
+  if (!source) return null;
+  return path.join(source.projectsDir, source.rawFolder(folderKey));
+}
+
 /** Build projects response from cached data, unioning every registered source */
 function buildProjectsFromCache() {
   const metaMap = getAllMeta();
@@ -331,11 +375,7 @@ function buildProjectsFromCache() {
       };
       s.title = resolveSessionTitle(s);
       if (!projectMap.has(row.projectPath)) {
-        projectMap.set(row.projectPath, {
-          folder: encodeProjectPath(row.projectPath),
-          projectPath: row.projectPath,
-          sessions: [],
-        });
+        projectMap.set(row.projectPath, newProjectGroup(row.projectPath, source));
       }
       projectMap.get(row.projectPath).sessions.push(s);
     }
@@ -362,11 +402,7 @@ function buildProjectsFromCache() {
         if (!projectPath) continue;
         if (hiddenProjects.has(projectPath)) continue;
         if (!projectMap.has(projectPath)) {
-          projectMap.set(projectPath, {
-            folder: encodeProjectPath(projectPath),
-            projectPath,
-            sessions: [],
-          });
+          projectMap.set(projectPath, newProjectGroup(projectPath, source));
         }
       }
     } catch {}
@@ -378,11 +414,8 @@ function buildProjectsFromCache() {
     if (!session.projectPath) continue;
     if (hiddenProjects.has(session.projectPath)) continue;
     if (!projectMap.has(session.projectPath)) {
-      projectMap.set(session.projectPath, {
-        folder: encodeProjectPath(session.projectPath),
-        projectPath: session.projectPath,
-        sessions: [],
-      });
+      // A Plain Terminal runs on this machine, so it belongs to the Local Host.
+      projectMap.set(session.projectPath, newProjectGroup(session.projectPath, localSource()));
     }
     const proj = projectMap.get(session.projectPath);
     if (!proj.sessions.some(s => s.sessionId === sessionId)) {
@@ -566,6 +599,8 @@ module.exports = {
   getSource,
   getSources,
   localSource,
+  sourceForFolder,
+  folderDiskPath,
   UnknownSourceError,
   readSessionFile,
   readFolderFromFilesystem,

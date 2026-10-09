@@ -34,3 +34,14 @@ test('a null or empty project path is passed through untouched on any source', (
   assert.equal(remote.qualifyProjectPath(null), null);
   assert.equal(remote.qualifyProjectPath(''), '');
 });
+
+test('rawFolder inverts qualifyFolder so a qualified key maps back to the on-disk folder name', () => {
+  const local = createSource({ id: 'default', projectsDir: '/local', accountId: 'default' });
+  const remote = createSource({ id: 'ssh://h', projectsDir: '/m', accountId: 'a', hostId: 'h' });
+  const folder = '-home-me-work-proj';
+  // Local is identity both ways; remote strips exactly its own host prefix.
+  assert.equal(local.rawFolder(local.qualifyFolder(folder)), folder);
+  assert.equal(remote.rawFolder(remote.qualifyFolder(folder)), folder);
+  // A key that is not this source's is left as-is rather than mangled.
+  assert.equal(remote.rawFolder(folder), folder);
+});
