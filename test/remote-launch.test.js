@@ -14,6 +14,8 @@ const {
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
+  listSessionsCommand, parseTmuxSessionList, hasSessionCommand,
+  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit,
 } = require('../remote-launch');
 
 // --- an independent single-quote oracle -------------------------------------------------------
@@ -318,4 +320,112 @@ test('planRemoteTmuxRenames — only the re-keyed Sessions, in order, from a mix
   assert.deepEqual(
     planRemoteTmuxRenames([settled, forked]),
     [{ session: forked, oldId: 't2', newId: 'r2' }]);
+});
+
+// --- picking Sessions back up: discovery (VIN-160) --------------------------------------------
+// At startup and whenever a Host turns Reachable, WootonPad lists the live tmux sessions on the
+// Host's dedicated socket and re-attaches each in the background. The discovery command and its
+// output parsing are the pure seam; the adapter (main.js) shells out and spawns the PTYs.
+
+test('listSessionsCommand — lists the wootonpad socket through a login shell, name only', () => {
+  const cmd = listSessionsCommand();
+  // Runs under $SHELL -lc so tmux is on the login PATH, exactly like every other remote command.
+  assert.match(cmd, /^\$SHELL -lc '/);
+  const inner = unSingleQuote(cmd.slice('$SHELL -lc '.length));
+  assert.match(inner, /^tmux -L wootonpad list-sessions /);
+  // -F '#{session_name}' so only the session names come back, one per line — nothing to parse off
+  // the default verbose format.
+  assert.match(inner, /-F '#\{session_name\}'/);
+});
+
+test('parseTmuxSessionList — reads the Session ids out of the wp- names', () => {
+  assert.deepEqual(parseTmuxSessionList('wp-abc\nwp-3f2a-9c1d-44\n'), ['abc', '3f2a-9c1d-44']);
+});
+
+test('parseTmuxSessionList — empty output (no server / no sessions) is no Sessions', () => {
+  assert.deepEqual(parseTmuxSessionList(''), []);
+  assert.deepEqual(parseTmuxSessionList('\n\n'), []);
+});
+
+test('parseTmuxSessionList — a non-wp session on the socket is ignored', () => {
+  // Another tool could in principle share the socket; only wp-<id> names are WootonPad Sessions.
+  assert.deepEqual(parseTmuxSessionList('wp-keep\nscratch\nwp-also'), ['keep', 'also']);
+});
+
+test('parseTmuxSessionList — a wp- name that is not a bare token is skipped (never spliced raw later)', () => {
+  // The id is later interpolated unquoted into an attach command, so a non-token name is dropped
+  // here rather than trusted — belt and braces with assertSafeSessionId downstream.
+  assert.deepEqual(parseTmuxSessionList('wp-ok\nwp-a b\nwp-a;b'), ['ok']);
+});
+
+test('hasSessionCommand — asks the socket whether the Session is still alive, login-shell wrapped', () => {
+  const cmd = hasSessionCommand('sess-1');
+  assert.match(cmd, /^\$SHELL -lc '/);
+  const inner = unSingleQuote(cmd.slice('$SHELL -lc '.length));
+  assert.match(inner, /^tmux -L wootonpad has-session -t wp-sess-1$/);
+});
+
+test('hasSessionCommand — rejects an unsafe id (it is spliced into the remote command)', () => {
+  assert.throws(() => hasSessionCommand("x'y"), /session id/i);
+});
+
+// --- picking Sessions back up: the background re-attach argv -----------------------------------
+
+test('buildAttachArgs — attaches the existing tmux session, forcing a PTY', () => {
+  const args = buildAttachArgs({ sshTarget: 'mac-mini', sessionId: 'sess-1' });
+  assert.ok(args.includes('-tt'), 'attach needs a PTY — tmux attach requires a terminal');
+  const remoteCmd = args[args.length - 1];
+  const inner = unSingleQuote(remoteCmd.slice('$SHELL -lc '.length));
+  // attach-session, never new-session: a re-attach must find the running Claude, never start one.
+  assert.match(inner, /^tmux -L wootonpad attach-session -t wp-sess-1$/);
+});
+
+test('buildAttachArgs — carries BatchMode and never relaxes host-key checking', () => {
+  const args = buildAttachArgs({ sshTarget: 'mac-mini', sessionId: 'sess-1' });
+  assert.ok(args.includes('BatchMode=yes'));
+  assert.ok(!args.some(a => /accept-new|StrictHostKeyChecking=no/.test(a)));
+});
+
+test('buildAttachArgs — a hostile sshTarget is rejected before it reaches argv', () => {
+  assert.throws(() => buildAttachArgs({ sshTarget: '-oProxyCommand=evil', sessionId: 's' }), /SSH target/i);
+});
+
+// --- picking Sessions back up: which to attach ------------------------------------------------
+
+test('sessionsToReattach — the live tmux Sessions not already attached locally', () => {
+  assert.deepEqual(sessionsToReattach(['a', 'b', 'c'], ['b']), ['a', 'c']);
+});
+
+test('sessionsToReattach — all already attached means nothing to do', () => {
+  assert.deepEqual(sessionsToReattach(['a', 'b'], ['a', 'b']), []);
+});
+
+test('sessionsToReattach — a duplicate live id is attached once', () => {
+  assert.deepEqual(sessionsToReattach(['a', 'a', 'b'], []), ['a', 'b']);
+});
+
+// --- a dropped SSH is not an exit (VIN-160) ---------------------------------------------------
+// When a remote Session's ssh PTY dies, the decision is: did Claude really exit inside tmux, or
+// did the link just drop (laptop slept, Wi-Fi cut)? A dropped link keeps the Session, stale, to be
+// re-attached once the Host answers; a real exit ends it. The adapter runs the has-session probe;
+// this pure function reads its result.
+
+test('classifyRemotePtyExit — Stop (user-killed tmux) is a real exit', () => {
+  assert.equal(classifyRemotePtyExit({ stoppedByUser: true, reachable: true, hasSessionCode: 1 }), 'exited');
+});
+
+test('classifyRemotePtyExit — an Unreachable Host is a dropped link, never an exit', () => {
+  assert.equal(classifyRemotePtyExit({ stoppedByUser: false, reachable: false, hasSessionCode: null }), 'dropped');
+});
+
+test('classifyRemotePtyExit — the tmux session still lives (probe 0): the client dropped, not Claude', () => {
+  assert.equal(classifyRemotePtyExit({ stoppedByUser: false, reachable: true, hasSessionCode: 0 }), 'dropped');
+});
+
+test('classifyRemotePtyExit — ssh could not connect (255) is a dropped link even if reachability is stale', () => {
+  assert.equal(classifyRemotePtyExit({ stoppedByUser: false, reachable: undefined, hasSessionCode: 255 }), 'dropped');
+});
+
+test('classifyRemotePtyExit — reachable Host, tmux session gone (probe 1): Claude really exited', () => {
+  assert.equal(classifyRemotePtyExit({ stoppedByUser: false, reachable: true, hasSessionCode: 1 }), 'exited');
 });

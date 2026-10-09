@@ -171,6 +171,80 @@ function buildRenameArgs({ sshTarget, oldSessionId, newSessionId }) {
   return sshInvoke(sshTarget, loginShell(`tmux -L ${TMUX_SOCKET} rename-session -t ${from} ${to}`));
 }
 
+// ── Picking Sessions back up (VIN-160) ───────────────────────────────
+// The point of a Remote Host: close the laptop, come back later, find every Session where it was.
+// At startup and whenever a Host turns Reachable, WootonPad lists the live tmux sessions on the
+// Host's socket and re-attaches each in the background — so its State Dot is truthful even if nobody
+// opens it. These are the parts worth testing away from the network: the discovery command, how its
+// output is read, the background attach argv, which Sessions still need attaching, and — when a
+// remote PTY dies — whether it was a real exit or just a dropped link.
+
+// List the live tmux sessions on the Host's dedicated socket, name only (one per line), so the
+// adapter can parse ids without reading tmux's verbose default format. Login-shell wrapped like
+// every other remote command, so tmux is found on the login PATH. tmux exits non-zero with "no
+// server running" when there is nothing on the socket — the adapter treats that as no Sessions.
+function listSessionsCommand() {
+  return loginShell(`tmux -L ${TMUX_SOCKET} list-sessions -F '#{session_name}'`);
+}
+
+// Read the Session ids out of the wp-<id> names list-sessions printed. A name that is not wp-<bare
+// token> is skipped: another tool could share the socket, and the id is later spliced unquoted into
+// an attach command, so a non-token name is dropped here rather than trusted (SESSION_ID_RE).
+function parseTmuxSessionList(stdout) {
+  const ids = [];
+  for (const line of String(stdout || '').split('\n')) {
+    const name = line.trim();
+    if (!name.startsWith('wp-')) continue;
+    const id = name.slice('wp-'.length);
+    if (SESSION_ID_RE.test(id)) ids.push(id);
+  }
+  return ids;
+}
+
+// Ask the socket whether a Session's tmux session is still alive (has-session exits 0 if it is,
+// non-zero if not). Used after a remote PTY dies to tell a real exit from a dropped link.
+function hasSessionCommand(sessionId) {
+  return loginShell(`tmux -L ${TMUX_SOCKET} has-session -t ${tmuxSessionName(sessionId)}`);
+}
+
+// The ssh argv that re-attaches a Session's tmux in the background. attach-session, never
+// new-session: a re-attach must find the running Claude and never start a new one. Forces a PTY
+// (`-tt`) because tmux attach needs a terminal; the session env (TERM_PROGRAM) and its options were
+// set at creation and are inherited, so nothing is re-sent here.
+function buildAttachArgs({ sshTarget, sessionId }) {
+  const name = tmuxSessionName(sessionId);
+  return sshInvoke(sshTarget, loginShell(`tmux -L ${TMUX_SOCKET} attach-session -t ${name}`), { tty: true });
+}
+
+// The live tmux Sessions that are not already attached locally — what the adapter must re-attach.
+// Deduped, order preserved, so a Host answering twice in quick succession attaches each id once.
+function sessionsToReattach(liveSessionIds, activeSessionIds) {
+  const active = new Set(activeSessionIds);
+  const out = [];
+  const seen = new Set();
+  for (const id of liveSessionIds) {
+    if (active.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push(id);
+  }
+  return out;
+}
+
+// ── A dropped SSH is not an exit ──────────────────────────────────────
+// When a remote Session's ssh PTY dies, did Claude exit inside tmux, or did the link just drop (the
+// laptop slept, Wi-Fi was cut)? A real exit ends the Session; a dropped link keeps it, stale, to be
+// re-attached once the Host answers (CONTEXT.md, Reachable; the issue). Stop killing the tmux
+// session is a deliberate exit. Otherwise the adapter probes has-session: a session that still
+// lives (0) means our client dropped, not Claude; ssh that could not connect (255) is the Host gone;
+// a connected probe that finds no session is Claude's real exit.
+function classifyRemotePtyExit({ stoppedByUser, reachable, hasSessionCode }) {
+  if (stoppedByUser) return 'exited';
+  if (reachable === false) return 'dropped';
+  if (hasSessionCode === 0) return 'dropped';
+  if (hasSessionCode === 255) return 'dropped';
+  return 'exited';
+}
+
 // ── The re-key decision ──────────────────────────────────────────────
 // After a Host's mirror changes, fork / plan-accept detection may have re-keyed some of its live
 // remote Sessions. These two pure functions are the decision the adapter wires around its I/O: what
@@ -202,4 +276,6 @@ module.exports = {
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
+  listSessionsCommand, parseTmuxSessionList, hasSessionCommand,
+  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit,
 };
