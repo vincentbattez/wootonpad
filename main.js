@@ -25,7 +25,8 @@ const { isBusyTitle, isIdleTitle } = require('./cli-activity');
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
-const { createProjectGit } = require('./project-git');
+const { createProjectGit, NETWORK_TIMEOUT_MS } = require('./project-git');
+const remoteGit = require('./remote-git');
 const remoteHostsIpcModule = require('./remote-hosts-ipc');
 const remoteLaunch = require('./remote-launch');
 const { createSource } = require('./session-source');
@@ -224,22 +225,53 @@ function projectExecFile(argv, cwd, options = {}) {
   return ['wsl.exe', wslExecArgs(distro, cwd, argv), rest];
 }
 
-// projectExecFile decides where git runs — inside the distribution for a WSL-backed account.
+// A git command against a Remote Project (cwd is an ssh://<hostId>/<path> key) runs on its Host over
+// SSH, through the Host's login shell (VIN-159, ADR 0016, ADR 0017). This is the same seam a WSL
+// account redirects — git stays one argv interface (ADR 0007), only where it runs changes. It rides
+// the Host's multiplexed master (resolved.args already carries ControlMaster/ControlPath/
+// ControlPersist, built in remote-hosts.sshOptions). The shell-out itself — the control-socket dir,
+// the BatchMode/askpass safety, and the { code, stdout, stderr } shape — is remote-hosts-ipc's one
+// SSH runner (ADR 0016-remote-hosts-over-ssh: that adapter is the only part that shells out), reused
+// here with git's larger output buffer so the boundary is maintained in exactly one place.
+function runRemoteGit(resolved, timeout) {
+  return remoteHostsIpcModule.runSsh(resolved.args, { timeout, maxBuffer: GIT_MAX_BUFFER });
+}
+
+// projectExecFile decides where git runs locally — inside the distribution for a WSL-backed account.
+// A Remote Project key routes to its Host over SSH instead; a local path falls through unchanged.
 const projectGit = createProjectGit({
-  run: (argv, cwd, { timeout } = {}) => new Promise(resolve => {
-    const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
-      encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
-    });
-    execFile(file, args, options, (err, stdout, stderr) => {
-      resolve({
-        // A timeout kills the child without an exit code; git's own codes are numbers.
-        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-        stdout,
-        // A spawn failure or timeout prints no stderr; its message is all the user gets.
-        stderr: stderr || (err ? err.message : ''),
+  run: (argv, cwd, { timeout } = {}) => {
+    // Only a Remote Project key pays for a Host-store read; a local path is a cheap regex miss.
+    const parsed = remoteGit.parseRemoteKey(cwd);
+    if (parsed) {
+      // The multiplexing options (ControlMaster/ControlPath/ControlPersist) are built once, in
+      // remote-hosts.sshOptions, from the Host's control socket path. resolveRemoteGitArgs derives
+      // that path from the Host it already resolved, so the caller neither fabricates a stub Host nor
+      // looks the id up a second time.
+      const resolved = remoteGit.resolveRemoteGitArgs(cwd, argv, remoteHostsIpc.getHosts(), {
+        controlPathFor: remoteHostsIpcModule.controlPathFor,
+      });
+      // A remote read crosses SSH, so it rides the network budget (30s), never the 5s local tier a
+      // caller like lightSnapshot passes for on-disk git — a cold master or slow link needs the room.
+      if (resolved) return runRemoteGit(resolved, Math.max(timeout || 0, NETWORK_TIMEOUT_MS));
+      // Remote key whose Host was removed: fall through. projectExecFile on an ssh:// path fails
+      // fast, which lightSnapshot renders as a null branch — the badge keeps its last value.
+    }
+    return new Promise(resolve => {
+      const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
+        encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
+      });
+      execFile(file, args, options, (err, stdout, stderr) => {
+        resolve({
+          // A timeout kills the child without an exit code; git's own codes are numbers.
+          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+          stdout,
+          // A spawn failure or timeout prints no stderr; its message is all the user gets.
+          stderr: stderr || (err ? err.message : ''),
+        });
       });
     });
-  }),
+  },
 });
 
 // Build stats in the same format as stats-cache.json using Switchboard's own DB.
@@ -819,8 +851,50 @@ function cacheProjectSize(projectPath) {
   }).catch(() => {});
 }
 
+// A Remote Project's sidebar badge: the light Git Snapshot read from git on its Host over SSH
+// (VIN-159). Docker containers and the Project size are out of a Remote Host's v1 (ADR 0016), so
+// only git runs — no du, no docker compose. Served stale-while-unreachable: the last good Snapshot
+// persists in the same project-info cache and is returned at once, and while the Host is known
+// Unreachable no fresh read is even attempted, so an offline Mini never spams the log (CONTEXT.md,
+// Remote Project). A fresh read whose git did not answer keeps the last Snapshot rather than
+// blanking the badge.
+function getRemoteProjectInfo(projectKey, parsed) {
+  const send = (channel, ...payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...payload);
+  };
+  const cacheKey = 'project-info:' + projectKey;
+  const cached = getSetting(cacheKey);
+  const base = cached?.data ?? null;
+  const gitFresh = cached?.fetchedAt && (Date.now() - cached.fetchedAt) < (cached.ttl || PROJECT_INFO_TTL_MS);
+  const reachable = remoteHostsIpc.getReachability()[parsed.hostId];
+
+  // The dial/stale decision is the pure planRemoteSnapshot policy; main.js keeps only the wiring.
+  if (!gitFresh && remoteGit.planRemoteSnapshot(base, reachable).dial) {
+    send('project-info-loading', projectKey);
+    projectGit.lightSnapshot(projectKey).then(snap => {
+      const { updated, snapshot } = remoteGit.planRemoteSnapshot(base, reachable, snap);
+      if (!updated) {
+        // A reachable (or not-yet-probed) Host answered with no branch — a cold ControlMaster, a
+        // transient SSH drop, or a non-git dir. Keep the stale Snapshot, but refresh its timestamp so
+        // the TTL quiets the next refresh: a flaky-but-reachable Host is dialed at most once per TTL,
+        // never on every sidebar refresh. This is the same cache-for-TTL parity the local handler has.
+        setSetting(cacheKey, { data: base, fetchedAt: Date.now(), ttl: infoJitter() });
+        send('project-info-updated', projectKey, base);
+        return;
+      }
+      const data = { ...snapshot, containers: [] };
+      setSetting(cacheKey, { data, fetchedAt: Date.now(), ttl: infoJitter() });
+      send('project-info-updated', projectKey, data);
+    }).catch(() => send('project-info-updated', projectKey, base));
+  }
+  return base;
+}
+
 ipcMain.handle('get-project-info', (_event, projectPath) => {
-  if (!projectPath || !fs.existsSync(hostPath(projectPath))) return null;
+  if (!projectPath) return null;
+  const remote = remoteGit.parseRemoteKey(projectPath);
+  if (remote) return getRemoteProjectInfo(projectPath, remote);
+  if (!fs.existsSync(hostPath(projectPath))) return null;
   const cacheKey = 'project-info:' + projectPath;
   const cached = getSetting(cacheKey);
   const cachedSize = getSetting('project-size:' + projectPath);
