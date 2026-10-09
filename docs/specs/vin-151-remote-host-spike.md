@@ -14,8 +14,12 @@ Run the harness **on the MacBook** (the Local Host), the machine that actually r
 ./scripts/vin-151-verify.sh all        # or: osc9 | path | detach | scrollback
 ```
 
-The launch shape under test lives in one place — `tmux_launch()` in `scripts/vin-151-verify.sh`
-— so a reviewer can check it against ADR 0016 without reading the whole script:
+The ADR 0016 launch shape under test is defined once — `tmux_launch()` in
+`scripts/vin-151-verify.sh` — and the OSC (`osc9`) and detach checks both go through it, so a
+reviewer can check that shape against ADR 0016 without reading the whole script. (The smaller
+helpers `path_check()` and `push_emitter()` run their own plain `ssh … $SHELL -lc …` commands:
+they only probe PATH or copy a file, and do not launch a tmux session, so they deliberately do
+not carry the tmux options.)
 
 ```
 ssh -tt -o BatchMode=yes mac-mini -- $SHELL -lc '
@@ -43,20 +47,30 @@ no `tmux`, no Keychain, and no Chrome — so it could not run the checks itself.
 
 ## Acceptance criteria → checks
 
-The busy / needs-input vocabulary these map to is already fixed in
-`src/vue/features/sessions/session-state.mjs`: **OSC 0 title spinner / OSC 9;4 → busy (working)**,
-**OSC 9 → attention (needsInput)**. The captures must carry exactly those sequences.
+The Working / Needs Input vocabulary these map to is already fixed in
+`src/vue/features/sessions/session-state.mjs`: **OSC 0 title spinner / OSC 9;4 → working**,
+**OSC 9 → needsInput**. The captures must carry exactly those sequences.
 
-### AC1 — OSC 0 titles (spinner / idle) reach the client
+### AC1 — OSC 0 titles (spinner / sleeping) reach the client
 - Command: `./scripts/vin-151-verify.sh osc9`
 - Capture: `vin-151-captures/osc.raw` (inspect with `cat -v osc.raw`)
 - Proven by: the string `VIN151-OSC0-TITLE` appearing in the raw client stream.
+- **Coverage caveat:** the emitter (`/tmp/vin151-emit.sh`) is a `printf` stub, not Claude. This
+  check proves the *transport* seam — that tmux + `ssh -tt` forward a synthetic OSC 0 to the
+  client — but it does **not** prove that Claude's own title emissions survive it. To close that
+  gap, drive a real `claude` invocation through `tmux_launch` and scan its capture; until then
+  AC1 is only partially covered and Claude's real emissions remain unverified.
 - Observed: _____
 - Verdict: _____
 
-### AC2 — OSC 9 notifications (permission / attention) reach the client
+### AC2 — OSC 9 notifications (permission / needs input) reach the client
 - Command: same capture as AC1.
-- Proven by: `VIN151-OSC9-NOTIFY` (attention) and `;4;1;50` (OSC 9;4 busy) in `osc.raw`.
+- Proven by: `VIN151-OSC9-NOTIFY` (needsInput) and `;4;1;50` (OSC 9;4 working) in `osc.raw`.
+  Note `;4;1;50` is OSC 9;4 progress, which maps to the Working state; it is **beyond** AC1/AC2
+  (which name only OSC 0 and OSC 9) and is captured as a bonus observation, not a requirement.
+- **Coverage caveat:** same as AC1 — the OSC 9 markers come from the `printf` stub, so this proves
+  tmux forwards a synthetic OSC 9, not that Claude's notifications do. Driving real `claude` is the
+  follow-up; AC2 is only partially covered until then.
 - **Key risk this check settles:** does tmux forward Claude's OSC 9 *bare*, or only when wrapped
   in tmux passthrough (`ESC Ptmux; … ESC \`)? The emitter sends both; the harness scans for the
   bare markers *and* `VIN151-WRAP9`. Whichever survives decides whether the remote launch needs
@@ -75,10 +89,14 @@ The busy / needs-input vocabulary these map to is already fixed in
 
 ### AC4 — `$SHELL -lc` resolves tmux + claude; detach survives; `new -A` redraws
 - Commands: `./scripts/vin-151-verify.sh path` then `./scripts/vin-151-verify.sh detach`
+- `detach` opens an **attached** session running `claude` through `tmux_launch`, then **kills the
+  ssh** (the client dropping while attached) and checks the session is still listed. This is the
+  real AC4 shape — an attached client dying, not an already-detached `sleep`.
 - Captures: `path.txt` (tmux + claude paths and versions), `detach-start.txt`, `detach-list.txt`
-  (the session must still be listed after the ssh drops), then the by-hand `new -A` re-attach.
+  (`wp-detach` running claude must still be listed after the ssh is killed), then the by-hand
+  `new -A` re-attach.
 - Observed paths / versions: _____
-- Survived detach? _____  Redrew on re-attach? _____
+- Survived the ssh being killed? _____  Redrew on re-attach? _____
 
 ### AC5 — Auth on a headless Mac (manual, not in the harness — needs the real Keychain/token)
 - Keychain over SSH: `ssh -tt mac-mini -- $SHELL -lc 'claude -p "say ok"'` with **no** token file
