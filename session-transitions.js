@@ -100,7 +100,7 @@ function detectSessionTransitions(folder, source) {
   for (const [sessionId, session] of [...activeSessions]) {
     if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder || sessionSourceId(session) !== src.id) {
       if (!session.exited && !session.isPlainTerminal && session.forkFrom) {
-        log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : 'folderMismatch('+session.projectFolder+' vs '+folder+')'}`);
+        log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : session.projectFolder !== folder ? 'folderMismatch('+session.projectFolder+' vs '+folder+')' : 'sourceMismatch('+sessionSourceId(session)+' vs '+src.id+')'}`);
       }
       continue;
     }
