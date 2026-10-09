@@ -182,6 +182,10 @@ test('buildTmuxCommand — new -A on the wootonpad socket, named wp-<id>, starte
   const inner = buildTmuxCommand({ sessionId: 'sess-1', remotePath: '/srv/proj', claudeCommand: "claude --session-id 'sess-1'" });
   assert.match(inner, /^tmux -L wootonpad new-session -A -s wp-sess-1 /);
   assert.match(inner, / -c '\/srv\/proj' /);
+  // TERM_PROGRAM is injected into the session env so Claude emits OSC 9 (needsInput) — ssh does not
+  // forward it, so `-e` is how it reaches the far side.
+  assert.match(inner, / -e TERM_PROGRAM=WarpTerminal /);
+  assert.match(inner, / -e TERM_PROGRAM_VERSION=/);
   // the claude command reaches tmux as one single-quoted argument it runs via sh -c
   assert.ok(inner.includes("'claude --session-id '\\''sess-1'\\'''"), inner);
   // the four inline options from the spike / ADR 0016, each after a literal ; (written \;)

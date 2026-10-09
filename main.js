@@ -2231,11 +2231,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
         cwd: os.homedir(),
         env: {
           ...cleanPtyEnv,
-          TERM: 'xterm-256color', COLORTERM: 'truecolor',
-          // Spoof Warp so Claude emits OSC 9 (needsInput), same reason the local spawn does — these
-          // reach the remote claude as TERM is forwarded; OSC 0 titles (the working state) cross via
-          // tmux set-titles regardless.
-          TERM_PROGRAM: 'WarpTerminal', TERM_PROGRAM_VERSION: 'v0.2026.07.30.08.12.stable_01', FORCE_COLOR: '3',
+          // ssh forwards TERM, which gives the far side a real terminal type; TERM_PROGRAM (what
+          // Claude checks before emitting OSC 9) is NOT forwarded, so it is injected into the tmux
+          // session env by remote-launch instead. OSC 0 titles (the working state) cross via tmux
+          // set-titles regardless.
+          TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
           SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '',
         },
       });

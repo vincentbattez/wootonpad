@@ -29,6 +29,13 @@ const { singleQuote: q, loginShell } = remoteHosts;
 // One tmux session per WootonPad Session, on one shared socket, so a re-attach always finds it.
 const TMUX_SOCKET = 'wootonpad';
 
+// Claude only emits OSC 9 notifications (what the State Dot reads for needsInput) when it believes
+// it runs under a known terminal, which it decides from TERM_PROGRAM — exactly as the local spawn
+// spoofs Warp. ssh does not forward TERM_PROGRAM (only TERM), so it is injected into the tmux
+// session environment with `-e`, where the Claude process and every later re-attach inherit it.
+const TERM_PROGRAM = 'WarpTerminal';
+const TERM_PROGRAM_VERSION = 'v0.2026.07.30.08.12.stable_01';
+
 // A session id is spliced raw into the remote command (as `-s wp-<id>` and as `-t wp-<id>`), so it
 // is validated as a bare token — no quote, space or metacharacter can break out of the script.
 const SESSION_ID_RE = /^[A-Za-z0-9_-]+$/;
@@ -116,7 +123,9 @@ function buildClaudeCommand({ sessionId, isNew, forkFrom, account, options = {} 
 function buildTmuxCommand({ sessionId, remotePath, claudeCommand }) {
   const name = tmuxSessionName(sessionId);
   return (
-    `tmux -L ${TMUX_SOCKET} new-session -A -s ${name} -c ${q(remotePath)} ${q(claudeCommand)}`
+    `tmux -L ${TMUX_SOCKET} new-session -A -s ${name}`
+    + ` -e TERM_PROGRAM=${TERM_PROGRAM} -e TERM_PROGRAM_VERSION=${TERM_PROGRAM_VERSION}`
+    + ` -c ${q(remotePath)} ${q(claudeCommand)}`
     + ' \\; set -g prefix None'
     + ' \\; set -g status off'
     + ' \\; set -g allow-passthrough on'
