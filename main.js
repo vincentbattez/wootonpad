@@ -1998,7 +1998,7 @@ ipcMain.handle('stop-session', (_event, sessionId) => {
   if (session.remote && session.sshTarget) {
     try {
       const args = remoteLaunch.buildStopArgs({ sshTarget: session.sshTarget, sessionId: session.remoteTmuxId || sessionId });
-      execFile('ssh', args, { env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' } }, (err) => {
+      runRemoteSsh(args, (err) => {
         if (err) log.warn(`[remote-stop] kill-session for ${sessionId} failed: ${err.message}`);
       });
     } catch (e) {
@@ -2518,13 +2518,13 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // Host's prerequisite diagnostic and write its clear message into the terminal instead of
     // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
     if (session.remote && !session._stoppedByUser && exitCode !== 0) {
-      const realId0 = session.realSessionId || sessionId;
+      const reportId = session.realSessionId || sessionId;
       Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
         if (d && d.ok) return;
         const msg = (d && d.message) || 'The Remote Host could not start the Session.';
         const fix = d && d.command ? `\r\n\x1b[2mTry: ${d.command}\x1b[0m` : '';
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('terminal-data', realId0, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
+          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
         }
       }).catch(() => {});
     }
@@ -2631,6 +2631,13 @@ function remoteLaunchContext(projectPath) {
   };
 }
 
+// Fire-and-forget ssh to a Host, used by the Stop kill and the re-key rename. Both dial with the
+// same non-interactive env (never prompt for a passphrase, no X askpass) and only care about the
+// error in their own callback; the shared shape lives here so the two call sites cannot drift.
+function runRemoteSsh(args, onDone) {
+  return execFile('ssh', args, { env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' } }, onDone);
+}
+
 // Rename the tmux session on the Host so it follows the real id after a fork / plan-accept re-key,
 // letting a later re-attach find it. Best-effort: a dropped Host just means the rename lands on the
 // next re-attach's `new -A` miss; the diagnostic path covers a genuinely broken Host.
@@ -2638,9 +2645,17 @@ function renameRemoteTmux(session, oldId, newId) {
   if (!session.sshTarget) return;
   try {
     const args = remoteLaunch.buildRenameArgs({ sshTarget: session.sshTarget, oldSessionId: oldId, newSessionId: newId });
-    execFile('ssh', args, { env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' } }, (err) => {
-      if (err) log.warn(`[remote-rename] ${oldId} → ${newId} failed: ${err.message}`);
-      else log.info(`[remote-rename] tmux ${remoteLaunch.tmuxSessionName(oldId)} → ${remoteLaunch.tmuxSessionName(newId)}`);
+    runRemoteSsh(args, (err) => {
+      if (err) {
+        // Leave remoteTmuxId at oldId on failure (Host dropped mid-rekey, far side briefly absent):
+        // the next mirror-sync pass re-plans the rename, and Stop keeps killing the live wp-<oldId>.
+        // Advancing the id here would strand a dead wp-<newId> and leave Claude running (AC4, VIN-155).
+        log.warn(`[remote-rename] ${oldId} → ${newId} failed: ${err.message}`);
+      } else {
+        // Advance only on confirmed success: the Host's tmux session now really carries wp-<newId>.
+        session.remoteTmuxId = newId;
+        log.info(`[remote-rename] tmux ${remoteLaunch.tmuxSessionName(oldId)} → ${remoteLaunch.tmuxSessionName(newId)}`);
+      }
     });
   } catch (e) {
     log.warn(`[remote-rename] could not build rename for ${oldId} → ${newId}: ${e.message}`);
@@ -2657,8 +2672,9 @@ function runRemoteTransitions(descriptor) {
   const sessions = [...activeSessions.values()].filter(s => s.remote && !s.exited && s.sourceId === descriptor.id);
   for (const folder of remoteLaunch.remoteTransitionFolders(sessions)) detectSessionTransitions(folder, source);
   for (const { session, oldId, newId } of remoteLaunch.planRemoteTmuxRenames(sessions)) {
+    // renameRemoteTmux advances session.remoteTmuxId itself, but only once the far-side rename is
+    // confirmed — so a failed rename re-plans here next pass instead of stranding a dead name.
     renameRemoteTmux(session, oldId, newId);
-    session.remoteTmuxId = newId;
   }
 }
 

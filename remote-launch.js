@@ -69,6 +69,8 @@ function parseRemoteProjectPath(projectPath) {
 function buildClaudeCommand({ sessionId, isNew, forkFrom, account, options = {} }) {
   let cmd;
   if (forkFrom) {
+    // The fork command itself uses only forkFrom (q()-quoted), not sessionId — this fail-fast guards
+    // the id that tmuxSessionName will later interpolate unquoted into wp-<id>.
     assertSafeSessionId(sessionId);
     cmd = `claude --resume ${q(forkFrom)} --fork-session`;
   } else if (isNew) {
