@@ -243,9 +243,12 @@ const projectGit = createProjectGit({
     const parsed = remoteGit.parseRemoteKey(cwd);
     if (parsed) {
       // The multiplexing options (ControlMaster/ControlPath/ControlPersist) are built once, in
-      // remote-hosts.sshOptions, from the Host's control socket path.
-      const controlPath = remoteHostsIpcModule.controlPathFor({ id: parsed.hostId });
-      const resolved = remoteGit.resolveRemoteGitArgs(cwd, argv, remoteHostsIpc.getHosts(), { controlPath });
+      // remote-hosts.sshOptions, from the Host's control socket path. resolveRemoteGitArgs derives
+      // that path from the Host it already resolved, so the caller neither fabricates a stub Host nor
+      // looks the id up a second time.
+      const resolved = remoteGit.resolveRemoteGitArgs(cwd, argv, remoteHostsIpc.getHosts(), {
+        controlPathFor: remoteHostsIpcModule.controlPathFor,
+      });
       // A remote read crosses SSH, so it rides the network budget (30s), never the 5s local tier a
       // caller like lightSnapshot passes for on-disk git — a cold master or slow link needs the room.
       if (resolved) return runRemoteGit(resolved, Math.max(timeout || 0, NETWORK_TIMEOUT_MS));
@@ -869,6 +872,11 @@ function getRemoteProjectInfo(projectKey, parsed) {
     projectGit.lightSnapshot(projectKey).then(snap => {
       const { updated, snapshot } = remoteGit.planRemoteSnapshot(base, reachable, snap);
       if (!updated) {
+        // A reachable (or not-yet-probed) Host answered with no branch — a cold ControlMaster, a
+        // transient SSH drop, or a non-git dir. Keep the stale Snapshot, but refresh its timestamp so
+        // the TTL quiets the next refresh: a flaky-but-reachable Host is dialed at most once per TTL,
+        // never on every sidebar refresh. This is the same cache-for-TTL parity the local handler has.
+        setSetting(cacheKey, { data: base, fetchedAt: Date.now(), ttl: infoJitter() });
         send('project-info-updated', projectKey, base);
         return;
       }

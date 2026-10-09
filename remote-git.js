@@ -43,13 +43,17 @@ function remoteGitArgs(sshTarget, remotePath, gitArgv, opts = {}) {
 // Returns { host, args }, or null for a local key (the runner runs git locally, unchanged) or a
 // remote key whose Host is unknown — a Host the user removed never dials out. Keeps the one place
 // that turns an opaque key back into a dialable endpoint (ADR 0017, the seam 0016 carves out) pure
-// and tested.
+// and tested. `opts.controlPathFor`, when given, is called with the resolved Host to derive its
+// multiplexing socket path — so the caller never fabricates a partial Host or looks the id up twice;
+// any remaining opts (e.g. connectTimeout) pass through to the ssh arg builder.
 function resolveRemoteGitArgs(projectKey, gitArgv, hosts, opts = {}) {
   const parsed = parseRemoteKey(projectKey);
   if (!parsed) return null;
   const host = (hosts || []).find(h => h && h.id === parsed.hostId);
   if (!host) return null;
-  return { host, args: remoteGitArgs(host.sshTarget, parsed.remotePath, gitArgv, opts) };
+  const { controlPathFor, ...sshOpts } = opts;
+  if (controlPathFor) sshOpts.controlPath = controlPathFor(host);
+  return { host, args: remoteGitArgs(host.sshTarget, parsed.remotePath, gitArgv, sshOpts) };
 }
 
 // The stale-while-unreachable policy for a Remote Project's light badge (VIN-159), kept pure so it

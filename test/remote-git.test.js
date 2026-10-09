@@ -95,6 +95,18 @@ test('the remote command runs git as argv: a Project dir containing a space is o
   assert.deepEqual(out.trim().split('\n'), ['status', '--porcelain']);
 });
 
+test('resolveRemoteGitArgs derives the multiplexing socket from the resolved Host via controlPathFor', () => {
+  const seen = [];
+  const { args } = resolveRemoteGitArgs('ssh://host-abc/home/me/proj', ['status'], [host()], {
+    controlPathFor: h => { seen.push(h); return '/sock/cm-' + h.id; },
+  });
+  // The resolved Host — not a stub built from the id — is handed to controlPathFor, and the socket
+  // path it returns lands in the ssh ControlPath option.
+  assert.deepEqual(seen, [host()]);
+  assert.match(args.join(' '), /ControlPath=\/sock\/cm-host-abc/);
+  assert.match(args.join(' '), /ControlMaster=auto/);
+});
+
 // --- stale-while-unreachable policy -----------------------------------------------------------
 // planRemoteSnapshot owns the two acceptance-criteria rules for a Remote Project's light badge:
 // never dial a Host known Unreachable, and keep the last good Snapshot when a fresh read's git
