@@ -12,7 +12,8 @@
 # which is why this exists as a hand-run harness.
 #
 #   ./scripts/vin-151-verify.sh all          # every check, in order
-#   ./scripts/vin-151-verify.sh osc9         # AC1+AC2: OSC 0 title (spinner/sleeping) + OSC 9 notification
+#   ./scripts/vin-151-verify.sh osc9         # AC1+AC2 (SYNTHETIC stub): OSC 0 title + OSC 9 notify transport
+#   ./scripts/vin-151-verify.sh osc9-real    # AC1+AC2 (REAL claude): Claude's own OSC 0/OSC 9 across the seam
 #   ./scripts/vin-151-verify.sh path         # AC4: $SHELL -lc resolves tmux + claude
 #   ./scripts/vin-151-verify.sh detach       # AC4: detach survives, new -A redraws
 #   ./scripts/vin-151-verify.sh scrollback   # AC3: xterm scrollback vs tmux
@@ -113,8 +114,18 @@ EMIT
 osc9() {
   echo "== AC1/AC2: OSC 0 + OSC 9 through ssh -tt + tmux (SYNTHETIC emitter) =="
   push_emitter || { echo "!! could not push emitter (host unreachable?)"; return 1; }
+  # The stub now exists in the Mini's shared /tmp. Remove it on ANY exit path —
+  # capture() hard-exits (exit 3) when script(1) is missing, which would skip a
+  # trailing rm and leave the world-readable stub behind. An EXIT trap covers
+  # both the normal return and that hard-exit.
+  trap 'ssh -o BatchMode=yes "$HOST" "rm -f /tmp/vin151-emit.sh" 2>/dev/null || true' EXIT
   local raw="$OUT/osc.raw"
-  capture "$raw" bash -c "$(declare -f tmux_launch); HOST='$HOST' SOCKET='$SOCKET' tmux_launch wp-osc '/tmp/vin151-emit.sh'"
+  # Pass HOST/SOCKET to tmux_launch through the ENVIRONMENT, not by splicing
+  # their values into the bash -c program text — a quote or shell metachar in
+  # either var would otherwise break or inject into the command. (They are
+  # self-set here, so this is defensive hygiene rather than a live exploit.)
+  capture "$raw" env HOST="$HOST" SOCKET="$SOCKET" \
+    bash -c "$(declare -f tmux_launch); tmux_launch wp-osc '/tmp/vin151-emit.sh'"
   echo "raw bytes -> $raw"
   scan "$raw" "OSC0 title (bare)"      'VIN151-OSC0-TITLE'
   scan "$raw" "OSC9 notify (bare)"     'VIN151-OSC9-NOTIFY'
@@ -122,10 +133,44 @@ osc9() {
   scan "$raw" "OSC0 (tmux-wrapped)"    'VIN151-WRAP0'
   scan "$raw" "OSC9 (tmux-wrapped)"    'VIN151-WRAP9'
   echo "   NOTE: whichever form survives tells you if Claude must wrap its OSC."
-  echo "   NOTE: this is the SYNTHETIC-stub transport check; Claude's own OSC"
-  echo "         emissions are NOT exercised here (see runbook AC1/AC2)."
+  echo "   NOTE: this is the SYNTHETIC-stub transport check; the REAL-Claude"
+  echo "         path is 'osc9-real' (see runbook AC1/AC2)."
   # Leave no world-readable stub behind in the shared /tmp.
   ssh -o BatchMode=yes "$HOST" 'rm -f /tmp/vin151-emit.sh' 2>/dev/null || true
+  trap - EXIT
+}
+
+# -----------------------------------------------------------------------------
+# AC1 + AC2 (REAL Claude) — drive an actual `claude` through the ADR launch
+# shape and scan its RAW client capture for Claude's own OSC 0 / OSC 9 bytes.
+# The synthetic osc9() above proves only that tmux + ssh -tt forward *a stub*
+# sequence; this path closes the end-to-end claim the spec makes — that OSC 0
+# titles and OSC 9 notifications "emitted by Claude" reach the client — by
+# exercising Claude's real emissions across the same seam.
+# -----------------------------------------------------------------------------
+osc9_real() {
+  echo "== AC1/AC2: OSC 0 + OSC 9 from a REAL claude through ssh -tt + tmux =="
+  # A SINGLE-TOKEN prompt only: tmux_launch splices its command word UNQUOTED
+  # (by design), so a prompt with spaces/quotes would word-split and break the
+  # launch. Override with a single shell word via WOOTON_CLAUDE_PROMPT.
+  local prompt="${WOOTON_CLAUDE_PROMPT:-ok}"
+  case "$prompt" in
+    *[!A-Za-z0-9_-]*) echo "!! WOOTON_CLAUDE_PROMPT must be a single shell word (no spaces/quotes)"; return 2 ;;
+  esac
+  local raw="$OUT/osc-claude.raw"
+  echo "-- launching: claude -p $prompt  (non-interactive; ends on its own) --"
+  # Same env-not-splice hygiene as osc9(); the command word is a single token.
+  capture "$raw" env HOST="$HOST" SOCKET="$SOCKET" \
+    bash -c "$(declare -f tmux_launch); tmux_launch wp-osc-claude 'claude -p $prompt'"
+  echo "raw bytes -> $raw"
+  # cat -v renders ESC as ^[ ; match Claude's real OSC 0 / OSC 9 introducers.
+  scan "$raw" "OSC 0 title (real claude)"  '\^\[]0;'
+  scan "$raw" "OSC 9 notify (real claude)" '\^\[]9;'
+  echo "   NOTE: these are Claude's OWN emissions — presence proves AC1/AC2 end"
+  echo "         to end (claude → tmux → ssh -tt → client), not just transport."
+  echo "   NOTE: print mode (-p) may emit fewer sequences than an interactive"
+  echo "         session; if absent, also observe an interactive run by hand."
+  ssh -o BatchMode=yes "$HOST" -- "\$SHELL -lc 'tmux -L ${SOCKET} kill-session -t wp-osc-claude'" 2>/dev/null || true
 }
 
 # -----------------------------------------------------------------------------
@@ -142,15 +187,23 @@ detach() {
   echo "-- open an attached session running claude via the ADR launch shape --"
   # Route through tmux_launch() so the session under test carries the real ADR
   # options (prefix None, allow-passthrough on, …) and runs `claude`, not sleep.
-  # Background the attached ssh so we can kill it out from under the session,
-  # exactly as a dropped client would. (ssh -tt wants a tty on stdin; run this
-  # harness from a real terminal so the backgrounded attach gets one.)
+  # Background the attached launch so we can drop the client out from under the
+  # session, exactly as a dropped client would. (ssh -tt wants a tty on stdin;
+  # run this harness from a real terminal so the backgrounded attach gets one.)
+  #
+  # NOTE: tmux_launch is a multi-command function, so `&` backgrounds a SUBSHELL
+  # and $! is that subshell's PID, NOT the ssh client's. Killing the subshell
+  # would orphan the ssh — it would stay attached, the drop would never happen,
+  # and `tmux ls` would still show wp-detach, fabricating a clean pass. So we
+  # instead kill the real ssh CLIENT process by matching its command line
+  # (the session name wp-detach is in its argv), which actually drops the
+  # attached connection, then confirm the session survived server-side.
   tmux_launch wp-detach 'claude' >"$OUT/detach-start.txt" 2>&1 &
-  local ssh_pid=$!
+  local launch_pid=$!
   sleep 5   # let the attached session start claude inside tmux
-  echo "-- kill the ssh (pid $ssh_pid): the client drops while attached --"
-  kill "$ssh_pid" 2>/dev/null || true
-  wait "$ssh_pid" 2>/dev/null || true
+  echo "-- drop the attached client: pkill the real ssh process (argv has wp-detach) --"
+  pkill -f 'ssh .*wp-detach' 2>/dev/null || true
+  wait "$launch_pid" 2>/dev/null || true
   echo "-- list sessions on the socket; wp-detach (running claude) must survive --"
   ssh -o BatchMode=yes "$HOST" -- "\$SHELL -lc 'tmux -L ${SOCKET} ls'" | tee "$OUT/detach-list.txt"
   echo "-- re-attach with new -A and confirm the pane redraws claude's transcript --"
@@ -182,9 +235,10 @@ NOTE
 
 case "${1:-all}" in
   osc9)       osc9 ;;
+  osc9-real)  osc9_real ;;
   path)       path_check ;;
   detach)     detach ;;
   scrollback) scrollback ;;
-  all)        path_check; echo; osc9; echo; detach; echo; scrollback ;;
-  *) echo "usage: $0 {all|osc9|path|detach|scrollback}"; exit 2 ;;
+  all)        path_check; echo; osc9; echo; osc9_real; echo; detach; echo; scrollback ;;
+  *) echo "usage: $0 {all|osc9|osc9-real|path|detach|scrollback}"; exit 2 ;;
 esac

@@ -52,25 +52,33 @@ The Working / Needs Input vocabulary these map to is already fixed in
 **OSC 9 → needsInput**. The captures must carry exactly those sequences.
 
 ### AC1 — OSC 0 titles (spinner / sleeping) reach the client
-- Command: `./scripts/vin-151-verify.sh osc9`
-- Capture: `vin-151-captures/osc.raw` (inspect with `cat -v osc.raw`)
-- Proven by: the string `VIN151-OSC0-TITLE` appearing in the raw client stream.
-- **Coverage caveat:** the emitter (`/tmp/vin151-emit.sh`) is a `printf` stub, not Claude. This
-  check proves the *transport* seam — that tmux + `ssh -tt` forward a synthetic OSC 0 to the
-  client — but it does **not** prove that Claude's own title emissions survive it. To close that
-  gap, drive a real `claude` invocation through `tmux_launch` and scan its capture; until then
-  AC1 is only partially covered and Claude's real emissions remain unverified.
-- Observed: _____
+- Command (transport, synthetic): `./scripts/vin-151-verify.sh osc9`
+- Command (end to end, real Claude): `./scripts/vin-151-verify.sh osc9-real`
+- Capture: `vin-151-captures/osc.raw` (synthetic) / `vin-151-captures/osc-claude.raw` (real claude);
+  inspect with `cat -v`.
+- Proven by: `VIN151-OSC0-TITLE` in `osc.raw` proves the *transport* seam (synthetic stub);
+  an OSC 0 introducer (`^[]0;`) in `osc-claude.raw` proves Claude's **own** title emissions cross
+  the seam. AC1 closes on the latter; the former is transport-only evidence.
+- **Coverage note:** the `osc9` emitter (`/tmp/vin151-emit.sh`) is a `printf` stub, not Claude —
+  it proves tmux + `ssh -tt` forward a synthetic OSC 0, not that Claude's own titles survive. The
+  `osc9-real` path (now part of the harness) drives a real `claude -p` through the same
+  `tmux_launch` shape and scans its raw capture for Claude's real OSC 0; run both. Print mode may
+  emit fewer sequences than an interactive session — if the real OSC 0 is absent, also observe an
+  interactive run by hand before recording a verdict.
+- Observed (synthetic / real): _____
 - Verdict: _____
 
 ### AC2 — OSC 9 notifications (permission / needs input) reach the client
-- Command: same capture as AC1.
-- Proven by: `VIN151-OSC9-NOTIFY` (needsInput) and `;4;1;50` (OSC 9;4 working) in `osc.raw`.
-  Note `;4;1;50` is OSC 9;4 progress, which maps to the Working state; it is **beyond** AC1/AC2
-  (which name only OSC 0 and OSC 9) and is captured as a bonus observation, not a requirement.
-- **Coverage caveat:** same as AC1 — the OSC 9 markers come from the `printf` stub, so this proves
-  tmux forwards a synthetic OSC 9, not that Claude's notifications do. Driving real `claude` is the
-  follow-up; AC2 is only partially covered until then.
+- Command: same two captures as AC1 (`osc9` synthetic, `osc9-real` end to end).
+- Proven by: `VIN151-OSC9-NOTIFY` (needsInput) and `;4;1;50` (OSC 9;4 working) in `osc.raw`
+  (transport); an OSC 9 introducer (`^[]9;`) in `osc-claude.raw` proves Claude's own
+  notifications cross the seam. Note `;4;1;50` is OSC 9;4 progress, which maps to the Working
+  state; it is **beyond** AC1/AC2 (which name only OSC 0 and OSC 9) and is captured as a bonus
+  observation, not a requirement.
+- **Coverage note:** the `osc9` OSC 9 markers come from the `printf` stub, so that check proves
+  tmux forwards a synthetic OSC 9, not that Claude's notifications do. The `osc9-real` path closes
+  that gap by scanning a real `claude` capture for `^[]9;`; AC2 closes on the real capture, not the
+  synthetic one.
 - **Key risk this check settles:** does tmux forward Claude's OSC 9 *bare*, or only when wrapped
   in tmux passthrough (`ESC Ptmux; … ESC \`)? The emitter sends both; the harness scans for the
   bare markers *and* `VIN151-WRAP9`. Whichever survives decides whether the remote launch needs
