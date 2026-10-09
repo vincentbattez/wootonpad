@@ -7037,3 +7037,73 @@ body.hide-avatars .grid-card-avatar {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Remote Hosts (VIN-153): the Host → Accounts tree in the Accounts tab ── */
+.host-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.host-target {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono, monospace);
+}
+
+.host-header .account-card-actions { margin-left: auto; }
+
+.host-test-btn { padding: 3px 10px; font-size: 11px; }
+
+.host-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.host-badge--reachable {
+  color: var(--green-500);
+  background: color-mix(in srgb, var(--green-500) 12%, transparent);
+}
+
+.host-badge--unreachable {
+  color: var(--red-500);
+  background: color-mix(in srgb, var(--red-500) 12%, transparent);
+}
+
+.host-badge--checking {
+  color: var(--text-tertiary);
+  background: var(--neutral-a3);
+}
+
+.host-test-result {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+}
+
+.host-test-result--ok { color: var(--green-500); }
+.host-test-result--fail { color: var(--red-500); }
+
+.host-test-cmd {
+  display: block;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: var(--neutral-a3);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.host-add-account-form { margin-top: 8px; }
