@@ -618,6 +618,43 @@ body { display: flex; flex-direction: column; }
 
 .acct-dd-chips { display: flex; gap: 3px; flex-shrink: 0; }
 
+/* The switcher's Host groups (VIN-158): a muted header above each Host's Accounts. Shown only when
+   a Remote Host exists — with just the Local Host the switcher stays a flat list. */
+.acct-dd-group + .acct-dd-group { margin-top: 2px; }
+
+.acct-dd-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.acct-dd-group-icon {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  opacity: 0.8;
+}
+.acct-dd-group-icon svg { width: 12px; height: 12px; }
+
+.acct-dd-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The check on a Host's active Account. */
+.acct-dd-check {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--indigo-11);
+}
+
 /* ---- Accounts panel ---- */
 #accounts-content,
 #projects-content {

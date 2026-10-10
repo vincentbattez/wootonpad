@@ -61,6 +61,9 @@ contextBridge.exposeInMainWorld('api', {
   addRemoteAccount: (hostId, account) => ipcRenderer.invoke('add-remote-account', hostId, account),
   removeHost: (hostId) => ipcRenderer.invoke('remove-host', hostId),
   removeRemoteAccount: (hostId, accountId) => ipcRenderer.invoke('remove-remote-account', hostId, accountId),
+  // Switch a Host's active Account (VIN-158): persists the choice on the Host and re-points its
+  // mirror so that Host's Remote Projects swap to the new Account.
+  setRemoteActiveAccount: (hostId, accountId) => ipcRenderer.invoke('set-remote-active-account', hostId, accountId),
   testHostConnection: (hostId) => ipcRenderer.invoke('test-host-connection', hostId),
   getHostReachability: () => ipcRenderer.invoke('get-host-reachability'),
   // Add a Remote Project by hand (VIN-157): the native folder picker can't browse another machine,

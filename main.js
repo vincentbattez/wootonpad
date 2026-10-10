@@ -1878,6 +1878,18 @@ const remoteMirrorIpc = remoteMirrorIpcModule.createRemoteMirrorIpc({
   onIndexed: (descriptor) => runRemoteTransitions(descriptor),
 });
 
+// Switch a Host's active Account (VIN-158). The adapter persists the choice on the Host record (so
+// it survives a restart with no migration); here we re-point that Host's mirror to the new Account's
+// projects dir at once and nudge the sidebar to re-fetch, so the Host's Remote Projects swap now
+// rather than on the next poll. Only this Host moves — the Local Host and every other Host are
+// untouched. New Sessions on the Host already read its active Account (remoteMirror.activeAccount).
+ipcMain.handle('set-remote-active-account', (_event, hostId, accountId) => {
+  const hosts = remoteHostsIpc.setRemoteActiveAccount(hostId, accountId);
+  remoteMirrorIpc.syncOnce();
+  notifyRendererProjectsChanged();
+  return hosts;
+});
+
 // --- Scheduled tasks ---
 const scheduleIpc = require('./schedule-ipc');
 
