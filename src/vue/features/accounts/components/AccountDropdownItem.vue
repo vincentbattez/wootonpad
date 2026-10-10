@@ -9,22 +9,29 @@
     <span class="acct-dd-chips">
       <span v-for="chip in chips" :key="chip" class="account-chip">{{ chip }}</span>
     </span>
+    <span v-if="isActive" class="acct-dd-check" v-html="checkSvg"></span>
   </div>
 </template>
 
 <script setup>
-// One row in the sidebar account-switcher dropdown. Dumb: it takes the account, its active flag
-// and its usage chips, and emits `select`. The chip computation is the pure usage module.
+// One row in the sidebar account-switcher dropdown. Dumb: it takes the account, its active flag, its
+// usage and whether it is a Remote Account, and emits `select`. A Remote Account's usage shows "—"
+// (out of v1), a Local Account's its real chips — both via the pure switcher module. The active
+// Account carries a check (CONTEXT.md: a check on each Host's active Account).
 import { computed } from 'vue';
-import { usageChips } from '../usage.mjs';
+import { switcherChips } from '../switcher.mjs';
+import { accountsIcons } from '../../../shared/lib/icons.js';
 
 const props = defineProps({
   account: { type: Object, required: true },
   isActive: { type: Boolean, default: false },
   usage: { type: Object, default: null },
+  remote: { type: Boolean, default: false },
 });
 
 defineEmits(['select']);
 
-const chips = computed(() => usageChips(props.usage));
+const { checkSvg } = accountsIcons;
+
+const chips = computed(() => switcherChips(props.usage, props.remote));
 </script>

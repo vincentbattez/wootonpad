@@ -164,3 +164,34 @@ test('start runs an immediate sync then schedules the poll; stop releases the ti
   ipc.stop();
   assert.equal(cleared, true);
 });
+
+test('switching the active Account re-points the Source and re-indexes the new mirror even with no rsync delta (VIN-158)', async () => {
+  // Switching back to an Account whose mirror dir already holds its tree: a delta-only rsync reports
+  // nothing transferred, so the re-pointed Source must be indexed explicitly or the sidebar would
+  // show the old Account's Projects (or none) until something happened to change on the Host.
+  let h = host('h1');
+  const cache = fakeCache();
+  const ipc = createRemoteMirrorIpc({
+    getHosts: () => [h],
+    getReachability: () => ({ h1: true }),
+    sessionCache: cache,
+    mirrorRoot: MIRROR_ROOT,
+    runRsync: async () => ({ code: 0, stdout: './\n' }), // no delta — already mirrored
+    log: { warn() {} },
+  });
+
+  await ipc.syncOnce(); // registers ssh:h1 against the Default Account
+  cache.calls.populate.length = 0;
+  cache.calls.unregister.length = 0;
+
+  // The user picks another Account for this Host.
+  h = host('h1', {
+    accounts: [{ id: 'default', configDir: '~/.claude' }, { id: 'racc-2', configDir: '~/.work' }],
+    activeAccountId: 'racc-2',
+  });
+  await ipc.syncOnce();
+
+  assert.deepEqual(cache.calls.unregister, ['ssh:h1'], 're-pointed: the old Account Source is evicted');
+  assert.ok([...cache.registered.keys()].includes('ssh:h1'), 'the new Account Source is registered');
+  assert.deepEqual(cache.calls.populate, ['ssh:h1'], 'the new Account mirror is indexed despite no rsync delta');
+});

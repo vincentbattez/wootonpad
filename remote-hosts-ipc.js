@@ -194,6 +194,14 @@ function createRemoteHostsIpc({
     setHosts(hosts);
     return hosts;
   }
+  // Record a Host's active Account (VIN-158). Persisted on the Host record, so the choice survives
+  // a restart with no migration; the pure transform ignores an Account the Host lacks. The mirror
+  // re-point and the sidebar re-fetch are the caller's side effects (main.js), kept out of here.
+  function setRemoteActiveAccount(hostId, accountId) {
+    const hosts = remoteHosts.setActiveRemoteAccount(getHosts(), hostId, accountId);
+    setHosts(hosts);
+    return hosts;
+  }
   function testConnection(hostId) {
     const host = getHosts().find(h => h.id === hostId);
     if (!host) return Promise.resolve({ ok: false, step: 'unknown', message: 'Host not found.', command: '' });
@@ -213,7 +221,7 @@ function createRemoteHostsIpc({
     getHosts, setHosts,
     probeHostsOnce, startHostProbe, stopHostProbe, getReachability,
     addHost, addRemoteAccount, removeHost, removeRemoteAccount, testConnection, testReachability,
-    addRemoteProject,
+    addRemoteProject, setRemoteActiveAccount,
   };
 }
 
