@@ -253,6 +253,38 @@ function sessionsToReattach(liveSessionIds, activeSessionIds) {
   return out;
 }
 
+// After a quit+relaunch the live tmux list can report a Session under a stale pre-re-key name: a
+// fork/plan-accept re-keyed it to a new id in a previous run but the tmux rename was pending or
+// failed before quit, so the far side still answers to the old name while the mirror — and thus the
+// sidebar row — knows the Session only as its realSessionId. In-process this is reconciled from
+// activeSessions (remoteTmuxId), but after a restart that store is empty, so the live old name must
+// be resolved forward to the realSessionId the row uses before keying — otherwise the re-attach is
+// keyed (and its State Dot pushed) under an id the row never matches, and AC #1 silently fails
+// (VIN-160). `lineage` is the mirror's fork graph: one `{ id, forkedFrom }` per known session id,
+// `forkedFrom` being the id it was forked / transitioned from (null for an original). Walk the old
+// name forward along single fork edges to the terminal descendant and return it. An id that is a
+// known leaf, or whose walk forks ambiguously (more than one child) or is absent, is returned
+// unchanged — the conservative identity that keeps today's keying rather than guess a wrong row.
+function resolveReattachKey(liveTmuxId, lineage) {
+  const childrenOf = new Map();
+  for (const rec of lineage || []) {
+    if (!rec || !rec.forkedFrom || !rec.id) continue;
+    if (!childrenOf.has(rec.forkedFrom)) childrenOf.set(rec.forkedFrom, []);
+    childrenOf.get(rec.forkedFrom).push(rec.id);
+  }
+  let current = liveTmuxId;
+  const seen = new Set([current]);
+  for (;;) {
+    const kids = childrenOf.get(current);
+    if (!kids || kids.length !== 1) break; // a leaf, or an ambiguous fork: stop and keep `current`
+    const next = kids[0];
+    if (seen.has(next)) break; // a cycle in a corrupt mirror must not loop forever
+    seen.add(next);
+    current = next;
+  }
+  return current;
+}
+
 // ── A dropped SSH is not an exit ──────────────────────────────────────
 // When a remote Session's ssh PTY dies, did Claude exit inside tmux, or did the link just drop (the
 // laptop slept, Wi-Fi was cut)? A real exit ends the Session; a dropped link keeps it, stale, to be
@@ -318,6 +350,6 @@ module.exports = {
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
-  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit, remotePtyEnv,
+  buildAttachArgs, sessionsToReattach, resolveReattachKey, classifyRemotePtyExit, remotePtyEnv,
   isRemoteDropCandidate, shouldReportRemoteLaunchFailure,
 };

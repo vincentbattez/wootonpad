@@ -15,7 +15,7 @@ const {
   buildStopArgs, buildRenameArgs,
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
-  buildAttachArgs, sessionsToReattach, classifyRemotePtyExit, remotePtyEnv,
+  buildAttachArgs, sessionsToReattach, resolveReattachKey, classifyRemotePtyExit, remotePtyEnv,
   isRemoteDropCandidate, shouldReportRemoteLaunchFailure,
 } = require('../remote-launch');
 
@@ -414,6 +414,49 @@ test('sessionsToReattach — all already attached means nothing to do', () => {
 
 test('sessionsToReattach — a duplicate live id is attached once', () => {
   assert.deepEqual(sessionsToReattach(['a', 'a', 'b'], []), ['a', 'b']);
+});
+
+// --- resolveReattachKey (VIN-160) -------------------------------------------------------------
+// Across a quit+relaunch the activeSessions store is empty, so a live tmux id that carries a stale
+// pre-re-key name (a fork/plan-accept rename pending or failed before quit) can't be reconciled from
+// it. The mirror's fork graph is walked instead to key the re-attach under the realSessionId its
+// sidebar row uses, so the State Dot lands on the matching row (AC #1).
+
+test('resolveReattachKey — a stale pre-re-key name walks forward to its realSessionId', () => {
+  const lineage = [{ id: 'old', forkedFrom: null }, { id: 'new', forkedFrom: 'old' }];
+  assert.equal(resolveReattachKey('old', lineage), 'new');
+});
+
+test('resolveReattachKey — a chain of re-keys walks to the terminal descendant', () => {
+  const lineage = [
+    { id: 'a', forkedFrom: null }, { id: 'b', forkedFrom: 'a' }, { id: 'c', forkedFrom: 'b' },
+  ];
+  assert.equal(resolveReattachKey('a', lineage), 'c');
+});
+
+test('resolveReattachKey — a leaf id (its own row) is returned unchanged', () => {
+  const lineage = [{ id: 'old', forkedFrom: null }, { id: 'new', forkedFrom: 'old' }];
+  assert.equal(resolveReattachKey('new', lineage), 'new');
+});
+
+test('resolveReattachKey — an ambiguous fork (two children) is left as-is rather than guessing', () => {
+  const lineage = [
+    { id: 'p', forkedFrom: null }, { id: 'c1', forkedFrom: 'p' }, { id: 'c2', forkedFrom: 'p' },
+  ];
+  assert.equal(resolveReattachKey('p', lineage), 'p');
+});
+
+test('resolveReattachKey — an id absent from the lineage, or empty lineage, is returned unchanged', () => {
+  assert.equal(resolveReattachKey('x', [{ id: 'a', forkedFrom: null }]), 'x');
+  assert.equal(resolveReattachKey('x', []), 'x');
+  assert.equal(resolveReattachKey('x'), 'x');
+});
+
+test('resolveReattachKey — a cycle in a corrupt mirror terminates instead of looping', () => {
+  const lineage = [{ id: 'a', forkedFrom: 'b' }, { id: 'b', forkedFrom: 'a' }];
+  // Either endpoint is acceptable; the guarantee is that it returns rather than hanging.
+  const out = resolveReattachKey('a', lineage);
+  assert.ok(out === 'a' || out === 'b');
 });
 
 // --- a dropped SSH is not an exit (VIN-160) ---------------------------------------------------

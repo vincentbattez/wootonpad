@@ -2271,6 +2271,11 @@ function wirePtyHandlers(ptyProcess, session, sessionId) {
       remote: session.remote, stoppedByUser: session._stoppedByUser,
       everConnected: session._everConnected, reattached: session._reattached,
     })) {
+      // The PTY is dead now, but the drop-vs-exit verdict is async (handleRemotePtyExit's has-session
+      // probe can take up to connectTimeout). handleRemotePtyExit releases the dead handle
+      // synchronously, before that probe, so a terminal-input/terminal-resize arriving in the window
+      // can't pty.write into it (VIN-160); the input/resize guards below also require a live
+      // session.pty for that reason.
       remoteReattach.handleRemotePtyExit(session, sessionId, exitCode, signal);
       return;
     }
@@ -2341,10 +2346,45 @@ function seedBusyFromTitle(session, sessionId, title) {
     session._cliBusy = true;
     session._oscIdle = false;
     log.debug(`[remote-reattach] seed session=${currentId} → BUSY from pane title`);
+    // Lift a stale persisted `done` the same way the OSC-0 busy edge does (ADR 0015): a re-attached
+    // Session marked `done` that has genuinely resumed work is busy again, so its `done` must lift
+    // now. The live OSC-0 busy branch only lifts on the `!_cliBusy` edge, which this seed has just
+    // consumed, so without lifting here the stale `done` would never clear and the Dot would lie the
+    // moment the turn goes idle (VIN-160).
+    liftSessionDone(currentId);
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('cli-busy-state', currentId, true);
     }
   }
+}
+
+// The mirror's fork graph for a Host: one `{ id, forkedFrom }` per mirrored .jsonl, `forkedFrom`
+// being the id it was forked / plan-accepted from (null for an original). The adapter walks this to
+// resolve a stale pre-re-key tmux name forward to its realSessionId across a restart (VIN-160). The
+// mirror lays sessions out as <mirrorDir>/<projectFolder>/<id>.jsonl; the same head-of-file signal
+// read that fork/plan-accept detection uses (session-transitions) yields the parent edge, guarding
+// the self-referential parentSessionId a non-forked file carries.
+function readMirrorLineage(host) {
+  const { readNewSessionSignals } = require('./session-transitions');
+  const dir = remoteMirror.mirrorDirFor(MIRROR_ROOT, host);
+  const out = [];
+  let folders;
+  try { folders = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  for (const folder of folders) {
+    if (!folder.isDirectory()) continue;
+    const folderPath = path.join(dir, folder.name);
+    let files;
+    try { files = fs.readdirSync(folderPath); } catch { continue; }
+    for (const file of files) {
+      if (!file.endsWith('.jsonl')) continue;
+      const id = file.slice(0, -'.jsonl'.length);
+      const sig = readNewSessionSignals(path.join(folderPath, file));
+      const parent = sig.forkedFrom ||
+        (sig.parentSessionId && sig.parentSessionId !== id ? sig.parentSessionId : null);
+      out.push({ id, forkedFrom: parent });
+    }
+  }
+  return out;
 }
 
 // Picking remote Sessions back up (VIN-160) lives in its own adapter; main.js only wires its
@@ -2356,7 +2396,7 @@ const remoteReattach = createRemoteReattach({
   getReachability: () => remoteHostsIpc.getReachability(),
   getHosts: () => remoteHostsIpc.getHosts(),
   wirePtyHandlers, finalizePtyExit, seedBusyFromTitle,
-  getCachedFolder, cleanPtyEnv, mirrorRoot: MIRROR_ROOT, log,
+  getCachedFolder, readMirrorLineage, cleanPtyEnv, mirrorRoot: MIRROR_ROOT, log,
 });
 
 // --- IPC: open-terminal ---
@@ -2722,7 +2762,9 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 ipcMain.on('terminal-input', (_event, sessionId, data) => {
   const session = activeSessions.get(sessionId);
   // A dropped Remote Session has no live PTY (its link went away): swallow input until it re-attaches.
-  if (session && !session.exited && !session.dropped) {
+  // Require a live `session.pty` too — a remote drop candidate whose PTY just died is released
+  // synchronously but not marked dropped/exited until its async probe lands (VIN-160).
+  if (session && session.pty && !session.exited && !session.dropped) {
     session.pty.write(data);
   }
 });
@@ -2730,7 +2772,9 @@ ipcMain.on('terminal-input', (_event, sessionId, data) => {
 // --- IPC: terminal-resize (fire-and-forget) ---
 ipcMain.on('terminal-resize', (_event, sessionId, cols, rows) => {
   const session = activeSessions.get(sessionId);
-  if (session && !session.exited && !session.dropped) {
+  // Require a live `session.pty`: a remote drop candidate's dead PTY is released synchronously on
+  // exit, before its async probe marks the Session dropped/exited (VIN-160).
+  if (session && session.pty && !session.exited && !session.dropped) {
     // For plain terminals, suppress buffering during resize to avoid
     // accumulating prompt redraws that pollute reattach replay
     if (session.isPlainTerminal) session._suppressBuffer = true;

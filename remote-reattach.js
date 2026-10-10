@@ -27,8 +27,12 @@ function createRemoteReattach({
   activeSessions, pty, sshRun,
   getReachability, getHosts,
   wirePtyHandlers, finalizePtyExit, seedBusyFromTitle,
-  getCachedFolder, cleanPtyEnv, mirrorRoot, log,
+  getCachedFolder, readMirrorLineage, cleanPtyEnv, mirrorRoot, log,
 }) {
+  // After a restart `activeSessions` is empty, so a stale pre-re-key tmux name can't be reconciled
+  // from it; the mirror's fork graph is read instead (injected so the adapter stays testable). A Host
+  // with no injected reader (or no mirror yet) yields no lineage — every live id keys as itself.
+  readMirrorLineage = readMirrorLineage || (() => []);
   // List the live tmux sessions on the Host's socket and re-attach each one not already attached.
   function reattachRemoteSessions(host) {
     if (!host || !host.sshTarget) return;
@@ -55,8 +59,18 @@ function createRemoteReattach({
           if (s.remoteTmuxId) attached.push(s.remoteTmuxId);
           if (s.realSessionId) attached.push(s.realSessionId);
         }
-        for (const liveId of remoteLaunch.sessionsToReattach(liveIds, attached)) {
-          reattachRemoteSession(host, keyByTmuxId.get(liveId) || liveId);
+        // Across a restart `keyByTmuxId` is empty, so a live id carrying a stale pre-re-key name is
+        // resolved forward to its realSessionId via the mirror's fork graph (VIN-160). The Session is
+        // keyed under that real id (the id its sidebar row uses, so the State Dot lands on the right
+        // row) but still attached to the tmux that exists — wp-<liveId> — via the tmuxId override.
+        const toReattach = remoteLaunch.sessionsToReattach(liveIds, attached);
+        // Only read the mirror when there is a fresh (not-in-process) id to resolve.
+        const lineage = toReattach.some(id => !keyByTmuxId.has(id)) ? readMirrorLineage(host) : [];
+        for (const liveId of toReattach) {
+          const inProcessKey = keyByTmuxId.get(liveId);
+          if (inProcessKey) { reattachRemoteSession(host, inProcessKey); continue; }
+          const resolved = remoteLaunch.resolveReattachKey(liveId, lineage);
+          reattachRemoteSession(host, resolved, resolved !== liveId ? { tmuxId: liveId } : undefined);
         }
       })
       .catch(e => log.warn(`[remote-reattach] list for ${host.sshTarget} failed: ${e.message}`));
@@ -66,7 +80,7 @@ function createRemoteReattach({
   // State Dot and buffers output exactly like a foreground launch (wirePtyHandlers), so clicking the
   // row later replays the buffer and streams live — no restart of Claude. Reviving an existing (dropped)
   // Session reuses its object (and its last buffered State) rather than starting a second row.
-  function reattachRemoteSession(host, sessionId) {
+  function reattachRemoteSession(host, sessionId, opts = {}) {
     const existing = activeSessions.get(sessionId);
     if (existing && !existing.exited && !existing.dropped) return; // already live
     // The far side's tmux is named by the Session's remoteTmuxId, which diverges from sessionId on the
@@ -75,8 +89,10 @@ function createRemoteReattach({
     // — or forever, if the rename was pending or failed. Target it the way every other tmux path does,
     // remoteTmuxId || sessionId (main.js buildStopArgs, hasSessionCommand); addressing wp-<realSessionId>
     // here would miss a tmux that never got renamed, so revival would silently fail (VIN-160). A fresh
-    // attach's sessionId is itself a live tmux id off the list, so it falls through to sessionId.
-    const tmuxId = (existing && existing.remoteTmuxId) || sessionId;
+    // attach's sessionId is itself a live tmux id off the list, so it falls through to sessionId —
+    // unless a cross-restart stale-name resolve passed the real tmux name as `opts.tmuxId`, which the
+    // Session was just keyed under its realSessionId for (reattachRemoteSessions).
+    const tmuxId = (existing && existing.remoteTmuxId) || opts.tmuxId || sessionId;
     let args;
     try {
       args = remoteLaunch.buildAttachArgs({ sshTarget: host.sshTarget, sessionId: tmuxId });
@@ -122,7 +138,10 @@ function createRemoteReattach({
       isPlainTerminal: false, sessionType: 'session', forkFrom: null,
       mcpServer: null, focusToken: null, _openedAt: Date.now(),
       remote: true, hostId: host.id, sshTarget: host.sshTarget,
-      sourceId: descriptor.id, remoteTmuxId: sessionId,
+      // remoteTmuxId names the far-side tmux: usually == sessionId, but a cross-restart stale-name
+      // resolve keys the Session under its realSessionId while its tmux still answers to the old name
+      // (opts.tmuxId), so the two diverge exactly as they do after an in-process re-key (VIN-160).
+      sourceId: descriptor.id, remoteTmuxId: tmuxId,
       // This Session arrived by re-attach, never a foreground launch: a pre-connect PTY death is a
       // dropped link to classify, not a failed launch to finalize as exited (VIN-160).
       _reattached: true,
@@ -139,6 +158,12 @@ function createRemoteReattach({
   // session is Claude's real exit, which finalizes exactly as a local one. The Host is looked up in
   // the store for one consistent shape, as the open-terminal drop-revival path does.
   function handleRemotePtyExit(session, sessionId, exitCode, signal) {
+    // The ssh PTY is dead; whether this was a drop or a real exit is decided below, possibly after an
+    // async has-session probe (up to connectTimeout). Release the dead handle synchronously now — the
+    // whole decision runs off the exit event, so this precedes the probe — so a terminal-input/
+    // terminal-resize arriving in that window can't pty.write into the dead PTY (VIN-160). Nothing in
+    // the decision path reads session.pty; markRemoteDropped nulls it again, harmlessly.
+    session.pty = null;
     const reachable = getReachability()[session.hostId];
     const decide = (hasSessionCode) => {
       const verdict = remoteLaunch.classifyRemotePtyExit({ stoppedByUser: false, reachable, hasSessionCode });

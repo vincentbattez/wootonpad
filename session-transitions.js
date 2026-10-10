@@ -214,4 +214,4 @@ function detectSessionTransitions(folder, source) {
 }
 
 
-module.exports = { init, detectSessionTransitions, localSource };
+module.exports = { init, detectSessionTransitions, localSource, readNewSessionSignals };

@@ -16,7 +16,7 @@ const HOST = { id: 'h1', name: 'Mini', sshTarget: 'mac-mini' };
 // A faithful-enough double over every injected boundary: an in-memory Session store, a scriptable
 // SSH runner keyed by which remote command it sees (list / has-session / pane-title), a PTY spawn
 // that hands back inert handles, and recorders for the PTY wiring, the exit finalize and the Dot seed.
-function setup({ hosts = [HOST], reachability = {}, sshResponder } = {}) {
+function setup({ hosts = [HOST], reachability = {}, sshResponder, mirrorLineage = [] } = {}) {
   const activeSessions = new Map();
   const sshCalls = [];
   const spawned = [];
@@ -41,6 +41,7 @@ function setup({ hosts = [HOST], reachability = {}, sshResponder } = {}) {
     wirePtyHandlers: (ptyProcess, session, sessionId) => wired.push({ ptyProcess, session, sessionId }),
     finalizePtyExit: (session, sessionId, code, signal) => finalized.push({ session, sessionId, code, signal }),
     seedBusyFromTitle: (session, sessionId, title) => seeded.push({ session, sessionId, title }),
+    readMirrorLineage: () => mirrorLineage,
     getCachedFolder: () => 'some-project',
     cleanPtyEnv: {},
     mirrorRoot: '/data/remote-mirrors',
@@ -174,12 +175,75 @@ test('discovery revives a re-keyed dropped Session in place, never a duplicate u
   assert.equal(wired[0].sessionId, 'new', 'wired under its real map key');
 });
 
+test('across a restart, a live tmux under a stale pre-re-key name is keyed under its realSessionId', async () => {
+  // Quit+relaunch: activeSessions is empty, so the stale old tmux name can't be reconciled from it.
+  // A fork/plan-accept re-keyed the Session to 'new' in the previous run, but the tmux rename was
+  // pending or failed, so tmux still answers to wp-old — and that is what the live list reports. The
+  // mirror's fork graph (new forked-from old) resolves it forward, so the fresh re-attach is keyed
+  // under 'new' (the sidebar row's id, where the State Dot must land) while still attaching to the
+  // tmux that exists, wp-old (VIN-160, AC #1).
+  const { reattach, activeSessions, wired, seeded, sshCalls } = setup({
+    mirrorLineage: [{ id: 'old', forkedFrom: null }, { id: 'new', forkedFrom: 'old' }],
+    sshResponder: (command) => {
+      if (command.includes('list-sessions')) return { code: 0, stdout: 'wp-old\n' };
+      if (command.includes('display-message')) return { code: 0, stdout: '  ✶ Working…  \n' };
+      return { code: 0, stdout: '' };
+    },
+  });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle(); await settle();
+
+  assert.ok(activeSessions.has('new'), 'keyed under the realSessionId the sidebar row uses');
+  assert.ok(!activeSessions.has('old'), 'not keyed under the stale tmux name');
+  assert.equal(activeSessions.get('new').remoteTmuxId, 'old', 'but the far-side tmux is still wp-old');
+  assert.equal(wired[0].sessionId, 'new', 'wired — and so the State Dot pushed — under the real id');
+  assert.equal(seeded[0].sessionId, 'new', 'the seeded busy State lands on the matching row');
+  const paneProbe = sshCalls.find(c => c.command.includes('display-message'));
+  assert.ok(paneProbe.command.includes('wp-old'), 'the pane-title probe targets the tmux that exists');
+});
+
+test('across a restart, a live tmux whose name is current (no re-key) is keyed under itself', async () => {
+  const { reattach, activeSessions, wired } = setup({
+    mirrorLineage: [{ id: 'a', forkedFrom: null }],
+    sshResponder: (command) => command.includes('list-sessions')
+      ? { code: 0, stdout: 'wp-a\n' } : { code: 0, stdout: '' },
+  });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle();
+
+  assert.ok(activeSessions.has('a'));
+  assert.equal(activeSessions.get('a').remoteTmuxId, 'a', 'tmux id and map key coincide with no re-key');
+  assert.equal(wired[0].sessionId, 'a');
+});
+
 test('an already-live Session is left alone when asked to re-attach it', () => {
   const { reattach, activeSessions, spawned } = setup();
   const live = { remote: true, hostId: 'h1', remoteTmuxId: 'a', dropped: false, exited: false };
   activeSessions.set('a', live);
   reattach.reattachRemoteSession(HOST, 'a');
   assert.equal(spawned.length, 0, 'a live Session is not re-spawned');
+});
+
+test('a dead remote PTY is released synchronously, before the async drop-vs-exit probe resolves', async () => {
+  // The drop-vs-exit verdict can wait on a has-session probe (up to connectTimeout). Until it lands
+  // the Session is neither dropped nor exited, so the only thing stopping a terminal-input/-resize
+  // from writing into the dead PTY is that the handle is already gone: handleRemotePtyExit must null
+  // session.pty up front, not only once the probe returns (VIN-160).
+  let resolveProbe;
+  const { reattach } = setup({
+    reachability: {},
+    sshResponder: (command) => command.includes('has-session')
+      ? new Promise(r => { resolveProbe = () => r({ code: 0, stdout: '' }); })
+      : { code: 0, stdout: '' },
+  });
+  const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a', pty: { write() {} } };
+  reattach.handleRemotePtyExit(session, 'a', 1, null);
+  // No await yet: the probe is still outstanding, but the dead handle is already released.
+  assert.equal(session.pty, null, 'the dead PTY is gone before the probe resolves');
+  assert.equal(session.dropped, undefined, 'and the verdict has not yet landed');
+  resolveProbe();
+  await settle(); await settle();
+  assert.equal(session.dropped, true, 'the still-live tmux then classifies it as a drop');
 });
 
 test('an Unreachable Host makes a dead PTY a dropped link, never an exit', async () => {
