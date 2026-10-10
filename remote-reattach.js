@@ -168,6 +168,11 @@ function createRemoteReattach({
     // terminal-resize arriving in that window can't pty.write into the dead PTY (VIN-160). Nothing in
     // the decision path reads session.pty; markRemoteDropped nulls it again, harmlessly.
     session.pty = null;
+    // The Host was removed while this PTY was live (forgetHostSessions, VIN-161): its tmux was left
+    // running on the Host — removal never stops a Session (AC2) — and the Host is being forgotten, so
+    // make no has-session probe (nothing may touch a removed Host) and keep no stale row to revive.
+    // Just let the dead handle go.
+    if (session._forgotten) return;
     const reachable = getReachability()[session.hostId];
     const decide = (hasSessionCode) => {
       const verdict = remoteLaunch.classifyRemotePtyExit({ stoppedByUser: false, reachable, hasSessionCode });
@@ -217,7 +222,26 @@ function createRemoteReattach({
       .catch(() => {});
   }
 
-  return { reattachRemoteSessions, reattachRemoteSession, handleRemotePtyExit, markRemoteDropped };
+  // Detach and forget every live/dropped Session of a removed Remote Host (VIN-161). Killing the
+  // local ssh client only detaches tmux — Claude keeps running on the Host, exactly what removal
+  // promises (AC2) — so this never kills a tmux session. Each Session is marked `_forgotten` before
+  // its PTY is dropped, so the exit it triggers short-circuits in handleRemotePtyExit rather than
+  // probing the (now removed) Host or keeping a stale row. Returns the ids forgotten.
+  function forgetHostSessions(hostId) {
+    const forgotten = [];
+    for (const [id, s] of [...activeSessions]) {
+      if (!s.remote || s.hostId !== hostId) continue;
+      s._forgotten = true;
+      if (s.pty) { try { s.pty.kill(); } catch (e) { log.warn(`[remote-forget] kill ${id}: ${e.message}`); } }
+      s.pty = null;
+      activeSessions.delete(id);
+      forgotten.push(id);
+    }
+    if (forgotten.length) log.info(`[remote-forget] detached ${forgotten.length} Session(s) of host=${hostId}`);
+    return forgotten;
+  }
+
+  return { reattachRemoteSessions, reattachRemoteSession, handleRemotePtyExit, markRemoteDropped, forgetHostSessions };
 }
 
 module.exports = { createRemoteReattach };

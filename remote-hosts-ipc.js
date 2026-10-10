@@ -14,6 +14,8 @@ const fs = require('fs');
 const { execFile } = require('child_process');
 const { randomUUID } = require('crypto');
 const remoteHosts = require('./remote-hosts');
+const remoteLaunch = require('./remote-launch');
+const remoteRemoval = require('./remote-removal');
 const { qualifyRemoteProjectPath } = require('./session-source');
 
 const HOSTS_CONTROL_DIR = path.join(os.homedir(), '.wootonpad', 'ssh');
@@ -142,14 +144,35 @@ function createRemoteHostsIpc({
     const hosts = remoteHosts.removeHost(getHosts(), hostId);
     setHosts(hosts);
     delete hostReachability[hostId];
-    // Drop the Host's hand-added Remote Projects (VIN-157), so a removed Host leaves no ghost row
-    // that can never be reached, un-greyed or re-added.
+    // Forget the Host's settings-held Project references, so a removed Host leaves no ghost row that
+    // can never be reached, un-greyed or re-added (VIN-157/161): its hand-added Remote Projects and
+    // its hidden-Project keys. The cache, per-Project rows and mirror files are the removal adapter's
+    // job (remote-removal-ipc); here we only touch the settings this adapter already owns.
     const global = getSetting('global') || {};
-    if (Array.isArray(global.remoteProjects) && global.remoteProjects.some(rp => rp.hostId === hostId)) {
-      global.remoteProjects = global.remoteProjects.filter(rp => rp.hostId !== hostId);
-      setSetting('global', global);
+    let changed = false;
+    if (Array.isArray(global.remoteProjects)) {
+      const { kept, removed } = remoteRemoval.partitionHostKeys(global.remoteProjects, hostId, rp => rp.projectPath);
+      if (removed.length) { global.remoteProjects = kept; changed = true; }
     }
+    if (Array.isArray(global.hiddenProjects)) {
+      const { kept, removed } = remoteRemoval.partitionHostKeys(global.hiddenProjects, hostId);
+      if (removed.length) { global.hiddenProjects = kept; changed = true; }
+    }
+    if (changed) setSetting('global', global);
     return hosts;
+  }
+
+  // Count the Sessions live on a Host right now, for the removal confirmation (AC3). A Session is a
+  // tmux session on the Host's shared socket, so the count is the live wp-<id> list. Only read when
+  // the Host is Reachable; Unreachable or not-yet-probed → the count is genuinely unknown (never
+  // zero), and no SSH is attempted. A reachable Host with no tmux server counts zero.
+  async function countRemoteSessions(hostId) {
+    const host = getHosts().find(h => h.id === hostId);
+    const reachable = hostReachability[hostId];
+    if (!host || reachable !== true) return { reachable, count: null };
+    const res = await run(host, { command: remoteLaunch.listSessionsCommand() }, { connectTimeout: 10 });
+    if (!res || (res.code !== 0 && !String(res.stdout || '').trim())) return { reachable: true, count: 0 };
+    return { reachable: true, count: remoteLaunch.parseTmuxSessionList(res.stdout).length };
   }
 
   // Add a Remote Project by hand (VIN-157). A Project where Claude never ran has no folder in the
@@ -221,7 +244,7 @@ function createRemoteHostsIpc({
     getHosts, setHosts,
     probeHostsOnce, startHostProbe, stopHostProbe, getReachability,
     addHost, addRemoteAccount, removeHost, removeRemoteAccount, testConnection, testReachability,
-    addRemoteProject, setRemoteActiveAccount,
+    addRemoteProject, setRemoteActiveAccount, countRemoteSessions,
   };
 }
 

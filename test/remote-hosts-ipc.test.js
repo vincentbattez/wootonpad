@@ -6,7 +6,7 @@ const { createRemoteHostsIpc } = require('../remote-hosts-ipc');
 // A fake over every injected boundary: an in-memory settings store, a recorder for renderer pushes,
 // a scriptable SSH runner keyed by sshTarget, and a hand-driven timer so the probe interval is
 // observable without real time.
-function harness({ reachable = {}, dirOut = {} } = {}) {
+function harness({ reachable = {}, dirOut = {}, sessionsOut = {} } = {}) {
   const store = {};
   const sent = [];
   const becameReachable = [];
@@ -19,10 +19,16 @@ function harness({ reachable = {}, dirOut = {} } = {}) {
     onReachabilityChange: () => { refreshes++; },
     onHostReachable: (host) => { becameReachable.push(host.id); },
     run: async (host, step) => {
-      // The dir check (VIN-157) answers from a per-host, per-path table; every other step is the
-      // reachability probe, which is a zero exit exactly when the host is reachable.
+      // The dir check (VIN-157) answers from a per-host, per-path table; the live-session list
+      // (VIN-161) from a per-host tmux-name list; every other step is the reachability probe, which
+      // is a zero exit exactly when the host is reachable.
       if (step && step.id === 'dir') {
         return { code: 0, stdout: (dirOut[host.sshTarget] || {})[step.path] || 'NO_DIR' };
+      }
+      if (step && /list-sessions/.test(step.command || '')) {
+        const out = sessionsOut[host.sshTarget];
+        if (out == null) return { code: 1, stdout: '', stderr: 'no server running' };
+        return { code: 0, stdout: out };
       }
       return { code: reachable[host.sshTarget] ? 0 : 255 };
     },
@@ -125,6 +131,64 @@ test('removing a Host forgets its remembered reachability', async () => {
   assert.deepEqual(ipc.getReachability(), { h1: true });
   ipc.removeHost('h1');
   assert.deepEqual(ipc.getReachability(), {});
+});
+
+// ── Counting live Sessions for the removal confirmation (VIN-161, AC3) ──
+// The confirmation names how many Sessions are live on the Host; the count rides the live tmux list
+// on the Host's socket when it is Reachable, and is unknown when it is not.
+
+test('counting live Sessions on a Reachable Host parses the live tmux list', async () => {
+  const { ipc, store } = harness({
+    reachable: { 'mac-mini': true },
+    sessionsOut: { 'mac-mini': 'wp-aaa\nwp-bbb\nmisc-not-ours\nwp-ccc\n' },
+  });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.probeHostsOnce(); // so the Host is known Reachable
+  const res = await ipc.countRemoteSessions('h1');
+  assert.deepEqual(res, { reachable: true, count: 3 }, 'only wp-<id> names count; foreign names are skipped');
+});
+
+test('a Reachable Host with no tmux server counts zero, not unknown', async () => {
+  const { ipc, store } = harness({ reachable: { 'mac-mini': true }, sessionsOut: {} });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.probeHostsOnce();
+  const res = await ipc.countRemoteSessions('h1');
+  assert.deepEqual(res, { reachable: true, count: 0 });
+});
+
+test('an Unreachable Host reports the count as unknown and never lists over SSH (AC3)', async () => {
+  const { ipc, store } = harness({ reachable: { 'mac-mini': false } });
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  await ipc.probeHostsOnce();
+  const res = await ipc.countRemoteSessions('h1');
+  assert.equal(res.count, null, 'unknown, not zero');
+  assert.equal(res.reachable, false);
+});
+
+test('a not-yet-probed Host counts as unknown (reachability undefined)', async () => {
+  const { ipc, store } = harness();
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  const res = await ipc.countRemoteSessions('h1');
+  assert.equal(res.count, null);
+});
+
+test('counting an unknown Host answers unknown rather than throwing', async () => {
+  const { ipc } = harness();
+  const res = await ipc.countRemoteSessions('nope');
+  assert.equal(res.count, null);
+});
+
+test('removing a Host also forgets its hidden Remote Projects (AC1)', () => {
+  const { ipc, store } = harness();
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [] }];
+  store.global = {
+    remoteProjects: [{ hostId: 'h1', projectPath: 'ssh://h1/a' }],
+    hiddenProjects: ['ssh://h1/a', 'ssh://h2/b', '/local/c'],
+  };
+  ipc.removeHost('h1');
+  assert.deepEqual(store.global.hiddenProjects, ['ssh://h2/b', '/local/c'],
+    'only this Host\'s hidden keys are dropped; a sibling Host and a local Project survive');
+  assert.deepEqual(store.global.remoteProjects, []);
 });
 
 test('testing an unknown Host answers a not-found diagnosis rather than throwing', async () => {

@@ -20,6 +20,7 @@ function setup({ hosts = [HOST], reachability = {}, sshResponder, mirrorLineage 
   const activeSessions = new Map();
   const sshCalls = [];
   const spawned = [];
+  const killed = [];
   const wired = [];
   const finalized = [];
   const seeded = [];
@@ -34,7 +35,7 @@ function setup({ hosts = [HOST], reachability = {}, sshResponder, mirrorLineage 
 
   const reattach = createRemoteReattach({
     activeSessions,
-    pty: { spawn: (_file, _args, _opts) => { const p = { id: spawned.length }; spawned.push(p); return p; } },
+    pty: { spawn: (_file, _args, _opts) => { const p = { id: spawned.length, kill: () => killed.push(p.id) }; spawned.push(p); return p; } },
     sshRun,
     getReachability: () => reachability,
     getHosts: () => hosts,
@@ -48,7 +49,7 @@ function setup({ hosts = [HOST], reachability = {}, sshResponder, mirrorLineage 
     log: { info() {}, warn() {}, debug() {} },
   });
 
-  return { reattach, activeSessions, sshCalls, spawned, wired, finalized, seeded, reachability };
+  return { reattach, activeSessions, sshCalls, spawned, killed, wired, finalized, seeded, reachability };
 }
 
 const settle = () => new Promise(r => setImmediate(r));
@@ -288,4 +289,41 @@ test('the Host resolves from the store for one consistent shape; a removed Host 
   assert.equal(session.dropped, true, 'a Host no longer in the store leaves the Session dropped, not exited');
   assert.equal(finalized.length, 0);
   assert.ok(!sshCalls.some(c => c.command.includes('has-session')), 'no probe is attempted against a removed Host');
+});
+
+// ── Forgetting a removed Host's Sessions (VIN-161) ──────────────────────────
+// Removing a Remote Host detaches every live/dropped Session of it on the client without touching
+// the Host: the local ssh client is killed (which only detaches tmux — Claude keeps running), the
+// row is dropped, and the exit the kill triggers must not probe the removed Host or keep it stale.
+
+test('forgetHostSessions detaches only that Host\'s Sessions and leaves the rest', () => {
+  const { reattach, activeSessions, killed } = setup();
+  const live = { remote: true, hostId: 'h1', pty: { kill: () => killed.push('live') } };
+  const dropped = { remote: true, hostId: 'h1', dropped: true, pty: null };
+  const other = { remote: true, hostId: 'h2', pty: { kill: () => killed.push('other') } };
+  const local = { remote: false, pty: { kill: () => killed.push('local') } };
+  activeSessions.set('live', live);
+  activeSessions.set('dropped', dropped);
+  activeSessions.set('other', other);
+  activeSessions.set('local', local);
+
+  const forgotten = reattach.forgetHostSessions('h1');
+
+  assert.deepEqual(forgotten.sort(), ['dropped', 'live']);
+  assert.deepEqual([...activeSessions.keys()].sort(), ['local', 'other'], 'only h1 Sessions are dropped');
+  assert.deepEqual(killed, ['live'], 'the live ssh client is killed (detach); a dropped one has no PTY; h2/local untouched');
+  assert.equal(live._forgotten, true);
+});
+
+test('a forgotten Session\'s PTY exit makes no SSH probe and keeps no stale row (AC2)', async () => {
+  const { reattach, activeSessions, sshCalls, finalized } = setup({ reachability: { h1: true } });
+  const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a', pty: { kill() {} } };
+  activeSessions.set('a', session);
+  reattach.forgetHostSessions('h1');
+  // The kill triggers the real exit; simulate it landing in the handler.
+  reattach.handleRemotePtyExit(session, 'a', 0, null);
+  await settle(); await settle();
+  assert.ok(!sshCalls.some(c => c.command.includes('has-session')), 'a forgotten Host is never probed');
+  assert.equal(finalized.length, 0, 'no finalize that would re-touch the store');
+  assert.notEqual(session.dropped, true, 'not kept stale for revival — the Host is gone');
 });
