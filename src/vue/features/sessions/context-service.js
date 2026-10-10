@@ -1,6 +1,7 @@
 // The sessions Feature's context-gauge service: it subscribes to the main process's
-// live `session-context` push (emitted once per busy→idle turn) and writes the new
-// context onto that Session's row in the store, where the sidebar's gauge reads it.
+// live `session-context` push (emitted on each throttled transcript write during a turn,
+// and on the busy→idle transition) and writes the new context onto that Session's row in
+// the store, where the sidebar's gauge reads it.
 // Modelled on the stats service — the one place that reaches window.api for the gauge.
 // The frozen legacy renderer never relays this event; only the Vue side listens.
 
