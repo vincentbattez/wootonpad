@@ -95,6 +95,32 @@ _Avoid_: detail, info, status
 A code editor installed on the machine, outside WootonPad, that a Project can be handed off to. Always qualified as _external_ — unqualified "IDE" refers to WootonPad acting as an IDE for the Claude CLI.
 _Avoid_: IDE (unqualified), editor
 
+### Remote Hosts
+
+**Host**:
+A machine WootonPad runs Sessions on. The Accounts tab is a Host → Accounts tree: every Account belongs to exactly one Host. There is always one Local Host and any number of Remote Hosts.
+_Avoid_: Machine, server, node, box
+
+**Local Host**:
+This machine — the one WootonPad is running on. It holds the Local Accounts (the Accounts that existed before Remote Hosts) unchanged, and is always the first entry of the tree. It is never added, removed, tested or probed; it is simply there.
+_Avoid_: localhost, this computer, default host
+
+**Remote Host**:
+A Host reached over SSH, identified by a user-given name and an `sshTarget` — an `~/.ssh/config` alias or `user@host`. Added and removed by the user; its reachability is probed; its prerequisites are checked by Test Connection. See ADR 0016.
+_Avoid_: SSH host, box, remote machine
+
+**Account**:
+A Claude config directory on a Host, under which Sessions run. A Local Account lives on the Local Host; a Remote Account is a `configDir` on a Remote Host, authenticated by the `.oauth-token` inside that directory. Naming the config dir is how one Host carries several identities.
+_Avoid_: Profile, identity, login, user
+
+**Default Account**:
+The `~/.claude` Account every Host has. It is an invariant — present on every Host, injected if a stored record lacks one, and never removable — so a Host always has at least one Account to run under.
+_Avoid_: Primary account, main account
+
+**Reachable**:
+A Remote Host's SSH-level availability, shown as a badge. Exactly a zero exit of the `BatchMode` probe is **Reachable**; a timeout, a refused key or a dropped link are all **Unreachable**; before the first probe it is **Checking**. Orthogonal to whether its prerequisites pass — reachability is only "can SSH connect", not "is the Host ready" (that is Test Connection).
+_Avoid_: Online, up, connected, alive
+
 ## Architecture front
 
 Terms describing how the renderer's Vue layer is organised. Each is defined by the constraint it carries in this repo, not by its generic meaning elsewhere.

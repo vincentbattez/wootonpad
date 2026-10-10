@@ -27,8 +27,10 @@
       :active-account-id="dropdownStore.activeAccountId"
       :usage="dropdownStore.usage"
       :open="dropdownStore.open"
-      @toggle="dropdownStore.open = !dropdownStore.open"
+      :hosts="remoteHosts"
+      @toggle="onToggleDropdown"
       @select="onDropdownSelect"
+      @select-remote="onDropdownSelectRemote"
     />
   </Teleport>
 </template>
@@ -42,6 +44,7 @@
 // #account-selector so the Feature owns it while it stays at the same mount point.
 import { ref, watch, onMounted, onUnmounted } from 'vue';
 import { sb } from '../../../shared/services/sb.js';
+import { api } from '../../../shared/services/api.js';
 import { accountsStore, accountDropdownStore as dropdownStore } from '../store.js';
 import AccountList from '../components/AccountList.vue';
 import AccountAddForm from '../components/AccountAddForm.vue';
@@ -106,14 +109,46 @@ async function onAddWsl(home) {
 watch(() => accountsStore.accounts, loadWslHomes, { immediate: true });
 
 // ── Dropdown ──────────────────────────────────────────────────────
+// The switcher lists Accounts grouped by Host (VIN-158). The Local Host's part comes through the
+// frozen renderer's dropdown bridge (dropdownStore); the Remote Hosts are read straight off the
+// preload IPC here, the way HostsContainer owns its own Host IPC — the accounts Bridge never learns
+// about Hosts. Loaded on mount and refreshed each time the dropdown opens, so an Account added or
+// removed on the Accounts tab is reflected the next time the switcher is opened.
+const remoteHosts = ref([]);
+
+async function loadRemoteHosts() {
+  try {
+    remoteHosts.value = (await api.getHosts?.()) || [];
+  } catch {
+    remoteHosts.value = [];
+  }
+}
+
+function onToggleDropdown() {
+  dropdownStore.open = !dropdownStore.open;
+  if (dropdownStore.open) loadRemoteHosts();
+}
+
 async function onDropdownSelect(id) {
   dropdownStore.open = false;
   if (id !== dropdownStore.activeAccountId) await sb.switchAccount?.(id);
 }
 
+// Picking a Remote Host's Account changes that Host's active Account only: the Local Host part of
+// the sidebar does not move. The main process re-points the Host's mirror and swaps its Remote
+// Projects; the returned fresh Host list updates the switcher's check without a re-open.
+async function onDropdownSelectRemote(hostId, accountId) {
+  dropdownStore.open = false;
+  const hosts = await api.setRemoteActiveAccount?.(hostId, accountId);
+  if (Array.isArray(hosts)) remoteHosts.value = hosts;
+}
+
 // Any click outside closes the open dropdown; the button's @click.stop keeps opening it from
 // closing on the same event.
 function onDocumentClick() { dropdownStore.open = false; }
-onMounted(() => document.addEventListener('click', onDocumentClick));
+onMounted(() => {
+  document.addEventListener('click', onDocumentClick);
+  loadRemoteHosts();
+});
 onUnmounted(() => document.removeEventListener('click', onDocumentClick));
 </script>

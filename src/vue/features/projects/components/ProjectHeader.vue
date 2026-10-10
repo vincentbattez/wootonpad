@@ -22,8 +22,14 @@
       @submit="submit"
       @cancel="cancel"
     ><span class="project-name" @click.stop="$emit('toggle')">{{ shortName }}</span></SbEditableLabel>
+    <span
+      v-if="project.remote"
+      class="project-remote-badge"
+      :data-tooltip="project.hostName || 'Remote Host'"
+      v-html="remoteSvg"
+    ></span>
     <button class="project-menu-btn" data-tooltip="More actions" @click.stop="$emit('open-menu', $event)" v-html="dotsSvg"></button>
-    <button class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
+    <button v-if="canLaunch" class="project-new-btn" data-tooltip="New session" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSvg"></button>
   </div>
 </template>
 
@@ -34,7 +40,7 @@ import SbEditableLabel from '../../../shared/ui/SbEditableLabel.vue';
 import { useInlineRename } from '../../../shared/composables/use-inline-rename.js';
 import { useDropTarget } from '../../../shared/composables/use-drop-target.js';
 import ProjectAvatar from './ProjectAvatar.vue';
-const { chevronSvg, dotsSvg, plusSvg } = projectGroupIcons;
+const { chevronSvg, dotsSvg, plusSvg, remoteSvg } = projectGroupIcons;
 
 // The Project row's header: its collapse arrow, avatar, editable name and the two header actions.
 // A Dumb Component — it emits `toggle`, `new-session`, `open-menu`, `rename` and `cancel-rename`,
@@ -48,6 +54,10 @@ const props = defineProps({
   collapsed: { type: Boolean, default: false },
   hasActiveSession: { type: Boolean, default: false },
   renaming: { type: Boolean, default: false },
+  // Whether this Project can launch a Session. A Remote Project declares `launch: true` (Sessions
+  // run on the Host inside tmux, VIN-155); the button only hides if a Project declares `launch:
+  // false`. Defaults true so a local Project — which declares no capabilities — keeps its button.
+  canLaunch: { type: Boolean, default: true },
 });
 
 const emit = defineEmits(['toggle', 'refresh-commands', 'open-menu', 'new-session', 'rename', 'cancel-rename']);

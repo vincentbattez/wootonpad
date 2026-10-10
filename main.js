@@ -25,7 +25,13 @@ const { isBusyTitle, isIdleTitle } = require('./cli-activity');
 const { startMcpServer, shutdownMcpServer, shutdownAll: shutdownAllMcp, resolvePendingDiff, rekeyMcpServer, cleanStaleLockFiles } = require('./mcp-bridge');
 const { fetchAndTransformUsage } = require('./claude-auth');
 const { resolveAppearance, APPEARANCE_DEFAULTS } = require('./appearance');
-const { createProjectGit } = require('./project-git');
+const { createProjectGit, NETWORK_TIMEOUT_MS } = require('./project-git');
+const remoteGit = require('./remote-git');
+const remoteHostsIpcModule = require('./remote-hosts-ipc');
+const remoteLaunch = require('./remote-launch');
+const { createRemoteReattach } = require('./remote-reattach');
+const remoteMirrorLineage = require('./remote-mirror-lineage');
+const { createSource } = require('./session-source');
 const { execFile } = require('child_process');
 
 // A working diff can be large; the 1 MB default would truncate it into a parse error.
@@ -59,6 +65,25 @@ const cleanPtyEnv = Object.fromEntries(
     k !== 'WT_SESSION'
   )
 );
+
+// The node-pty spawn options shared by every ssh-PTY launch site — a remote Session (Claude in tmux),
+// a remote Plain Terminal (a login shell, no tmux), and the background re-attach. In all the whole
+// terminal is the ssh client's own PTY, so they want an identical terminal shape and env: a real
+// xterm with truecolor, and the ssh askpass guard (SSH_ASKPASS_REQUIRE=never + empty DISPLAY) so a
+// passphrase prompt fails fast instead of popping a GUI. ssh forwards TERM but NOT TERM_PROGRAM (what
+// Claude checks before emitting OSC 9), so a Session injects TERM_PROGRAM into the tmux session env in
+// remote-launch, not here; a Plain Terminal runs no Claude and needs none. The env is remote-launch's
+// remotePtyEnv — the one safe shape, also used by the background re-attach (VIN-160) — so no site can
+// drift; this wraps it with the terminal geometry the launch sites share (VIN-156).
+function remoteSshSpawnOpts() {
+  return {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    cwd: os.homedir(),
+    env: remoteLaunch.remotePtyEnv(cleanPtyEnv),
+  };
+}
 
 // Shell profiles → shell-profiles.js
 const {
@@ -115,6 +140,8 @@ const {
   getAreaAvatar, setAreaAvatar,
   getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
   moveArea, fileProject,
+  deleteRemoteCacheByFolderPrefix, deleteCachedSessionsByAccount,
+  deleteProjectDataByPathPrefix, deleteSettingsByKeyPrefix,
   closeDb,
 } = require('./db');
 
@@ -222,22 +249,53 @@ function projectExecFile(argv, cwd, options = {}) {
   return ['wsl.exe', wslExecArgs(distro, cwd, argv), rest];
 }
 
-// projectExecFile decides where git runs — inside the distribution for a WSL-backed account.
+// A git command against a Remote Project (cwd is an ssh://<hostId>/<path> key) runs on its Host over
+// SSH, through the Host's login shell (VIN-159, ADR 0016, ADR 0017). This is the same seam a WSL
+// account redirects — git stays one argv interface (ADR 0007), only where it runs changes. It rides
+// the Host's multiplexed master (resolved.args already carries ControlMaster/ControlPath/
+// ControlPersist, built in remote-hosts.sshOptions). The shell-out itself — the control-socket dir,
+// the BatchMode/askpass safety, and the { code, stdout, stderr } shape — is remote-hosts-ipc's one
+// SSH runner (ADR 0016-remote-hosts-over-ssh: that adapter is the only part that shells out), reused
+// here with git's larger output buffer so the boundary is maintained in exactly one place.
+function runRemoteGit(resolved, timeout) {
+  return remoteHostsIpcModule.runSsh(resolved.args, { timeout, maxBuffer: GIT_MAX_BUFFER });
+}
+
+// projectExecFile decides where git runs locally — inside the distribution for a WSL-backed account.
+// A Remote Project key routes to its Host over SSH instead; a local path falls through unchanged.
 const projectGit = createProjectGit({
-  run: (argv, cwd, { timeout } = {}) => new Promise(resolve => {
-    const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
-      encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
-    });
-    execFile(file, args, options, (err, stdout, stderr) => {
-      resolve({
-        // A timeout kills the child without an exit code; git's own codes are numbers.
-        code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
-        stdout,
-        // A spawn failure or timeout prints no stderr; its message is all the user gets.
-        stderr: stderr || (err ? err.message : ''),
+  run: (argv, cwd, { timeout } = {}) => {
+    // Only a Remote Project key pays for a Host-store read; a local path is a cheap regex miss.
+    const parsed = remoteGit.parseRemoteKey(cwd);
+    if (parsed) {
+      // The multiplexing options (ControlMaster/ControlPath/ControlPersist) are built once, in
+      // remote-hosts.sshOptions, from the Host's control socket path. resolveRemoteGitArgs derives
+      // that path from the Host it already resolved, so the caller neither fabricates a stub Host nor
+      // looks the id up a second time.
+      const resolved = remoteGit.resolveRemoteGitArgs(cwd, argv, remoteHostsIpc.getHosts(), {
+        controlPathFor: remoteHostsIpcModule.controlPathFor,
+      });
+      // A remote read crosses SSH, so it rides the network budget (30s), never the 5s local tier a
+      // caller like lightSnapshot passes for on-disk git — a cold master or slow link needs the room.
+      if (resolved) return runRemoteGit(resolved, Math.max(timeout || 0, NETWORK_TIMEOUT_MS));
+      // Remote key whose Host was removed: fall through. projectExecFile on an ssh:// path fails
+      // fast, which lightSnapshot renders as a null branch — the badge keeps its last value.
+    }
+    return new Promise(resolve => {
+      const [file, args, options] = projectExecFile(['git', ...argv], cwd, {
+        encoding: 'utf8', timeout, maxBuffer: GIT_MAX_BUFFER,
+      });
+      execFile(file, args, options, (err, stdout, stderr) => {
+        resolve({
+          // A timeout kills the child without an exit code; git's own codes are numbers.
+          code: err ? (typeof err.code === 'number' ? err.code : 1) : 0,
+          stdout,
+          // A spawn failure or timeout prints no stderr; its message is all the user gets.
+          stderr: stderr || (err ? err.message : ''),
+        });
       });
     });
-  }),
+  },
 });
 
 // Build stats in the same format as stats-cache.json using Switchboard's own DB.
@@ -598,7 +656,8 @@ function initSessionCache() {
 
 initSessionCache();
 const { readSessionFile, readFolderFromFilesystem, refreshFolder, populateCacheFromFilesystem,
-        buildProjectsFromCache, notifyRendererProjectsChanged, sendStatus, populateCacheViaWorker } = sessionCache;
+        buildProjectsFromCache, notifyRendererProjectsChanged, sendStatus,
+        populateAllSourcesViaWorker, localSource } = sessionCache;
 
 /**
  * Read the tail of a Session's .jsonl and push its live context to the renderer (VIN-143).
@@ -695,7 +754,7 @@ ipcMain.handle('add-project', (_event, rawProjectPath) => {
     }
 
     // Immediately index the new folder so it's in cache before frontend renders
-    refreshFolder(folder);
+    refreshFolder(folder, localSource());
     notifyRendererProjectsChanged();
     // Kick off du -sk once on add; subsequent refreshes use the long random TTL
     cacheProjectSize(projectPath);
@@ -816,8 +875,50 @@ function cacheProjectSize(projectPath) {
   }).catch(() => {});
 }
 
+// A Remote Project's sidebar badge: the light Git Snapshot read from git on its Host over SSH
+// (VIN-159). Docker containers and the Project size are out of a Remote Host's v1 (ADR 0016), so
+// only git runs — no du, no docker compose. Served stale-while-unreachable: the last good Snapshot
+// persists in the same project-info cache and is returned at once, and while the Host is known
+// Unreachable no fresh read is even attempted, so an offline Mini never spams the log (CONTEXT.md,
+// Remote Project). A fresh read whose git did not answer keeps the last Snapshot rather than
+// blanking the badge.
+function getRemoteProjectInfo(projectKey, parsed) {
+  const send = (channel, ...payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...payload);
+  };
+  const cacheKey = 'project-info:' + projectKey;
+  const cached = getSetting(cacheKey);
+  const base = cached?.data ?? null;
+  const gitFresh = cached?.fetchedAt && (Date.now() - cached.fetchedAt) < (cached.ttl || PROJECT_INFO_TTL_MS);
+  const reachable = remoteHostsIpc.getReachability()[parsed.hostId];
+
+  // The dial/stale decision is the pure planRemoteSnapshot policy; main.js keeps only the wiring.
+  if (!gitFresh && remoteGit.planRemoteSnapshot(base, reachable).dial) {
+    send('project-info-loading', projectKey);
+    projectGit.lightSnapshot(projectKey).then(snap => {
+      const { updated, snapshot } = remoteGit.planRemoteSnapshot(base, reachable, snap);
+      if (!updated) {
+        // A reachable (or not-yet-probed) Host answered with no branch — a cold ControlMaster, a
+        // transient SSH drop, or a non-git dir. Keep the stale Snapshot, but refresh its timestamp so
+        // the TTL quiets the next refresh: a flaky-but-reachable Host is dialed at most once per TTL,
+        // never on every sidebar refresh. This is the same cache-for-TTL parity the local handler has.
+        setSetting(cacheKey, { data: base, fetchedAt: Date.now(), ttl: infoJitter() });
+        send('project-info-updated', projectKey, base);
+        return;
+      }
+      const data = { ...snapshot, containers: [] };
+      setSetting(cacheKey, { data, fetchedAt: Date.now(), ttl: infoJitter() });
+      send('project-info-updated', projectKey, data);
+    }).catch(() => send('project-info-updated', projectKey, base));
+  }
+  return base;
+}
+
 ipcMain.handle('get-project-info', (_event, projectPath) => {
-  if (!projectPath || !fs.existsSync(hostPath(projectPath))) return null;
+  if (!projectPath) return null;
+  const remote = remoteGit.parseRemoteKey(projectPath);
+  if (remote) return getRemoteProjectInfo(projectPath, remote);
+  if (!fs.existsSync(hostPath(projectPath))) return null;
   const cacheKey = 'project-info:' + projectPath;
   const cached = getSetting(cacheKey);
   const cachedSize = getSetting('project-size:' + projectPath);
@@ -1167,11 +1268,17 @@ ipcMain.handle('get-projects', () => {
     const needsPopulate = !isCachePopulated(getActiveAccount().id) || !isSearchIndexPopulated();
 
     if (needsPopulate) {
-      populateCacheViaWorker();
+      populateAllSourcesViaWorker();
       return [];
     }
 
-    return buildProjectsFromCache();
+    // Remote Projects carry `remote`/`hostId` from the cache; annotate with the Host name (the
+    // remote icon's tooltip) and reachability (greyed when Unreachable) before the sidebar sees them.
+    return remoteMirror.annotateProjects(
+      buildProjectsFromCache(),
+      remoteHostsIpc.getHosts(),
+      remoteHostsIpc.getReachability(),
+    );
   } catch (err) {
     console.error('Error listing projects:', err);
     return [];
@@ -1715,7 +1822,7 @@ ipcMain.handle('set-active-account-id', (_event, accountId) => {
     PROJECTS_DIR: activeProjectsDir(), activeSessions, getMainWindow: () => mainWindow, log, rekeyMcpServer,
   });
   restartProjectsWatcher();
-  populateCacheViaWorker();
+  populateAllSourcesViaWorker();
   return { ok: true };
 });
 
@@ -1739,6 +1846,127 @@ ipcMain.handle('get-accounts-usage', async () => {
     }
   }));
   return results;
+});
+
+// --- Remote Hosts (VIN-153) ---
+// The SSH adapter, the Host store and the reachability-probe lifecycle all live in
+// remote-hosts-ipc.js so they are unit-tested without Electron; main.js only injects the db
+// settings and the renderer send, then wires each ipcMain.handle to a method on it (CODING_STANDARDS).
+const remoteHostsIpc = remoteHostsIpcModule.createRemoteHostsIpc({
+  getSetting,
+  setSetting,
+  send: (channel, ...payload) => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(channel, ...payload);
+  },
+  // A Host's reachability flip re-colours its Remote Projects (greyed when Unreachable). Greyed is
+  // computed at get-projects time, so nudge the sidebar to re-fetch the moment reachability changes.
+  onReachabilityChange: () => notifyRendererProjectsChanged(),
+  // A Host turning Reachable (at startup, or back from a sleep / dropped link) is the cue to pick
+  // its Sessions back up: list the live tmux sessions and re-attach each in the background (VIN-160).
+  onHostReachable: (host) => remoteReattach.reattachRemoteSessions(host),
+});
+
+ipcMain.handle('get-hosts', () => remoteHostsIpc.getHosts());
+ipcMain.handle('add-host', (_event, host) => remoteHostsIpc.addHost(host));
+ipcMain.handle('add-remote-account', (_event, hostId, account) => remoteHostsIpc.addRemoteAccount(hostId, account));
+// Removing a Remote Host, or one of its non-Default Accounts, forgets everything about it on the
+// client and never touches the Host — Sessions still running there keep running (VIN-161). The
+// orchestration is: detach the Host's live Sessions (kill the local ssh client, which only detaches
+// tmux), drop the Host/Account from the store, then purge its cache, per-Project rows, settings and
+// mirror files. The confirmation (preview-remote-removal) names how many Sessions are live first.
+ipcMain.handle('remove-host', (_event, hostId) => {
+  remoteReattach.forgetHostSessions(hostId);
+  const hosts = remoteHostsIpc.removeHost(hostId);
+  remoteRemoval.purgeHost(hostId);
+  notifyRendererProjectsChanged();
+  return hosts;
+});
+ipcMain.handle('remove-remote-account', (_event, hostId, accountId) => {
+  // Detach the removed Account's live Sessions first — exactly as remove-host does for the whole
+  // Host — so their exit short-circuits (`_forgotten`) instead of re-caching a row purgeAccount is
+  // about to delete and resurrecting it (AC1, VIN-161). Then drop the Account and purge its data.
+  remoteReattach.forgetAccountSessions(hostId, accountId);
+  const hosts = remoteHostsIpc.removeRemoteAccount(hostId, accountId);
+  remoteRemoval.purgeAccount(hostId, accountId);
+  // The removed Account may have been the active one; re-point the mirror to the fallback (Default)
+  // and re-fetch so the sidebar reflects the surviving Account at once rather than on the next poll.
+  remoteMirrorIpc.syncOnce();
+  notifyRendererProjectsChanged();
+  return hosts;
+});
+// The confirmation shown before a removal (AC3): count the Sessions live on the Host now (unknown
+// when Unreachable), and build the message in the pure core so the renderer only has to show it.
+ipcMain.handle('preview-remote-removal', async (_event, hostId, accountId = null) => {
+  const host = remoteHostsIpc.getHosts().find(h => h.id === hostId);
+  const { reachable, count } = await remoteHostsIpc.countRemoteSessions(hostId);
+  const accountName = accountId && host
+    ? (host.accounts.find(a => a.id === accountId) || {}).name || null
+    : null;
+  const message = remoteRemovalCore.describeRemoval({
+    hostName: (host && host.name) || hostId, accountName, liveCount: count, reachable,
+  });
+  return { reachable, count, message };
+});
+ipcMain.handle('test-host-connection', (_event, hostId) => remoteHostsIpc.testConnection(hostId));
+ipcMain.handle('get-host-reachability', () => remoteHostsIpc.getReachability());
+
+// Add a Remote Project by hand (VIN-157): validate the typed path on the Host as an existing
+// directory, then persist it so it shows in the sidebar at once (keyed ssh://<hostId>/<path>). The
+// adapter owns the validation and persistence; main.js only nudges the sidebar to re-fetch on a
+// successful add so the new Project appears without waiting on the next mirror poll.
+ipcMain.handle('add-remote-project', async (_event, hostId, projectPath) => {
+  const result = await remoteHostsIpc.addRemoteProject(hostId, projectPath);
+  if (result && result.ok) notifyRendererProjectsChanged();
+  return result;
+});
+
+// --- Remote Project mirroring (VIN-154) ---
+// Each Remote Host's active Account projects dir is rsync'd into the app data dir and registered as
+// one more session-cache Source, so its Claude Projects appear in the sidebar as Remote Projects.
+// The decision layer is remote-mirror.js; the adapter (remote-mirror-ipc.js) shells out rsync on a
+// poll and drives the Source registry. It reads the Host store and the live reachability map off
+// the Remote Hosts adapter, so there is one source of truth for both.
+const remoteMirror = require('./remote-mirror');
+const remoteMirrorIpcModule = require('./remote-mirror-ipc');
+const MIRROR_ROOT = path.join(app.getPath('userData'), 'remote-mirrors');
+const remoteMirrorIpc = remoteMirrorIpcModule.createRemoteMirrorIpc({
+  getHosts: () => remoteHostsIpc.getHosts(),
+  getReachability: () => remoteHostsIpc.getReachability(),
+  sessionCache,
+  mirrorRoot: MIRROR_ROOT,
+  log,
+  // A fork or plan-accept on a Remote Host is detected through the mirror: once rsync brings a new
+  // .jsonl down, re-run transition detection over that Host's live Sessions so the one that re-keyed
+  // follows its real id (and its tmux session is renamed to match). VIN-155.
+  onIndexed: (descriptor) => runRemoteTransitions(descriptor),
+});
+
+// --- Forgetting a removed Remote Host / Account (VIN-161) ---
+// The pure core (remote-removal.js) decides which ssh://<hostId>/ keys a Host owns and builds the
+// confirmation; this adapter applies the client-side purge over the db, the session cache and the
+// mirror files on disk. It never shells out: the Host is only ever dropped from the local store, so
+// its tmux Sessions survive (AC2). The removal IPC handlers above orchestrate detach → store → purge.
+const remoteRemovalCore = require('./remote-removal');
+const remoteRemoval = require('./remote-removal-ipc').createRemoteRemoval({
+  sessionCache,
+  deleteRemoteCacheByFolderPrefix,
+  deleteCachedSessionsByAccount,
+  deleteProjectDataByPathPrefix,
+  deleteSettingsByKeyPrefix,
+  mirrorRoot: MIRROR_ROOT,
+  log,
+});
+
+// Switch a Host's active Account (VIN-158). The adapter persists the choice on the Host record (so
+// it survives a restart with no migration); here we re-point that Host's mirror to the new Account's
+// projects dir at once and nudge the sidebar to re-fetch, so the Host's Remote Projects swap now
+// rather than on the next poll. Only this Host moves — the Local Host and every other Host are
+// untouched. New Sessions on the Host already read its active Account (remoteMirror.activeAccount).
+ipcMain.handle('set-remote-active-account', (_event, hostId, accountId) => {
+  const hosts = remoteHostsIpc.setRemoteActiveAccount(hostId, accountId);
+  remoteMirrorIpc.syncOnce();
+  notifyRendererProjectsChanged();
+  return hosts;
 });
 
 // --- Scheduled tasks ---
@@ -1940,6 +2168,20 @@ ipcMain.handle('stop-session', (_event, sessionId) => {
   if (!session || session.exited) return { ok: false, error: 'not running' };
   // Marks the exit as deliberate so the renderer doesn't report it as a crash.
   session._stoppedByUser = true;
+  // On a Remote Host, killing the local ssh PTY would only detach a Session — Claude would keep
+  // running inside tmux. Stop means gone: kill the tmux session on the Host first, then drop the ssh
+  // client (VIN-155). A remote Plain Terminal runs in no tmux (VIN-156), so dropping its ssh client
+  // already ends the shell on the Host — there is nothing to kill.
+  if (session.remote && session.sshTarget && !session.isPlainTerminal) {
+    try {
+      const args = remoteLaunch.buildStopArgs({ sshTarget: session.sshTarget, sessionId: session.remoteTmuxId || sessionId });
+      runRemoteSsh(args, (err) => {
+        if (err) log.warn(`[remote-stop] kill-session for ${sessionId} failed: ${err.message}`);
+      });
+    } catch (e) {
+      log.warn(`[remote-stop] could not build kill for ${sessionId}: ${e.message}`);
+    }
+  }
   session.pty.kill();
   return { ok: true };
 });
@@ -1973,7 +2215,13 @@ ipcMain.handle('rename-session', (_event, sessionId, name) => {
 ipcMain.handle('read-session-jsonl', (_event, sessionId) => {
   const folder = getCachedFolder(sessionId);
   if (!folder) return { error: 'Session not found in cache' };
-  const jsonlPath = path.join(activeProjectsDir(), folder, sessionId + '.jsonl');
+  // Resolve the on-disk path through the owning Source: a Remote Host's Sessions are read off its
+  // local mirror (folder key ssh://<hostId>/…), a local one off the active Account's dir. The
+  // folder key and sessionId of a Remote Session are rsync'd down untrusted, so sessionFilePath
+  // validates the resolved path stays inside the Source's projectsDir and returns null on a `..`
+  // that would escape the mirror root (CODING_STANDARDS).
+  const jsonlPath = sessionCache.sessionFilePath(folder, sessionId);
+  if (!jsonlPath) return { error: 'Session not found in cache' };
   try {
     const content = fs.readFileSync(jsonlPath, 'utf-8');
     const entries = [];
@@ -1993,6 +2241,246 @@ ipcMain.handle('archive-session', (_event, sessionId, archived) => {
   return { archived: val };
 });
 
+
+// Wire a spawned PTY (local or remote) to its Session: parse OSC for the State Dot, buffer and
+// forward output, and on exit decide what the exit means. Shared by a foreground launch
+// (open-terminal) and a background re-attach of a remote Session (VIN-160), so both paths read the
+// same OSC signals and run the same exit decision.
+function wirePtyHandlers(ptyProcess, session, sessionId) {
+  ptyProcess.onData(data => {
+    const currentId = session.realSessionId || sessionId;
+    // The PTY produced output, so it connected: a remote ssh client that never reaches this never
+    // attached to tmux, which is how a failed launch is told from a dropped link later (VIN-160).
+    session._everConnected = true;
+
+    // Parse OSC sequences (title changes, progress, notifications, etc.)
+    if (data.includes('\x1b]')) {
+      const oscMatches = data.matchAll(/\x1b\](\d+);([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
+      for (const m of oscMatches) {
+        const code = m[1];
+        const payload = m[2].slice(0, 120);
+        // Detect Claude CLI busy state from OSC 0 title (spinner chars = busy, ✳ = idle)
+        if (code === '0') {
+          const firstChar = payload.charAt(0);
+          // The spinner alphabet is the CLI's and changes between releases — read it in one
+          // tested place (cli-activity.js), never inline here (VIN-148).
+          const isBusy = isBusyTitle(payload);
+          const isIdle = isIdleTitle(payload);
+          log.debug(`[OSC 0] session=${currentId} char=U+${firstChar.charCodeAt(0).toString(16).toUpperCase()} busy=${isBusy} idle=${isIdle} wasBusy=${!!session._cliBusy}`);
+          if (isBusy && !session._cliBusy) {
+            session._cliBusy = true;
+            session._oscIdle = false;
+            log.debug(`[OSC 0] session=${currentId} → BUSY`);
+            liftSessionDone(currentId);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('cli-busy-state', currentId, true);
+            }
+          } else if (isIdle && session._cliBusy) {
+            session._cliBusy = false;
+            session._oscIdle = true;
+            log.debug(`[OSC 0] session=${currentId} → IDLE`);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('cli-busy-state', currentId, false);
+            }
+            // Context gauge fast path (VIN-143): a turn just ended, so the .jsonl's last
+            // assistant usage changed. Read only its tail and push the new context, one
+            // read per turn, exactly when the value moves. Never touches the CLI or
+            // ~/.claude/settings.json.
+            pushSessionContext(session, currentId);
+          }
+        }
+      }
+      // Parse iTerm2 OSC 9 sequences (terminated by BEL \x07 or ST \x1b\\)
+      const osc9Matches = data.matchAll(/\x1b\]9;([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
+      for (const osc9 of osc9Matches) {
+        const payload = osc9[1];
+        // OSC 9;4 progress: 4;0; = clear/done, 4;1;N = running at N%, 4;2;N = error, 4;3; = indeterminate
+        if (payload.startsWith('4;')) {
+          const level = payload.split(';')[1];
+          if (level === '0') continue; // 4;0 is also used for clearing, making it unreliable as an idle signal
+          log.debug(`[OSC 9;4] session=${currentId} level=${level} payload="${payload}" wasBusy=${!!session._cliBusy}`);
+          if ((level === '1' || level === '2' || level === '3') && !session._cliBusy) {
+            session._cliBusy = true;
+            session._oscIdle = false;
+            log.debug(`[OSC 9;4] session=${currentId} → BUSY`);
+            liftSessionDone(currentId);
+            if (mainWindow && !mainWindow.isDestroyed()) {
+              mainWindow.webContents.send('cli-busy-state', currentId, true);
+            }
+          }
+        } else {
+          // Regular notification (attention, permission, etc.)
+          log.info(`[OSC 9] session=${currentId} message="${payload}"`);
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('terminal-notification', currentId, payload);
+          }
+        }
+      }
+    }
+
+    // Standalone BEL (not part of an OSC sequence)
+    if (data.includes('\x07') && !data.includes('\x1b]')) {
+      log.info(`[BEL] session=${currentId}`);
+    }
+
+    // Track alternate screen mode (only if data contains the marker)
+    if (data.includes('\x1b[?')) {
+      if (data.includes('\x1b[?1049h') || data.includes('\x1b[?47h')) {
+        session.altScreen = true;
+        log.info(`[altscreen] session=${currentId} ON`);
+      }
+      if (data.includes('\x1b[?1049l') || data.includes('\x1b[?47l')) {
+        session.altScreen = false;
+        log.info(`[altscreen] session=${currentId} OFF`);
+      }
+    }
+
+    // Buffer output (skip resize-triggered redraws for plain terminals)
+    if (!session._suppressBuffer) {
+      session.outputBuffer.push(data);
+      session.outputBufferSize += data.length;
+      while (session.outputBufferSize > MAX_BUFFER_SIZE && session.outputBuffer.length > 1) {
+        session.outputBufferSize -= session.outputBuffer.shift().length;
+      }
+    }
+
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('terminal-data', currentId, data);
+    }
+  });
+
+  ptyProcess.onExit(({ exitCode, signal }) => {
+    // The Host was removed and this Session forgotten (VIN-161): forgetHostSessions killed the local
+    // ssh client to detach — Claude keeps running in tmux on the Host (AC2) — and already dropped the
+    // row. Make no drop/exit decision: nothing may probe or finalize against a removed Host.
+    if (session._forgotten) { session.pty = null; return; }
+    // A live Remote Session whose ssh PTY dies may just have dropped its link (laptop slept, Wi-Fi
+    // cut), not exited: don't finalize it as exited until a probe says Claude really ended (VIN-160).
+    // A *foreground launch* that never connected is a failed launch, not a drop — it falls through to
+    // finalize. A background re-attach, though, attaches to a tmux session just listed as live, so a
+    // pre-connect death there is a dropped handshake, never a failed launch: route it through the
+    // drop classifier too (`_reattached`), or a slept laptop would wrongly flip the row to exited.
+    if (remoteLaunch.isRemoteDropCandidate({
+      remote: session.remote, stoppedByUser: session._stoppedByUser,
+      everConnected: session._everConnected, reattached: session._reattached,
+    })) {
+      // The PTY is dead now, but the drop-vs-exit verdict is async (handleRemotePtyExit's has-session
+      // probe can take up to connectTimeout). handleRemotePtyExit releases the dead handle
+      // synchronously, before that probe, so a terminal-input/terminal-resize arriving in the window
+      // can't pty.write into it (VIN-160); the input/resize guards below also require a live
+      // session.pty for that reason.
+      remoteReattach.handleRemotePtyExit(session, sessionId, exitCode, signal);
+      return;
+    }
+    finalizePtyExit(session, sessionId, exitCode, signal);
+  });
+}
+
+// Finalize a PTY exit: mark the Session exited, surface a Remote launch failure's diagnostic, tear
+// down the MCP server and tell the renderer. The exit path shared by local Sessions, Plain/Run
+// Terminals, deliberate Stops, and a Remote Session whose Claude really ended (VIN-160).
+function finalizePtyExit(session, sessionId, exitCode, signal) {
+    session.exited = true;
+    // The tail carries the error of whatever actually failed, which may not be Claude.
+    const tail = stripAnsi((session.outputBuffer || []).join('')).slice(-600);
+    log.info(
+      `[pty-exit] session=${sessionId} code=${exitCode} signal=${signal ?? 'none'} ` +
+      `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
+    );
+    // A Remote Session's PTY is the ssh client: an early non-zero exit the user did not ask for is a
+    // spawn failure (unreachable Host, missing tmux/claude, an unauthenticated Account). Run the
+    // Host probe and write its clear message into the terminal instead of leaving the user with a raw
+    // ssh error (VIN-155). A Session probes its full prerequisites (reachability, tmux, claude, each
+    // Account's token); a Plain Terminal uses none of tmux/claude/token, so it probes reachability
+    // only — otherwise a reachable Host that merely lacks tmux would surface an irrelevant "install
+    // tmux" fix for a shell that never runs it (VIN-156). The pure remoteExitDiagnostic turns the
+    // probe result into the line to write (or null to stay silent for a healthy remote Session).
+    // Fire-and-forget — the exit is reported below. Only for a Session the user actually opened: a
+    // background re-attach the user never saw must not have a red launch-failure diagnostic written
+    // into a terminal nobody opened (VIN-160).
+    if (remoteLaunch.shouldReportRemoteLaunchFailure({
+      remote: session.remote, stoppedByUser: session._stoppedByUser,
+      exitCode, everOpened: session._everOpened,
+    })) {
+      const reportId = session.realSessionId || sessionId;
+      const probe = session.isPlainTerminal
+        ? remoteHostsIpc.testReachability(session.hostId)
+        : remoteHostsIpc.testConnection(session.hostId);
+      Promise.resolve(probe).then(d => {
+        const diag = remoteLaunch.remoteExitDiagnostic({ probe: d, isPlainTerminal: !!session.isPlainTerminal });
+        if (!diag) return;
+        const fix = diag.command ? `\r\n\x1b[2mTry: ${diag.command}\x1b[0m` : '';
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${diag.message}\x1b[0m${fix}\r\n`);
+        }
+      }).catch(() => {});
+    }
+
+    // Clean up MCP server
+    const mcpId = session.realSessionId || sessionId;
+    shutdownMcpServer(mcpId);
+    session.mcpServer = null;
+
+    const realId = session.realSessionId || sessionId;
+    // The renderer's crash-keep policy must treat a remote Plain Terminal like a Session (keep its
+    // tab so the async Host diagnostic can land), but it must NOT re-derive "remote Plain Terminal"
+    // from the (forgeable) Project key in the renderer — ADR 0017 keeps key-scheme reading in named
+    // main-process seams. main owns these facts, so propagate them on the exit event (VIN-156).
+    const exitInfo = {
+      stoppedByUser: !!session._stoppedByUser,
+      signal: signal ?? null,
+      remote: !!session.remote,
+      isPlainTerminal: !!session.isPlainTerminal,
+    };
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
+      // If a fork/plan-accept transition re-keyed this session under realId
+      // but the PTY exited before transition detection ran, also notify the
+      // renderer for the original sessionId so it doesn't stay stuck as "Running".
+      if (realId !== sessionId && activeSessions.has(sessionId)) {
+        mainWindow.webContents.send('process-exited', sessionId, exitCode, exitInfo);
+      }
+    }
+    activeSessions.delete(realId);
+    // Clean up the original key too in case transition detection hasn't run yet
+    activeSessions.delete(sessionId);
+}
+
+// Seed a re-attached Session's live busy State from a pane title (its CLI's last OSC 0). Shares the
+// OSC 0 busy alphabet with wirePtyHandlers (cli-activity.js), but only ever asserts busy — it never
+// clears a State it cannot positively observe, so an idle re-attach keeps its mirrored `done`/
+// `sleeping` Dot while a busy one reads as working at once rather than waiting on the next repaint.
+function seedBusyFromTitle(session, sessionId, title) {
+  const currentId = session.realSessionId || sessionId;
+  if (isBusyTitle(title) && !session._cliBusy) {
+    session._cliBusy = true;
+    session._oscIdle = false;
+    log.debug(`[remote-reattach] seed session=${currentId} → BUSY from pane title`);
+    // Lift a stale persisted `done` the same way the OSC-0 busy edge does (ADR 0015): a re-attached
+    // Session marked `done` that has genuinely resumed work is busy again, so its `done` must lift
+    // now. The live OSC-0 busy branch only lifts on the `!_cliBusy` edge, which this seed has just
+    // consumed, so without lifting here the stale `done` would never clear and the Dot would lie the
+    // moment the turn goes idle (VIN-160).
+    liftSessionDone(currentId);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('cli-busy-state', currentId, true);
+    }
+  }
+}
+
+// Picking remote Sessions back up (VIN-160) lives in its own adapter; main.js only wires its
+// boundaries. wirePtyHandlers/finalizePtyExit (the PTY lifecycle) and seedBusyFromTitle stay here
+// because they are shared with a foreground launch and reach mainWindow directly.
+const remoteReattach = createRemoteReattach({
+  activeSessions, pty,
+  sshRun: remoteHostsIpcModule.sshRun,
+  getReachability: () => remoteHostsIpc.getReachability(),
+  getHosts: () => remoteHostsIpc.getHosts(),
+  wirePtyHandlers, finalizePtyExit, seedBusyFromTitle,
+  getCachedFolder, readMirrorLineage: (host) => remoteMirrorLineage.readMirrorLineage(MIRROR_ROOT, host),
+  cleanPtyEnv, mirrorRoot: MIRROR_ROOT, log,
+});
+
 // --- IPC: open-terminal ---
 ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, sessionOptions) => {
   if (!mainWindow) return { ok: false, error: 'no window' };
@@ -2000,7 +2488,15 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   // Reattach to existing session
   if (activeSessions.has(sessionId)) {
     const session = activeSessions.get(sessionId);
+    // A Remote Session whose link dropped while away: revive its PTY now the user wants it, if the
+    // Host answers (VIN-160). The buffered last State is replayed below either way; the live stream
+    // resumes once the fresh attach connects, or the next Reachable flip picks it up.
+    if (session.remote && session.dropped) {
+      const host = remoteHostsIpc.getHosts().find(h => h.id === session.hostId);
+      if (host) remoteReattach.reattachRemoteSession(host, sessionId);
+    }
     session.rendererAttached = true;
+    session._everOpened = true;
     session.firstResize = !session.isPlainTerminal;
 
     // If TUI is in alternate screen mode, send escape to switch into it
@@ -2022,8 +2518,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     return { ok: true, reattached: true, mcpActive: !!session.mcpServer };
   }
 
+  // A Remote Project (ssh://<hostId>/<path>) runs its Session on the Remote Host inside tmux, not a
+  // local PTY. Resolve the Host, its active Account and the Host-side cwd up front; a missing Host
+  // is the one error we can surface before spawning anything.
+  const remoteCtx = remoteLaunchContext(projectPath);
+  if (remoteCtx && remoteCtx.error) return { ok: false, error: remoteCtx.error };
+
   // Spawn new PTY
-  if (!fs.existsSync(hostPath(projectPath))) {
+  if (!remoteCtx && !fs.existsSync(hostPath(projectPath))) {
     return { ok: false, error: `project directory no longer exists: ${projectPath}` };
   }
 
@@ -2073,9 +2575,12 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   let projectFolder = null;
 
   if (!isPlainTerminal) {
-    // Snapshot existing .jsonl files before spawning (for new session + fork/plan detection)
-    projectFolder = encodeProjectPath(projectPath);
-    const claudeProjectDir = path.join(getProjectsDir(activeAccount), projectFolder);
+    // Snapshot existing .jsonl files before spawning (for new session + fork/plan detection). A
+    // remote Session is detected against the Host's mirror, not the local Account's projects dir.
+    projectFolder = remoteCtx ? remoteCtx.folder : encodeProjectPath(projectPath);
+    const claudeProjectDir = remoteCtx
+      ? path.join(remoteCtx.descriptor.projectsDir, remoteCtx.folder)
+      : path.join(getProjectsDir(activeAccount), projectFolder);
     if (fs.existsSync(claudeProjectDir)) {
       try {
         knownJsonlFiles = new Set(
@@ -2102,7 +2607,20 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   let mcpServer = null;
   let focusToken = null;
   try {
-    if (isPlainTerminal) {
+    if (remoteCtx && isPlainTerminal) {
+      // A Plain Terminal on a Remote Project: ssh -tt into the Host and open an interactive login
+      // shell in the Project's Host-side path, with the Host's login PATH (VIN-156). No tmux — a
+      // Plain Terminal is ephemeral (CONTEXT.md): when this tab closes or the app quits the ssh
+      // client dies, the remote shell takes SIGHUP and is gone, leaving nothing behind on the Host.
+      // The whole terminal is the ssh client's PTY. remote-launch owns the quoting; a missing Host
+      // was already surfaced by remoteLaunchContext above.
+      const termArgs = remoteLaunch.buildRemoteTerminalArgs({
+        sshTarget: remoteCtx.host.sshTarget,
+        remotePath: remoteCtx.remotePath,
+      });
+      log.info(`[remote-terminal] host=${remoteCtx.host.sshTarget} path=${remoteCtx.remotePath}`);
+      ptyProcess = pty.spawn('ssh', termArgs, remoteSshSpawnOpts());
+    } else if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
       // Inject a shell function to override `claude` with a helpful message
       const claudeShim = 'claude() { echo "\\033[33mTo start a Claude session, use the + button in the sidebar.\\033[0m"; return 1; }; export -f claude 2>/dev/null;';
@@ -2132,6 +2650,28 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
           } catch {}
         }
       }, 300);
+    } else if (remoteCtx) {
+      // A Remote Session: ssh -tt into the Host and run Claude inside tmux under the active Account,
+      // the launch shape ADR 0016 fixed (remote-launch.js owns the quoting). IDE emulation is off
+      // (ADR 0015): no MCP server, no --ide — `done` is set from the row only. The whole terminal is
+      // the ssh client's PTY, so OSC titles / notifications cross tmux exactly as for a local Session.
+      const launchArgs = remoteLaunch.buildRemoteLaunchArgs({
+        sshTarget: remoteCtx.host.sshTarget,
+        sessionId, isNew, forkFrom: sessionOptions?.forkFrom || null,
+        account: remoteCtx.account, options: sessionOptions || {},
+        remotePath: remoteCtx.remotePath,
+      });
+      // The verb only — never the assembled argv: it carries the user's appendSystemPrompt and
+      // preLaunchCmd content, which has no place in the app log.
+      const launchVerb = sessionOptions?.forkFrom ? 'fork' : isNew ? 'new' : 'resume';
+      log.info(`[remote-launch] session=${sessionId} host=${remoteCtx.host.sshTarget} verb=${launchVerb}`);
+      // Same ssh-PTY spawn options as the remote Plain Terminal and the background re-attach
+      // (remoteSshSpawnOpts, whose env is remote-launch.remotePtyEnv): the terminal is the ssh
+      // client's PTY in every case, so the one safe shape lives in one place (VIN-156 / VIN-160).
+      // TERM_PROGRAM, which Claude checks before emitting OSC 9, is injected into the tmux session env
+      // by remote-launch, not here (ssh does not forward it); OSC 0 titles cross via tmux set-titles
+      // regardless.
+      ptyProcess = pty.spawn('ssh', launchArgs, remoteSshSpawnOpts());
     } else {
       // Build claude command with session options
       let claudeCmd;
@@ -2283,138 +2823,30 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     projectFolder, knownJsonlFiles, sessionSlug,
     isPlainTerminal, sessionType, forkFrom: sessionOptions?.forkFrom || null,
     mcpServer, focusToken, _openedAt: Date.now(),
+    // The user opened this Session (a foreground launch), so a launch-failure diagnostic is theirs to
+    // see — a background re-attach never sets this, so nothing is written to a terminal nobody opened.
+    _everOpened: true,
+    // Remote Session bookkeeping: the Source it was launched against (so the mirror's fork detection
+    // only considers it), the Host target (for a later tmux rename / kill), and the id its tmux
+    // session currently carries, so a re-key can rename the far side from this to the real id. A
+    // remote Plain Terminal runs in no tmux and backs no Session (VIN-156): it keeps `remote` and the
+    // Host target (its ssh client dying ends the shell) but carries no Source and no tmux id.
+    remote: !!remoteCtx,
+    hostId: remoteCtx ? remoteCtx.host.id : null,
+    // The Account this Session was launched under (its CLAUDE_CONFIG_DIR picks it). Removing that
+    // Account must detach and forget exactly its live Sessions before their cache rows are purged, or
+    // an exit after the purge re-caches and resurrects a row (VIN-161); the id is how they are found
+    // (remoteReattach.forgetAccountSessions). A local Session / Plain Terminal carries none.
+    accountId: remoteCtx && !isPlainTerminal ? remoteCtx.account.id : null,
+    sshTarget: remoteCtx ? remoteCtx.host.sshTarget : null,
+    sourceId: remoteCtx && !isPlainTerminal ? remoteCtx.descriptor.id : null,
+    remoteTmuxId: remoteCtx && !isPlainTerminal ? sessionId : null,
   };
   activeSessions.set(sessionId, session);
   // Binds this Project to its one Run Terminal, and survives the PTY's exit.
   if (sessionType === RUN_TERMINAL_TYPE) runTerminals.set(projectPath, sessionId);
 
-  ptyProcess.onData(data => {
-    const currentId = session.realSessionId || sessionId;
-
-    // Parse OSC sequences (title changes, progress, notifications, etc.)
-    if (data.includes('\x1b]')) {
-      const oscMatches = data.matchAll(/\x1b\](\d+);([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
-      for (const m of oscMatches) {
-        const code = m[1];
-        const payload = m[2].slice(0, 120);
-        // Detect Claude CLI busy state from OSC 0 title (spinner chars = busy, ✳ = idle)
-        if (code === '0') {
-          const firstChar = payload.charAt(0);
-          // The spinner alphabet is the CLI's and changes between releases — read it in one
-          // tested place (cli-activity.js), never inline here (VIN-148).
-          const isBusy = isBusyTitle(payload);
-          const isIdle = isIdleTitle(payload);
-          log.debug(`[OSC 0] session=${currentId} char=U+${firstChar.charCodeAt(0).toString(16).toUpperCase()} busy=${isBusy} idle=${isIdle} wasBusy=${!!session._cliBusy}`);
-          if (isBusy && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            log.debug(`[OSC 0] session=${currentId} → BUSY`);
-            liftSessionDone(currentId);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('cli-busy-state', currentId, true);
-            }
-          } else if (isIdle && session._cliBusy) {
-            session._cliBusy = false;
-            session._oscIdle = true;
-            log.debug(`[OSC 0] session=${currentId} → IDLE`);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('cli-busy-state', currentId, false);
-            }
-            // Context gauge fast path (VIN-143): a turn just ended, so the .jsonl's last
-            // assistant usage changed. Read only its tail and push the new context, one
-            // read per turn, exactly when the value moves. Never touches the CLI or
-            // ~/.claude/settings.json.
-            pushSessionContext(session, currentId);
-          }
-        }
-      }
-      // Parse iTerm2 OSC 9 sequences (terminated by BEL \x07 or ST \x1b\\)
-      const osc9Matches = data.matchAll(/\x1b\]9;([^\x07\x1b]*)(?:\x07|\x1b\\)/g);
-      for (const osc9 of osc9Matches) {
-        const payload = osc9[1];
-        // OSC 9;4 progress: 4;0; = clear/done, 4;1;N = running at N%, 4;2;N = error, 4;3; = indeterminate
-        if (payload.startsWith('4;')) {
-          const level = payload.split(';')[1];
-          if (level === '0') continue; // 4;0 is also used for clearing, making it unreliable as an idle signal
-          log.debug(`[OSC 9;4] session=${currentId} level=${level} payload="${payload}" wasBusy=${!!session._cliBusy}`);
-          if ((level === '1' || level === '2' || level === '3') && !session._cliBusy) {
-            session._cliBusy = true;
-            session._oscIdle = false;
-            log.debug(`[OSC 9;4] session=${currentId} → BUSY`);
-            liftSessionDone(currentId);
-            if (mainWindow && !mainWindow.isDestroyed()) {
-              mainWindow.webContents.send('cli-busy-state', currentId, true);
-            }
-          }
-        } else {
-          // Regular notification (attention, permission, etc.)
-          log.info(`[OSC 9] session=${currentId} message="${payload}"`);
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('terminal-notification', currentId, payload);
-          }
-        }
-      }
-    }
-
-    // Standalone BEL (not part of an OSC sequence)
-    if (data.includes('\x07') && !data.includes('\x1b]')) {
-      log.info(`[BEL] session=${currentId}`);
-    }
-
-    // Track alternate screen mode (only if data contains the marker)
-    if (data.includes('\x1b[?')) {
-      if (data.includes('\x1b[?1049h') || data.includes('\x1b[?47h')) {
-        session.altScreen = true;
-        log.info(`[altscreen] session=${currentId} ON`);
-      }
-      if (data.includes('\x1b[?1049l') || data.includes('\x1b[?47l')) {
-        session.altScreen = false;
-        log.info(`[altscreen] session=${currentId} OFF`);
-      }
-    }
-
-    // Buffer output (skip resize-triggered redraws for plain terminals)
-    if (!session._suppressBuffer) {
-      session.outputBuffer.push(data);
-      session.outputBufferSize += data.length;
-      while (session.outputBufferSize > MAX_BUFFER_SIZE && session.outputBuffer.length > 1) {
-        session.outputBufferSize -= session.outputBuffer.shift().length;
-      }
-    }
-
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('terminal-data', currentId, data);
-    }
-  });
-
-  ptyProcess.onExit(({ exitCode, signal }) => {
-    session.exited = true;
-    // The tail carries the error of whatever actually failed, which may not be Claude.
-    const tail = stripAnsi((session.outputBuffer || []).join('')).slice(-600);
-    log.info(
-      `[pty-exit] session=${sessionId} code=${exitCode} signal=${signal ?? 'none'} ` +
-      `plain=${!!session.isPlainTerminal} tail=${JSON.stringify(tail)}`
-    );
-    // Clean up MCP server
-    const mcpId = session.realSessionId || sessionId;
-    shutdownMcpServer(mcpId);
-    session.mcpServer = null;
-
-    const realId = session.realSessionId || sessionId;
-    const exitInfo = { stoppedByUser: !!session._stoppedByUser, signal: signal ?? null };
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
-      // If a fork/plan-accept transition re-keyed this session under realId
-      // but the PTY exited before transition detection ran, also notify the
-      // renderer for the original sessionId so it doesn't stay stuck as "Running".
-      if (realId !== sessionId && activeSessions.has(sessionId)) {
-        mainWindow.webContents.send('process-exited', sessionId, exitCode, exitInfo);
-      }
-    }
-    activeSessions.delete(realId);
-    // Clean up the original key too in case transition detection hasn't run yet
-    activeSessions.delete(sessionId);
-  });
+  wirePtyHandlers(ptyProcess, session, sessionId);
 
   if (sessionOptions?.forkFrom) {
     log.info(`[fork-spawn] tempId=${sessionId} forkFrom=${sessionOptions.forkFrom} folder=${projectFolder} knownFiles=${knownJsonlFiles.size}`);
@@ -2426,7 +2858,10 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
 // --- IPC: terminal-input (fire-and-forget) ---
 ipcMain.on('terminal-input', (_event, sessionId, data) => {
   const session = activeSessions.get(sessionId);
-  if (session && !session.exited) {
+  // A dropped Remote Session has no live PTY (its link went away): swallow input until it re-attaches.
+  // Require a live `session.pty` too — a remote drop candidate whose PTY just died is released
+  // synchronously but not marked dropped/exited until its async probe lands (VIN-160).
+  if (session && session.pty && !session.exited && !session.dropped) {
     session.pty.write(data);
   }
 });
@@ -2434,7 +2869,9 @@ ipcMain.on('terminal-input', (_event, sessionId, data) => {
 // --- IPC: terminal-resize (fire-and-forget) ---
 ipcMain.on('terminal-resize', (_event, sessionId, cols, rows) => {
   const session = activeSessions.get(sessionId);
-  if (session && !session.exited) {
+  // Require a live `session.pty`: a remote drop candidate's dead PTY is released synchronously on
+  // exit, before its async probe marks the Session dropped/exited (VIN-160).
+  if (session && session.pty && !session.exited && !session.dropped) {
     // For plain terminals, suppress buffering during resize to avoid
     // accumulating prompt redraws that pollute reattach replay
     if (session.isPlainTerminal) session._suppressBuffer = true;
@@ -2475,6 +2912,74 @@ ipcMain.on('close-terminal', (_event, sessionId) => {
 const sessionTransitions = require('./session-transitions');
 sessionTransitions.init({ PROJECTS_DIR: activeProjectsDir(), activeSessions, getMainWindow: () => mainWindow, log, rekeyMcpServer });
 const { detectSessionTransitions } = sessionTransitions;
+
+// --- Remote Session launch (VIN-155) ---
+// Resolve a Remote Project path (ssh://<hostId>/<path>) to everything the pure launch builder needs:
+// the Host's sshTarget, its active Account (CLAUDE_CONFIG_DIR), the Host-side cwd, and the mirror
+// Source the launched Session belongs to (so fork detection and the JSONL viewer find its .jsonl).
+function remoteLaunchContext(projectPath) {
+  const parsed = remoteLaunch.parseRemoteProjectPath(projectPath);
+  if (!parsed) return null;
+  const host = remoteHostsIpc.getHosts().find(h => h.id === parsed.hostId);
+  if (!host) return { error: `Remote Host for ${projectPath} is no longer configured.` };
+  const descriptor = remoteMirror.sourceDescriptorFor(host, MIRROR_ROOT);
+  return {
+    host,
+    account: remoteMirror.activeAccount(host),
+    remotePath: parsed.remotePath,
+    descriptor,
+    // The on-disk folder under the mirror whose .jsonl files back this Project's Sessions. Claude
+    // names it by encoding the Host-side cwd, exactly as encodeProjectPath mirrors locally.
+    folder: encodeProjectPath(parsed.remotePath),
+  };
+}
+
+// Fire-and-forget ssh to a Host, used by the Stop kill and the re-key rename. Both dial with the
+// same non-interactive env (never prompt for a passphrase, no X askpass) and only care about the
+// error in their own callback; the shared shape lives here so the two call sites cannot drift.
+function runRemoteSsh(args, onDone) {
+  return execFile('ssh', args, { env: { ...process.env, SSH_ASKPASS_REQUIRE: 'never', DISPLAY: '' } }, onDone);
+}
+
+// Rename the tmux session on the Host so it follows the real id after a fork / plan-accept re-key,
+// letting a later re-attach find it. Best-effort: a dropped Host just means the rename lands on the
+// next re-attach's `new -A` miss; the diagnostic path covers a genuinely broken Host.
+function renameRemoteTmux(session, oldId, newId) {
+  if (!session.sshTarget) return;
+  try {
+    const args = remoteLaunch.buildRenameArgs({ sshTarget: session.sshTarget, oldSessionId: oldId, newSessionId: newId });
+    runRemoteSsh(args, (err) => {
+      if (err) {
+        // Leave remoteTmuxId at oldId on failure (Host dropped mid-rekey, far side briefly absent):
+        // the next mirror-sync pass re-plans the rename, and Stop keeps killing the live wp-<oldId>.
+        // Advancing the id here would strand a dead wp-<newId> and leave Claude running (AC4, VIN-155).
+        log.warn(`[remote-rename] ${oldId} → ${newId} failed: ${err.message}`);
+      } else {
+        // Advance only on confirmed success: the Host's tmux session now really carries wp-<newId>.
+        session.remoteTmuxId = newId;
+        log.info(`[remote-rename] tmux ${remoteLaunch.tmuxSessionName(oldId)} → ${remoteLaunch.tmuxSessionName(newId)}`);
+      }
+    });
+  } catch (e) {
+    log.warn(`[remote-rename] could not build rename for ${oldId} → ${newId}: ${e.message}`);
+  }
+}
+
+// Re-run fork / plan-accept detection over a Host's live remote Sessions after its mirror changed,
+// then rename any tmux session whose Session just re-keyed so the far side follows its real id.
+function runRemoteTransitions(descriptor) {
+  const source = createSource({
+    id: descriptor.id, projectsDir: descriptor.projectsDir,
+    accountId: descriptor.accountId, hostId: descriptor.hostId,
+  });
+  const sessions = [...activeSessions.values()].filter(s => s.remote && !s.exited && s.sourceId === descriptor.id);
+  for (const folder of remoteLaunch.remoteTransitionFolders(sessions)) detectSessionTransitions(folder, source);
+  for (const { session, oldId, newId } of remoteLaunch.planRemoteTmuxRenames(sessions)) {
+    // renameRemoteTmux advances session.remoteTmuxId itself, but only once the far-side rename is
+    // confirmed — so a failed rename re-plans here next pass instead of stranding a dead name.
+    renameRemoteTmux(session, oldId, newId);
+  }
+}
 
 // --- fs.watch on projects directory ---
 let projectsWatcher = null;
@@ -2570,8 +3075,8 @@ function startProjectsWatcher() {
     for (const folder of folders) {
       const folderPath = path.join(watchDir, folder);
       if (fs.existsSync(folderPath)) {
-        detectSessionTransitions(folder);
-        refreshFolder(folder);
+        detectSessionTransitions(folder, sessionTransitions.localSource());
+        refreshFolder(folder, localSource());
       } else {
         deleteCachedFolder(folder, getActiveAccount().id);
       }
@@ -2660,6 +3165,8 @@ app.whenReady().then(() => {
   buildMenu();
   createWindow();
   startProjectsWatcher();
+  remoteHostsIpc.startHostProbe();
+  remoteMirrorIpc.start();
 
   // Both schedule modules resolve their directories per call, so schedules
   // follow the active account instead of the Windows home, and project paths
@@ -2717,7 +3224,7 @@ app.whenReady().then(() => {
   startScheduler(log, runScheduleCommand);
 
   // Re-index search if FTS table was recreated (e.g. tokenizer config change)
-  if (searchFtsRecreated) populateCacheViaWorker();
+  if (searchFtsRecreated) populateAllSourcesViaWorker();
 
   // Check for updates after launch
   if (autoUpdater) {
@@ -2738,6 +3245,11 @@ app.on('window-all-closed', () => {
 app.on('before-quit', () => {
   // Shut down all MCP servers
   shutdownAllMcp();
+
+  // Stop the reachability probe so its interval timer stops firing after quit
+  remoteHostsIpc.stopHostProbe();
+  // Stop the Remote Project mirror poll so no rsync fires after quit
+  remoteMirrorIpc.stop();
 
   // Close filesystem watcher
   if (projectsWatcher) {

@@ -618,6 +618,43 @@ body { display: flex; flex-direction: column; }
 
 .acct-dd-chips { display: flex; gap: 3px; flex-shrink: 0; }
 
+/* The switcher's Host groups (VIN-158): a muted header above each Host's Accounts. Shown only when
+   a Remote Host exists — with just the Local Host the switcher stays a flat list. */
+.acct-dd-group + .acct-dd-group { margin-top: 2px; }
+
+.acct-dd-group-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px 3px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-tertiary);
+}
+
+.acct-dd-group-icon {
+  display: inline-flex;
+  width: 12px;
+  height: 12px;
+  opacity: 0.8;
+}
+.acct-dd-group-icon svg { width: 12px; height: 12px; }
+
+.acct-dd-group-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The check on a Host's active Account. */
+.acct-dd-check {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--indigo-11);
+}
+
 /* ---- Accounts panel ---- */
 #accounts-content,
 #projects-content {
@@ -1367,6 +1404,27 @@ body { display: flex; flex-direction: column; }
 
 .project-header.collapsed .arrow {
   transform: rotate(-90deg);
+}
+
+/* A Remote Project's badge: the server glyph, muted, sitting beside the name. Its tooltip names
+   the Host (VIN-154). */
+.project-header .project-remote-badge {
+  order: 2;
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  margin-left: 4px;
+  color: var(--text-tertiary);
+  line-height: 0;
+  cursor: default;
+}
+.project-header .project-remote-badge svg { display: block; }
+
+/* An Unreachable Host greys its whole Project group — the header and every Session row — while the
+   cache is kept so nothing disappears (CONTEXT.md, Remote Project). */
+.project-group.remote-unreachable,
+.worktree-group.remote-unreachable {
+  opacity: 0.5;
 }
 
 .project-sessions {
@@ -4048,6 +4106,33 @@ body { display: flex; flex-direction: column; }
   line-height: 1.4;
 }
 
+.add-project-dialog .add-project-host-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.add-project-dialog .add-project-host-row label {
+  color: var(--text-disabled);
+  font-size: 12px;
+}
+
+.add-project-dialog .add-project-host-row select {
+  flex: 1;
+  background: var(--neutral-a2);
+  border: 1px solid var(--neutral-a4);
+  border-radius: 6px;
+  padding: 7px 8px;
+  color: var(--text-primary);
+  font-size: 13px;
+  outline: none;
+}
+
+.add-project-dialog .add-project-host-row select:focus {
+  border-color: var(--border-focus);
+}
+
 .add-project-dialog .folder-input-row {
   display: flex;
   gap: 8px;
@@ -4870,6 +4955,17 @@ body { display: flex; flex-direction: column; }
 
 .popover-option-terminal:hover {
   background: color-mix(in srgb, var(--green-500) 8%, transparent);
+}
+
+/* An Unreachable Host has no shell to open: the Plain Terminal option is disabled (VIN-156). */
+.popover-option:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.popover-option:disabled:hover {
+  background: none;
+  color: var(--text-secondary);
 }
 
 /* ========== TERMINAL BADGE ========== */
@@ -7053,3 +7149,73 @@ body.hide-avatars .grid-card-avatar {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ── Remote Hosts (VIN-153): the Host → Accounts tree in the Accounts tab ── */
+.host-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.host-target {
+  font-size: 11px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono, monospace);
+}
+
+.host-header .account-card-actions { margin-left: auto; }
+
+.host-test-btn { padding: 3px 10px; font-size: 11px; }
+
+.host-badge {
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: var(--radius-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.host-badge--reachable {
+  color: var(--green-500);
+  background: color-mix(in srgb, var(--green-500) 12%, transparent);
+}
+
+.host-badge--unreachable {
+  color: var(--red-500);
+  background: color-mix(in srgb, var(--red-500) 12%, transparent);
+}
+
+.host-badge--checking {
+  color: var(--text-tertiary);
+  background: var(--neutral-a3);
+}
+
+.host-test-result {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: var(--radius-xs);
+  font-size: 11px;
+  line-height: 1.5;
+  background: var(--surface-card);
+  border: 1px solid var(--border-subtle);
+}
+
+.host-test-result--ok { color: var(--green-500); }
+.host-test-result--fail { color: var(--red-500); }
+
+.host-test-cmd {
+  display: block;
+  margin-top: 6px;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: var(--neutral-a3);
+  color: var(--text-primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.host-add-account-form { margin-top: 8px; }

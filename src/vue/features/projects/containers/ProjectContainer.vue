@@ -1,10 +1,17 @@
 <template>
-  <div :class="isWorktree ? 'worktree-group' : 'project-group'" :id="folderId">
+  <div
+    :class="[
+      isWorktree ? 'worktree-group' : 'project-group',
+      { 'remote-project': project.remote, 'remote-unreachable': project.greyed },
+    ]"
+    :id="folderId"
+  >
 
     <WorktreeHeader
       v-if="isWorktree"
       :project="project"
       :collapsed="collapsed"
+      :can-launch="canLaunch"
       @toggle="toggle"
       @refresh-commands="refreshCommands"
       @open-menu="openMenu"
@@ -17,6 +24,7 @@
       :collapsed="collapsed"
       :has-active-session="hasActiveSession"
       :renaming="isRenaming"
+      :can-launch="canLaunch"
       @toggle="toggle"
       @refresh-commands="refreshCommands"
       @open-menu="openMenu"
@@ -30,15 +38,18 @@
          would clip it. Open/close/positioning come from the shared context-menu composable. -->
     <Teleport to="body">
       <div v-if="menu.open.value" class="project-menu" :style="menu.style.value" @click.stop>
-        <button class="project-menu-item project-run-btn" :title="runTooltip" @click="runFromMenu">
+        <!-- A Project declares what it can do; the UI shows only what it declares (ADR 0014 spirit).
+             A Remote Project lists Sessions and nothing more yet, so Run / External IDE / Project
+             Folder are hidden on it. A local Project declares no gate, so all three show as before. -->
+        <button v-if="caps.run !== false" class="project-menu-item project-run-btn" :title="runTooltip" @click="runFromMenu">
           <span class="project-menu-icon" v-html="playSvg"></span>
           <span class="project-menu-label">Run Project</span>
         </button>
-        <button class="project-menu-item project-ide-btn" :title="ideTooltip" @click="ideFromMenu">
+        <button v-if="caps.externalIde !== false" class="project-menu-item project-ide-btn" :title="ideTooltip" @click="ideFromMenu">
           <span class="project-menu-icon" v-html="codeSvg"></span>
           <span class="project-menu-label">Open in External IDE</span>
         </button>
-        <button class="project-menu-item project-folder-btn" @click="folderFromMenu">
+        <button v-if="caps.projectFolder !== false" class="project-menu-item project-folder-btn" @click="folderFromMenu">
           <span class="project-menu-icon" v-html="folderSvg"></span>
           <span class="project-menu-label">Open Project Folder</span>
         </button>
@@ -81,13 +92,13 @@
         :needs-input-sessions="needsInputSessions"
         :unread-sessions="unreadSessions"
         :search-match-ids="searchMatchIds"
-        @open="(s) => $emit('open', s)"
+        @open="(s) => canLaunch && $emit('open', s)"
         @stop="(id) => $emit('stop', id)"
         @star="(id) => $emit('star', id)"
         @archive="(id) => $emit('archive', id)"
-        @fork="(id) => $emit('fork', id)"
+        @fork="(id) => canLaunch && $emit('fork', id)"
         @jsonl="(id) => $emit('jsonl', id)"
-        @launch-config="(id) => $emit('launch-config', id)"
+        @launch-config="(id) => canLaunch && $emit('launch-config', id)"
         @rename="(id, name) => $emit('rename', id, name)"
         @done="(id) => $emit('done', id)"
         @archive-sessions="(sessions) => $emit('archive-sessions', sessions)"
@@ -178,6 +189,16 @@ const emit = defineEmits([
 const bridge = createProjectsBridge(store);
 
 const folderId = computed(() => 'project-' + props.project.projectPath.replace(/[^a-zA-Z0-9_-]/g, '_'));
+
+// The Project's declared capabilities. Absent (a local Project) means unrestricted: every button
+// shows. A Remote Project carries explicit `false`s for what it cannot do yet (VIN-154).
+const caps = computed(() => props.project.capabilities || {});
+
+// Whether a Session can be launched on this Project. A Remote Project declares `launch: true` —
+// Sessions start, resume and fork on the Remote Host inside tmux (VIN-155) — so its New-session
+// button and session-start gestures (resume, fork, launch config) flow through like a local
+// Project's. Only an explicit `launch: false` swallows them. Absent (a local Project) means allowed.
+const canLaunch = computed(() => caps.value.launch !== false);
 
 // A user-set label wins over the path; clearing it falls back to the last two segments.
 const shortName = computed(() =>

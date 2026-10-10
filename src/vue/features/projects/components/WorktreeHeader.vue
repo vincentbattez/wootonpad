@@ -3,7 +3,7 @@
     <span class="worktree-branch-icon" v-html="branchSvg" @click.stop="$emit('toggle')"></span>
     <span class="worktree-name" @click.stop="$emit('toggle')">{{ worktreeName }}</span>
     <button class="project-menu-btn worktree-menu-btn" data-tooltip="More actions" @click.stop="$emit('open-menu', $event)" v-html="dotsSvg"></button>
-    <button class="project-new-btn worktree-new-btn" data-tooltip="New session in worktree" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSmSvg"></button>
+    <button v-if="canLaunch" class="project-new-btn worktree-new-btn" data-tooltip="New session in worktree" @click.stop="$emit('new-session', project, $event.currentTarget)" v-html="plusSmSvg"></button>
   </div>
 </template>
 
@@ -19,6 +19,9 @@ const { dotsSvg, plusSmSvg, branchSvg } = projectGroupIcons;
 const props = defineProps({
   project: { type: Object, required: true },
   collapsed: { type: Boolean, default: false },
+  // See ProjectHeader: a Remote Project (and its Worktrees) declares `launch: false`, so the
+  // New-session button is hidden until launching a Remote Session is wired. Defaults true for local.
+  canLaunch: { type: Boolean, default: true },
 });
 
 defineEmits(['toggle', 'refresh-commands', 'open-menu', 'new-session']);

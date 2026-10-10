@@ -1,0 +1,364 @@
+// remote-reattach.js is the adapter that picks remote Sessions back up (VIN-160): it lists the live
+// tmux sessions on a Reachable Host and spawns a headless ssh PTY to re-attach each, and when such a
+// PTY dies it decides whether Claude really exited or the link just dropped. Every boundary (the SSH
+// runner, the PTY spawn, the Session store, the reachability and Host lookups, the PTY wiring and the
+// exit finalize) is injected, so the whole lifecycle is exercised here with fakes and no Electron,
+// no socket and no ssh binary. The command shapes and the exit classification it leans on are
+// remote-launch's, tested there; this proves the adapter wires them to the right effects.
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const { createRemoteReattach } = require('../remote-reattach');
+
+const HOST = { id: 'h1', name: 'Mini', sshTarget: 'mac-mini' };
+
+// A faithful-enough double over every injected boundary: an in-memory Session store, a scriptable
+// SSH runner keyed by which remote command it sees (list / has-session / pane-title), a PTY spawn
+// that hands back inert handles, and recorders for the PTY wiring, the exit finalize and the Dot seed.
+function setup({ hosts = [HOST], reachability = {}, sshResponder, mirrorLineage = [] } = {}) {
+  const activeSessions = new Map();
+  const sshCalls = [];
+  const spawned = [];
+  const killed = [];
+  const wired = [];
+  const finalized = [];
+  const seeded = [];
+
+  const sshRun = async (host, step) => {
+    const command = step.command;
+    sshCalls.push({ sshTarget: host.sshTarget, command });
+    if (sshResponder) return sshResponder(command, host);
+    if (command.includes('list-sessions')) return { code: 0, stdout: '' };
+    return { code: 0, stdout: '' };
+  };
+
+  const reattach = createRemoteReattach({
+    activeSessions,
+    pty: { spawn: (_file, _args, _opts) => { const p = { id: spawned.length, kill: () => killed.push(p.id) }; spawned.push(p); return p; } },
+    sshRun,
+    getReachability: () => reachability,
+    getHosts: () => hosts,
+    wirePtyHandlers: (ptyProcess, session, sessionId) => wired.push({ ptyProcess, session, sessionId }),
+    finalizePtyExit: (session, sessionId, code, signal) => finalized.push({ session, sessionId, code, signal }),
+    seedBusyFromTitle: (session, sessionId, title) => seeded.push({ session, sessionId, title }),
+    readMirrorLineage: () => mirrorLineage,
+    getCachedFolder: () => 'some-project',
+    cleanPtyEnv: {},
+    mirrorRoot: '/data/remote-mirrors',
+    log: { info() {}, warn() {}, debug() {} },
+  });
+
+  return { reattach, activeSessions, sshCalls, spawned, killed, wired, finalized, seeded, reachability };
+}
+
+const settle = () => new Promise(r => setImmediate(r));
+
+test('a Reachable Host\'s live tmux Sessions are each re-attached in the background', async () => {
+  const { reattach, activeSessions, spawned, wired } = setup({
+    sshResponder: (command) => command.includes('list-sessions')
+      ? { code: 0, stdout: 'wp-a\nwp-b\n' }
+      : { code: 0, stdout: '' },
+  });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle();
+
+  assert.deepEqual([...activeSessions.keys()].sort(), ['a', 'b']);
+  assert.equal(spawned.length, 2, 'one headless ssh PTY per live Session');
+  assert.deepEqual(wired.map(w => w.sessionId).sort(), ['a', 'b']);
+  for (const s of activeSessions.values()) {
+    assert.equal(s.remote, true);
+    assert.equal(s.rendererAttached, false, 'a background re-attach has no renderer');
+    assert.equal(s._reattached, true, 'marked re-attached so a pre-connect death reads as a drop');
+  }
+});
+
+test('a Session already live on the Host is not re-attached a second time', async () => {
+  const { reattach, activeSessions, spawned } = setup({
+    sshResponder: (command) => command.includes('list-sessions')
+      ? { code: 0, stdout: 'wp-a\nwp-b\n' }
+      : { code: 0, stdout: '' },
+  });
+  activeSessions.set('a', { remote: true, hostId: 'h1', remoteTmuxId: 'a' });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle();
+
+  assert.equal(spawned.length, 1, 'only the not-yet-attached Session b is spawned');
+  assert.ok(activeSessions.has('b'));
+});
+
+test('no tmux server on the Host (nothing ever launched) re-attaches nothing', async () => {
+  const { reattach, activeSessions, spawned } = setup({
+    sshResponder: () => ({ code: 1, stdout: '', stderr: 'no server running' }),
+  });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle();
+  assert.equal(activeSessions.size, 0);
+  assert.equal(spawned.length, 0);
+});
+
+test('a background re-attach seeds the State Dot from the Session\'s pane title', async () => {
+  const { reattach, seeded } = setup({
+    sshResponder: (command) => {
+      if (command.includes('list-sessions')) return { code: 0, stdout: 'wp-a\n' };
+      if (command.includes('display-message')) return { code: 0, stdout: '  ✶ Working…  \n' };
+      return { code: 0, stdout: '' };
+    },
+  });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle(); await settle();
+  assert.equal(seeded.length, 1);
+  assert.equal(seeded[0].sessionId, 'a');
+  assert.equal(seeded[0].title, '✶ Working…', 'the pane title is trimmed and handed to the Dot seed');
+});
+
+test('reviving a dropped Session reuses its object and keeps its buffer', async () => {
+  const { reattach, activeSessions, spawned, wired } = setup();
+  const dropped = { remote: true, hostId: 'h1', remoteTmuxId: 'a', dropped: true, exited: false,
+    outputBuffer: ['old output'], pty: null };
+  activeSessions.set('a', dropped);
+
+  reattach.reattachRemoteSession(HOST, 'a');
+  await settle();
+
+  assert.equal(activeSessions.get('a'), dropped, 'the same Session object is revived, not replaced');
+  assert.equal(dropped.dropped, false);
+  assert.equal(dropped._reattached, true, 'a revived Session is now an attach, so a drop is not an exit');
+  assert.deepEqual(dropped.outputBuffer, ['old output'], 'the buffered last State survives revival');
+  assert.equal(spawned.length, 1);
+  assert.equal(wired[0].session, dropped);
+});
+
+test('reviving a re-keyed dropped Session targets the far-side tmux by remoteTmuxId, not the map key', async () => {
+  // After a fork/plan-accept re-key the Session lives under its realSessionId while its tmux still
+  // carries the original name (the rename was pending or failed). Attach and seed must address the
+  // tmux that exists — wp-<remoteTmuxId> — not wp-<map key>, or revival silently fails (VIN-160).
+  const { reattach, activeSessions, sshCalls } = setup({
+    sshResponder: (command) =>
+      command.includes('display-message') ? { code: 0, stdout: '  ✶ Working…  \n' } : { code: 0, stdout: '' },
+  });
+  const dropped = { remote: true, hostId: 'h1', remoteTmuxId: 'old', realSessionId: 'new',
+    dropped: true, exited: false, outputBuffer: [], pty: null };
+  activeSessions.set('new', dropped);
+
+  reattach.reattachRemoteSession(HOST, 'new');
+  await settle(); await settle();
+
+  const paneProbe = sshCalls.find(c => c.command.includes('display-message'));
+  assert.ok(paneProbe, 'the pane-title probe is attempted');
+  assert.ok(paneProbe.command.includes('wp-old'), 'the pane-title probe targets the original tmux name');
+  assert.ok(!paneProbe.command.includes('wp-new'), 'and not the re-keyed map key');
+});
+
+test('discovery revives a re-keyed dropped Session in place, never a duplicate under the old tmux id', async () => {
+  // A fork/plan-accept re-keyed the Session to realSessionId 'new', but the tmux rename was pending
+  // or failed, so its tmux still answers to wp-old — and the Session dropped. On rediscovery the live
+  // list reports 'old' (the tmux name); it must be resolved back to the 'new' map key and revive that
+  // dropped row in place, not create a second, fresh row keyed on 'old' and leave 'new' dropped
+  // forever (VIN-160).
+  const { reattach, activeSessions, spawned, wired } = setup({
+    sshResponder: (command) => command.includes('list-sessions')
+      ? { code: 0, stdout: 'wp-old\n' }
+      : { code: 0, stdout: '' },
+  });
+  const dropped = { remote: true, hostId: 'h1', remoteTmuxId: 'old', realSessionId: 'new',
+    dropped: true, exited: false, outputBuffer: ['old output'], pty: null };
+  activeSessions.set('new', dropped);
+
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle();
+
+  assert.ok(!activeSessions.has('old'), 'no duplicate row is created under the stale tmux id');
+  assert.equal(activeSessions.get('new'), dropped, 'the dropped re-keyed Session is revived in place');
+  assert.equal(dropped.dropped, false, 'it is no longer dropped');
+  assert.equal(spawned.length, 1, 'exactly one PTY — the revive, not a revive plus a fresh attach');
+  assert.equal(wired[0].session, dropped);
+  assert.equal(wired[0].sessionId, 'new', 'wired under its real map key');
+});
+
+test('across a restart, a live tmux under a stale pre-re-key name is keyed under its realSessionId', async () => {
+  // Quit+relaunch: activeSessions is empty, so the stale old tmux name can't be reconciled from it.
+  // A fork/plan-accept re-keyed the Session to 'new' in the previous run, but the tmux rename was
+  // pending or failed, so tmux still answers to wp-old — and that is what the live list reports. The
+  // mirror's fork graph (new forked-from old) resolves it forward, so the fresh re-attach is keyed
+  // under 'new' (the sidebar row's id, where the State Dot must land) while still attaching to the
+  // tmux that exists, wp-old (VIN-160, AC #1).
+  const { reattach, activeSessions, wired, seeded, sshCalls } = setup({
+    mirrorLineage: [{ id: 'old', forkedFrom: null }, { id: 'new', forkedFrom: 'old' }],
+    sshResponder: (command) => {
+      if (command.includes('list-sessions')) return { code: 0, stdout: 'wp-old\n' };
+      if (command.includes('display-message')) return { code: 0, stdout: '  ✶ Working…  \n' };
+      return { code: 0, stdout: '' };
+    },
+  });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle(); await settle();
+
+  assert.ok(activeSessions.has('new'), 'keyed under the realSessionId the sidebar row uses');
+  assert.ok(!activeSessions.has('old'), 'not keyed under the stale tmux name');
+  assert.equal(activeSessions.get('new').remoteTmuxId, 'old', 'but the far-side tmux is still wp-old');
+  assert.equal(wired[0].sessionId, 'new', 'wired — and so the State Dot pushed — under the real id');
+  assert.equal(seeded[0].sessionId, 'new', 'the seeded busy State lands on the matching row');
+  const paneProbe = sshCalls.find(c => c.command.includes('display-message'));
+  assert.ok(paneProbe.command.includes('wp-old'), 'the pane-title probe targets the tmux that exists');
+});
+
+test('across a restart, a live tmux whose name is current (no re-key) is keyed under itself', async () => {
+  const { reattach, activeSessions, wired } = setup({
+    mirrorLineage: [{ id: 'a', forkedFrom: null }],
+    sshResponder: (command) => command.includes('list-sessions')
+      ? { code: 0, stdout: 'wp-a\n' } : { code: 0, stdout: '' },
+  });
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle();
+
+  assert.ok(activeSessions.has('a'));
+  assert.equal(activeSessions.get('a').remoteTmuxId, 'a', 'tmux id and map key coincide with no re-key');
+  assert.equal(wired[0].sessionId, 'a');
+});
+
+test('an already-live Session is left alone when asked to re-attach it', () => {
+  const { reattach, activeSessions, spawned } = setup();
+  const live = { remote: true, hostId: 'h1', remoteTmuxId: 'a', dropped: false, exited: false };
+  activeSessions.set('a', live);
+  reattach.reattachRemoteSession(HOST, 'a');
+  assert.equal(spawned.length, 0, 'a live Session is not re-spawned');
+});
+
+test('a dead remote PTY is released synchronously, before the async drop-vs-exit probe resolves', async () => {
+  // The drop-vs-exit verdict can wait on a has-session probe (up to connectTimeout). Until it lands
+  // the Session is neither dropped nor exited, so the only thing stopping a terminal-input/-resize
+  // from writing into the dead PTY is that the handle is already gone: handleRemotePtyExit must null
+  // session.pty up front, not only once the probe returns (VIN-160).
+  let resolveProbe;
+  const { reattach } = setup({
+    reachability: {},
+    sshResponder: (command) => command.includes('has-session')
+      ? new Promise(r => { resolveProbe = () => r({ code: 0, stdout: '' }); })
+      : { code: 0, stdout: '' },
+  });
+  const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a', pty: { write() {} } };
+  reattach.handleRemotePtyExit(session, 'a', 1, null);
+  // No await yet: the probe is still outstanding, but the dead handle is already released.
+  assert.equal(session.pty, null, 'the dead PTY is gone before the probe resolves');
+  assert.equal(session.dropped, undefined, 'and the verdict has not yet landed');
+  resolveProbe();
+  await settle(); await settle();
+  assert.equal(session.dropped, true, 'the still-live tmux then classifies it as a drop');
+});
+
+test('an Unreachable Host makes a dead PTY a dropped link, never an exit', async () => {
+  const { reattach, finalized } = setup({ reachability: { h1: false } });
+  const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a' };
+  reattach.handleRemotePtyExit(session, 'a', 1, null);
+  await settle();
+  assert.equal(session.dropped, true);
+  assert.equal(session.pty, null);
+  assert.equal(finalized.length, 0, 'a dropped link is never finalized as exited');
+});
+
+test('a reachable Host whose tmux session still lives is a dropped client, not Claude', async () => {
+  const { reattach, finalized } = setup({
+    reachability: {},
+    sshResponder: (command) => command.includes('has-session') ? { code: 0, stdout: '' } : { code: 0, stdout: '' },
+  });
+  const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a' };
+  reattach.handleRemotePtyExit(session, 'a', 1, null);
+  await settle(); await settle();
+  assert.equal(session.dropped, true);
+  assert.equal(finalized.length, 0);
+});
+
+test('a reachable Host whose tmux session is gone is Claude\'s real exit', async () => {
+  const { reattach, finalized } = setup({
+    reachability: {},
+    sshResponder: (command) => command.includes('has-session') ? { code: 1, stdout: '' } : { code: 0, stdout: '' },
+  });
+  const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a' };
+  reattach.handleRemotePtyExit(session, 'a', 0, null);
+  await settle(); await settle();
+  assert.equal(finalized.length, 1, 'a real exit finalizes exactly as a local one');
+  assert.equal(finalized[0].sessionId, 'a');
+});
+
+test('the Host resolves from the store for one consistent shape; a removed Host keeps the Session stale', async () => {
+  const { reattach, finalized, sshCalls } = setup({ hosts: [], reachability: {} });
+  const session = { remote: true, hostId: 'gone', remoteTmuxId: 'a' };
+  reattach.handleRemotePtyExit(session, 'a', 1, null);
+  await settle();
+  assert.equal(session.dropped, true, 'a Host no longer in the store leaves the Session dropped, not exited');
+  assert.equal(finalized.length, 0);
+  assert.ok(!sshCalls.some(c => c.command.includes('has-session')), 'no probe is attempted against a removed Host');
+});
+
+// ── Forgetting a removed Host's Sessions (VIN-161) ──────────────────────────
+// Removing a Remote Host detaches every live/dropped Session of it on the client without touching
+// the Host: the local ssh client is killed (which only detaches tmux — Claude keeps running), the
+// row is dropped, and the exit the kill triggers must not probe the removed Host or keep it stale.
+
+test('forgetHostSessions detaches only that Host\'s Sessions and leaves the rest', () => {
+  const { reattach, activeSessions, killed } = setup();
+  const live = { remote: true, hostId: 'h1', pty: { kill: () => killed.push('live') } };
+  const dropped = { remote: true, hostId: 'h1', dropped: true, pty: null };
+  const other = { remote: true, hostId: 'h2', pty: { kill: () => killed.push('other') } };
+  const local = { remote: false, pty: { kill: () => killed.push('local') } };
+  activeSessions.set('live', live);
+  activeSessions.set('dropped', dropped);
+  activeSessions.set('other', other);
+  activeSessions.set('local', local);
+
+  const forgotten = reattach.forgetHostSessions('h1');
+
+  assert.deepEqual(forgotten.sort(), ['dropped', 'live']);
+  assert.deepEqual([...activeSessions.keys()].sort(), ['local', 'other'], 'only h1 Sessions are dropped');
+  assert.deepEqual(killed, ['live'], 'the live ssh client is killed (detach); a dropped one has no PTY; h2/local untouched');
+  assert.equal(live._forgotten, true);
+});
+
+test('forgetAccountSessions detaches only the removed Account\'s Sessions, leaving the Host\'s others', () => {
+  const { reattach, activeSessions, killed } = setup();
+  const removed = { remote: true, hostId: 'h1', accountId: 'racc-9', pty: { kill: () => killed.push('removed') } };
+  const removedDropped = { remote: true, hostId: 'h1', accountId: 'racc-9', dropped: true, pty: null };
+  const otherAccount = { remote: true, hostId: 'h1', accountId: 'default', pty: { kill: () => killed.push('default') } };
+  const otherHost = { remote: true, hostId: 'h2', accountId: 'racc-9', pty: { kill: () => killed.push('h2') } };
+  activeSessions.set('removed', removed);
+  activeSessions.set('removedDropped', removedDropped);
+  activeSessions.set('otherAccount', otherAccount);
+  activeSessions.set('otherHost', otherHost);
+
+  const forgotten = reattach.forgetAccountSessions('h1', 'racc-9');
+
+  assert.deepEqual(forgotten.sort(), ['removed', 'removedDropped']);
+  assert.deepEqual([...activeSessions.keys()].sort(), ['otherAccount', 'otherHost'],
+    'the surviving Account and another Host are untouched');
+  assert.deepEqual(killed, ['removed'], 'only the removed Account\'s live ssh client is killed (detach)');
+  assert.equal(removed._forgotten, true, 'marked so its exit short-circuits before re-caching the purged row');
+});
+
+test('a forgotten Account Session\'s PTY exit makes no SSH probe and keeps no stale row (AC1)', async () => {
+  // Same short-circuit as a forgotten Host Session: removing the Account purged its cache rows, so the
+  // exit the detach triggers must neither probe the Account nor finalize (which would re-cache and
+  // resurrect the row). forgetAccountSessions sets `_forgotten`, which handleRemotePtyExit honours.
+  const { reattach, activeSessions, sshCalls, finalized } = setup({ reachability: { h1: true } });
+  const session = { remote: true, hostId: 'h1', accountId: 'racc-9', remoteTmuxId: 'a', pty: { kill() {} } };
+  activeSessions.set('a', session);
+  reattach.forgetAccountSessions('h1', 'racc-9');
+  reattach.handleRemotePtyExit(session, 'a', 0, null);
+  await settle(); await settle();
+  assert.ok(!sshCalls.some(c => c.command.includes('has-session')), 'a forgotten Account Session is never probed');
+  assert.equal(finalized.length, 0, 'no finalize that would re-cache and resurrect the purged row');
+  assert.notEqual(session.dropped, true, 'not kept stale — the Account is gone');
+});
+
+test('a forgotten Session\'s PTY exit makes no SSH probe and keeps no stale row (AC2)', async () => {
+  const { reattach, activeSessions, sshCalls, finalized } = setup({ reachability: { h1: true } });
+  const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a', pty: { kill() {} } };
+  activeSessions.set('a', session);
+  reattach.forgetHostSessions('h1');
+  // The kill triggers the real exit; simulate it landing in the handler.
+  reattach.handleRemotePtyExit(session, 'a', 0, null);
+  await settle(); await settle();
+  assert.ok(!sshCalls.some(c => c.command.includes('has-session')), 'a forgotten Host is never probed');
+  assert.equal(finalized.length, 0, 'no finalize that would re-touch the store');
+  assert.notEqual(session.dropped, true, 'not kept stale for revival — the Host is gone');
+});

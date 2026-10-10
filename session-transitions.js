@@ -1,18 +1,36 @@
 const path = require('path');
 const fs = require('fs');
+const { localSourceFromCtx } = require('./session-source');
 
 /**
  * Fork / plan-accept detection for active PTY sessions.
  * Call init(ctx) once with shared context.
+ *
+ * Detection runs per Source: it reads one source's projects directory and only
+ * considers the active sessions belonging to that source, so a fork landing on
+ * one Host never rekeys a same-named folder's session on another (VIN-152).
+ * detectSessionTransitions takes its source explicitly; the single local watcher
+ * in main.js passes localSource() for it.
  */
-let PROJECTS_DIR, activeSessions, getMainWindow, log, rekeyMcpServer;
+let activeSessions, getMainWindow, log, rekeyMcpServer;
+let local = null;
 
 function init(ctx) {
-  PROJECTS_DIR = ctx.PROJECTS_DIR;
   activeSessions = ctx.activeSessions;
   getMainWindow = ctx.getMainWindow;
   log = ctx.log;
   rekeyMcpServer = ctx.rekeyMcpServer;
+  local = localSourceFromCtx(ctx);
+}
+
+/** The Local Host's source, for the local watcher to pass to detectSessionTransitions. */
+function localSource() {
+  return local;
+}
+
+/** The source a session belongs to — the Local Host unless it carries a sourceId. */
+function sessionSourceId(session) {
+  return session.sourceId || (local && local.id) || 'default';
 }
 
 // --- Fork / plan-accept detection ---
@@ -77,17 +95,18 @@ function readOldSessionTail(filePath) {
 }
 
 /** Detect fork or plan-accept transitions for active PTY sessions in a folder */
-function detectSessionTransitions(folder) {
-  const folderPath = path.join(PROJECTS_DIR, folder);
+function detectSessionTransitions(folder, source) {
+  if (!source) throw new Error('detectSessionTransitions: a source is required');
+  const folderPath = path.join(source.projectsDir, folder);
   let currentFiles;
   try {
     currentFiles = fs.readdirSync(folderPath).filter(f => f.endsWith('.jsonl'));
   } catch { return; }
 
   for (const [sessionId, session] of [...activeSessions]) {
-    if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder) {
+    if (session.exited || session.isPlainTerminal || !session.knownJsonlFiles || session.projectFolder !== folder || sessionSourceId(session) !== source.id) {
       if (!session.exited && !session.isPlainTerminal && session.forkFrom) {
-        log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : 'folderMismatch('+session.projectFolder+' vs '+folder+')'}`);
+        log.info(`[fork-detect] skipped session=${sessionId} forkFrom=${session.forkFrom||'none'} reason=${session.exited ? 'exited' : session.isPlainTerminal ? 'terminal' : !session.knownJsonlFiles ? 'noKnown' : session.projectFolder !== folder ? 'folderMismatch('+session.projectFolder+' vs '+folder+')' : 'sourceMismatch('+sessionSourceId(session)+' vs '+source.id+')'}`);
       }
       continue;
     }
@@ -195,4 +214,4 @@ function detectSessionTransitions(folder) {
 }
 
 
-module.exports = { init, detectSessionTransitions };
+module.exports = { init, detectSessionTransitions, localSource, readNewSessionSignals };

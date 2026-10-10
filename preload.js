@@ -54,6 +54,31 @@ contextBridge.exposeInMainWorld('api', {
   getActiveAccountId: () => ipcRenderer.invoke('get-active-account-id'),
   setActiveAccountId: (id) => ipcRenderer.invoke('set-active-account-id', id),
   getAccountsUsage: () => ipcRenderer.invoke('get-accounts-usage'),
+
+  // Remote Hosts (VIN-153)
+  getHosts: () => ipcRenderer.invoke('get-hosts'),
+  addHost: (host) => ipcRenderer.invoke('add-host', host),
+  addRemoteAccount: (hostId, account) => ipcRenderer.invoke('add-remote-account', hostId, account),
+  removeHost: (hostId) => ipcRenderer.invoke('remove-host', hostId),
+  removeRemoteAccount: (hostId, accountId) => ipcRenderer.invoke('remove-remote-account', hostId, accountId),
+  // The confirmation shown before removing a Host or Account (VIN-161): how many Sessions are live
+  // (unknown when Unreachable) and the message to show. accountId null means the whole Host.
+  previewRemoteRemoval: (hostId, accountId = null) => ipcRenderer.invoke('preview-remote-removal', hostId, accountId),
+  // Switch a Host's active Account (VIN-158): persists the choice on the Host and re-points its
+  // mirror so that Host's Remote Projects swap to the new Account.
+  setRemoteActiveAccount: (hostId, accountId) => ipcRenderer.invoke('set-remote-active-account', hostId, accountId),
+  testHostConnection: (hostId) => ipcRenderer.invoke('test-host-connection', hostId),
+  getHostReachability: () => ipcRenderer.invoke('get-host-reachability'),
+  // Add a Remote Project by hand (VIN-157): the native folder picker can't browse another machine,
+  // so the user picks a Host and types a path, validated on the Host before it is added.
+  addRemoteProject: (hostId, projectPath) => ipcRenderer.invoke('add-remote-project', hostId, projectPath),
+  onHostReachability: (callback) => {
+    // Drop any previous subscriber first, so a re-mount of HostsContainer can't stack duplicate
+    // listeners that each fire the callback on one push.
+    ipcRenderer.removeAllListeners('host-reachability');
+    ipcRenderer.on('host-reachability', (_event, hostId, reachable) => callback(hostId, reachable));
+  },
+
   getHomedir: () => ipcRenderer.invoke('get-homedir'),
   getEffectiveSettings: (projectPath) => ipcRenderer.invoke('get-effective-settings', projectPath),
   getScheduleCreatorCommand: () => ipcRenderer.invoke('get-schedule-creator-command'),

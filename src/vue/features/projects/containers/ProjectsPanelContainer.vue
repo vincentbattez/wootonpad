@@ -190,6 +190,10 @@ function onAddProject() { sb.addProject?.(); }
 function onNewSession(project, btn) { sb.newSession?.(project, btn); }
 
 function openProject(project) {
+  // A Remote Project declares no Project Viewer yet (VIN-154): clicking its card must not open the
+  // viewer against a non-existent local ssh:// path, nor mark it active. Honour the declared
+  // capability (absent on a local Project means allowed, so local cards open as before).
+  if (project.capabilities?.projectViewer === false) return;
   projectsStore.activeProjectPath = project.projectPath;
   sb.openProject?.(project);
 }
