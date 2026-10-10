@@ -205,7 +205,10 @@ function remoteExitDiagnostic({ probe, isPlainTerminal }) {
     };
   }
   return {
-    message: (probe && probe.message) || 'The Remote Host could not start the Session.',
+    // Launch-type-neutral: this fallback is reached for a Session and a Plain Terminal alike (a
+    // failed probe, isPlainTerminal either way), and a Plain Terminal is not a Session (CONTEXT.md),
+    // so the no-message default must not claim the "Session" could not start.
+    message: (probe && probe.message) || 'The Remote Host could not be reached.',
     command: (probe && probe.command) || '',
   };
 }

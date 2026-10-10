@@ -344,8 +344,11 @@ test('remoteExitDiagnostic — a failed probe surfaces its own message and fix, 
 });
 
 test('remoteExitDiagnostic — a probe with no message falls back to a safe default, with no fix', () => {
+  // The fallback is reached on the Plain-Terminal path too, so it must stay launch-type-neutral: a
+  // failed Plain Terminal is not a Session (CONTEXT.md) and must not be told the "Session" failed.
   const diag = remoteExitDiagnostic({ probe: { ok: false }, isPlainTerminal: true });
-  assert.match(diag.message, /could not start the Session/i);
+  assert.match(diag.message, /could not be reached/i);
+  assert.ok(!/Session/i.test(diag.message), 'the neutral fallback must not mention the Session');
   assert.equal(diag.command, '');
 });
 
