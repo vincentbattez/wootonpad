@@ -316,6 +316,18 @@ const stmts = {
     ON CONFLICT(key) DO UPDATE SET value = excluded.value
   `),
   settingsDelete: db.prepare('DELETE FROM settings WHERE key = ?'),
+  settingsDeleteByPrefix: db.prepare("DELETE FROM settings WHERE key LIKE ? ESCAPE '\\'"),
+  // Forgetting a Remote Host (VIN-161): every row keyed by a ssh://<hostId>/… Project key or cache
+  // folder key, matched by prefix. Deletes stay scoped to the one Host — a sibling Host's keys carry
+  // a different hostId, so they never match.
+  cacheDeleteByFolderPrefix: db.prepare("DELETE FROM session_cache WHERE folder LIKE ? ESCAPE '\\'"),
+  cacheDeleteByAccount: db.prepare('DELETE FROM session_cache WHERE accountId = ?'),
+  metaDeleteByFolderPrefix: db.prepare("DELETE FROM cache_meta WHERE folder LIKE ? ESCAPE '\\'"),
+  searchDeleteByFolderPrefix: db.prepare("DELETE FROM search_fts WHERE rowid IN (SELECT rowid FROM search_map WHERE type = 'session' AND folder LIKE ? ESCAPE '\\')"),
+  searchMapDeleteByFolderPrefix: db.prepare("DELETE FROM search_map WHERE type = 'session' AND folder LIKE ? ESCAPE '\\'"),
+  projectAreaDeleteByPrefix: db.prepare("DELETE FROM project_area WHERE projectPath LIKE ? ESCAPE '\\'"),
+  projectGitCacheDeleteByPrefix: db.prepare("DELETE FROM project_git_cache WHERE projectPath LIKE ? ESCAPE '\\'"),
+  projectAvatarsDeleteByPrefix: db.prepare("DELETE FROM project_avatars WHERE projectPath LIKE ? ESCAPE '\\'"),
   searchQuery: db.prepare(`
     SELECT search_map.id, snippet(search_fts, 1, '<mark>', '</mark>', '...', 40) as snippet
     FROM search_fts
@@ -748,6 +760,50 @@ function deleteSetting(key) {
   stmts.settingsDelete.run(key);
 }
 
+// --- Forgetting a Remote Host / Account (VIN-161) ---
+// Escape the LIKE wildcards in a fixed prefix so only a literal `<prefix>…` matches (the ESCAPE '\'
+// clause is on every statement above). A generated hostId carries none of these, but a Host-side
+// path spliced into a Project key could, so the fixed part is escaped regardless.
+function likePrefix(prefix) {
+  return String(prefix).replace(/[\\%_]/g, c => '\\' + c) + '%';
+}
+
+// Forget every cached Session, its cache meta and its search entries for folders under a Host's
+// ssh://<hostId>/ prefix — the authoritative client-side purge of a removed Host's Sessions and
+// search hits, independent of whether the live mirror Source was still registered.
+function deleteRemoteCacheByFolderPrefix(prefix) {
+  const like = likePrefix(prefix);
+  db.transaction(() => {
+    stmts.searchDeleteByFolderPrefix.run(like);
+    stmts.searchMapDeleteByFolderPrefix.run(like);
+    stmts.metaDeleteByFolderPrefix.run(like);
+    stmts.cacheDeleteByFolderPrefix.run(like);
+  })();
+}
+
+// Forget one Account's cached Sessions, scoped by its cache accountId. Folder-keyed cache meta and
+// search are shared across a Host's Accounts (the folder key carries no Account), so they are left
+// for the Host's surviving Accounts; only the Account-scoped session rows go.
+function deleteCachedSessionsByAccount(accountId) {
+  stmts.cacheDeleteByAccount.run(accountId);
+}
+
+// Forget a Host's per-Project rows — Area filing, light Git Snapshot cache, GitLab avatars — keyed
+// by the ssh://<hostId>/ Project-path prefix.
+function deleteProjectDataByPathPrefix(prefix) {
+  const like = likePrefix(prefix);
+  db.transaction(() => {
+    stmts.projectAreaDeleteByPrefix.run(like);
+    stmts.projectGitCacheDeleteByPrefix.run(like);
+    stmts.projectAvatarsDeleteByPrefix.run(like);
+  })();
+}
+
+// Forget a Host's per-Project settings, stored under `project:ssh://<hostId>/…` keys.
+function deleteSettingsByKeyPrefix(prefix) {
+  stmts.settingsDeleteByPrefix.run(likePrefix(prefix));
+}
+
 function closeDb() {
   try { db.close(); } catch {}
 }
@@ -765,5 +821,7 @@ module.exports = {
   getAreaAvatar, setAreaAvatar,
   getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
   moveArea, fileProject,
+  deleteRemoteCacheByFolderPrefix, deleteCachedSessionsByAccount,
+  deleteProjectDataByPathPrefix, deleteSettingsByKeyPrefix,
   closeDb,
 };
