@@ -82,12 +82,17 @@ function createRemoteMirrorIpc({
 
       for (const d of desired) {
         const prev = registered.get(d.id);
-        if (!prev || prev.projectsDir !== d.projectsDir || prev.accountId !== d.accountId) {
-          if (prev) sessionCache.unregisterSource(d.id); // active Account changed: re-point
+        const repoint = prev && (prev.projectsDir !== d.projectsDir || prev.accountId !== d.accountId);
+        if (!prev || repoint) {
+          if (repoint) sessionCache.unregisterSource(d.id); // active Account changed: re-point
           sessionCache.registerSource(createSource({
             id: d.id, projectsDir: d.projectsDir, accountId: d.accountId, hostId: d.hostId,
           }));
           registered.set(d.id, d);
+          // On a re-point (the active Account was switched, VIN-158) the new Account's local mirror
+          // may already hold its tree — a delta-only rsync would transfer nothing, so index it now
+          // rather than leave the sidebar on the old Account's Projects until the Host next changes.
+          if (repoint) sessionCache.populateCacheViaWorker(d.id);
         }
 
         // Mirror + re-index only a Reachable Host. Unreachable → the mirror stops and the cache is

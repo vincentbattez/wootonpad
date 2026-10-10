@@ -8,6 +8,7 @@ const {
   classifyReachability,
   testConnection, checkRemoteDir,
   normalizeHost, addHost, addRemoteAccount, removeHost, removeRemoteAccount,
+  setActiveRemoteAccount,
 } = require('../remote-hosts');
 
 // ── SSH argument safety (no prompt can ever block the app) ───────────
@@ -366,4 +367,36 @@ test('removing a host drops it whole', () => {
   let hosts = addHost([], { name: 'Mini', sshTarget: 'mac-mini' }, idgen);
   hosts = removeHost(hosts, hosts[0].id);
   assert.deepEqual(hosts, []);
+});
+
+// ── Active Account per Host (VIN-158) ────────────────────────────────
+// One active Account per Host (CONTEXT.md). The switcher marks a Host's Account active; the
+// transform records it on that Host alone, and only ever names an Account the Host really has.
+
+test('setting a Host active Account records it on that Host alone', () => {
+  let hosts = addHost([], { name: 'Mini', sshTarget: 'mac-mini' }, idgen);
+  hosts = addHost(hosts, { name: 'Box', sshTarget: 'box' }, idgen);
+  const [mini, box] = hosts;
+  hosts = addRemoteAccount(hosts, mini.id, { name: 'Work', configDir: '/w' }, idgen);
+  const workId = hosts[0].accounts[1].id;
+
+  hosts = setActiveRemoteAccount(hosts, mini.id, workId);
+
+  assert.equal(hosts[0].activeAccountId, workId, 'the picked Host advances');
+  assert.equal(hosts[1].activeAccountId, undefined, 'the other Host is untouched');
+  assert.deepEqual(hosts[1], box, 'the other Host object is unchanged');
+});
+
+test('a Host active Account that names no real Account of the Host is refused', () => {
+  let hosts = addHost([], { name: 'Mini', sshTarget: 'mac-mini' }, idgen);
+  const before = hosts;
+  hosts = setActiveRemoteAccount(hosts, hosts[0].id, 'racc-ghost');
+  assert.deepEqual(hosts, before, 'an unknown Account id leaves the list untouched');
+});
+
+test('setting the active Account of an unknown Host is a no-op', () => {
+  let hosts = addHost([], { name: 'Mini', sshTarget: 'mac-mini' }, idgen);
+  const before = hosts;
+  hosts = setActiveRemoteAccount(hosts, 'host-ghost', 'default');
+  assert.deepEqual(hosts, before);
 });

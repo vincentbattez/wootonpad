@@ -286,6 +286,18 @@ function addRemoteAccount(hosts, hostId, { name, configDir }, idgen) {
   return hosts.map(h => h.id === hostId ? { ...h, accounts: [...h.accounts, account] } : h);
 }
 
+// Record which Account is active on a Host (CONTEXT.md: one active Account per Host). The id must
+// name an Account the Host really has — a stale or forged id is ignored rather than stored, so
+// activeAccount's Default-Account fallback is never relied on to paper over a bad write. Only the
+// named Host changes; every other Host passes through untouched.
+function setActiveRemoteAccount(hosts, hostId, accountId) {
+  return hosts.map(h => {
+    if (h.id !== hostId) return h;
+    if (!Array.isArray(h.accounts) || !h.accounts.some(a => a.id === accountId)) return h;
+    return { ...h, activeAccountId: accountId };
+  });
+}
+
 function removeHost(hosts, hostId) {
   return hosts.filter(h => h.id !== hostId);
 }
@@ -305,4 +317,5 @@ module.exports = {
   classifyReachability,
   testConnection, checkRemoteDir,
   defaultRemoteAccount, normalizeHost, addHost, addRemoteAccount, removeHost, removeRemoteAccount,
+  setActiveRemoteAccount,
 };

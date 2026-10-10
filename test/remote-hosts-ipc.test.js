@@ -182,3 +182,26 @@ test('removing a Host drops its hand-added Remote Projects so no ghost row survi
   ipc.removeHost('h1');
   assert.deepEqual(store.global.remoteProjects, []);
 });
+
+// ── Active Account per Host (VIN-158) ───────────────────────────────────
+// The switcher picks a Host's active Account; the adapter persists it on that Host and returns the
+// fresh list, so the choice survives a restart (it is in the 'hosts' setting) and the mirror re-points.
+
+test('setting a Host active Account persists it and returns the fresh list', () => {
+  const { ipc, store } = harness();
+  store.hosts = [{
+    id: 'h1', name: 'Mini', sshTarget: 'mac-mini',
+    accounts: [{ id: 'default', configDir: '~/.claude' }, { id: 'racc-9', name: 'Work', configDir: '~/.work' }],
+  }];
+  const hosts = ipc.setRemoteActiveAccount('h1', 'racc-9');
+  assert.equal(hosts[0].activeAccountId, 'racc-9', 'the returned list carries the choice');
+  assert.equal(store.hosts[0].activeAccountId, 'racc-9', 'it is persisted for the next restart');
+});
+
+test('setting an Account the Host does not have leaves the stored list unchanged', () => {
+  const { ipc, store } = harness();
+  store.hosts = [{ id: 'h1', name: 'Mini', sshTarget: 'mac-mini', accounts: [{ id: 'default', configDir: '~/.claude' }] }];
+  const hosts = ipc.setRemoteActiveAccount('h1', 'racc-ghost');
+  assert.equal(hosts[0].activeAccountId, undefined);
+  assert.equal(store.hosts[0].activeAccountId, undefined);
+});
