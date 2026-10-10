@@ -13,7 +13,9 @@
   <div v-if="open" class="account-dropdown-vue">
     <!-- One group per Host (CONTEXT.md: the switcher lists Accounts grouped by Host). With only the
          Local Host, `grouped` is false and the header is suppressed, so the dropdown stays the flat
-         list it has always been — one Account per Host adds no noise (VIN-158). -->
+         list it has always been; as soon as any Remote Host is present it groups by Host, whatever
+         the per-Host Account count. The always-visible header button is what stays unchanged with one
+         Account per Host (VIN-158). -->
     <div v-for="group in groups" :key="group.hostId == null ? 'local' : group.hostId" class="acct-dd-group">
       <div v-if="grouped" class="acct-dd-group-header">
         <span class="acct-dd-group-icon" v-html="hostSvg"></span>

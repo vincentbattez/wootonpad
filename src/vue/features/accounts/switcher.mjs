@@ -15,9 +15,9 @@ export function activeHostAccountId(host) {
 // The Host → Accounts groups the open dropdown renders: the Local Host first (the local accounts and
 // their active id, handed in from the frozen renderer's switcher bridge), then one group per Remote
 // Host in order, each carrying its own Accounts and its own active Account.
-export function switcherGroups({ accounts = [], activeAccountId = 'default', hosts = [] } = {}) {
+export function switcherGroups({ accounts, activeAccountId, hosts }) {
   const local = { hostId: null, name: 'Local Host', accounts, activeAccountId };
-  const remote = (hosts || []).map(h => ({
+  const remote = hosts.map(h => ({
     hostId: h.id,
     name: h.name,
     accounts: h.accounts || [],
@@ -36,6 +36,6 @@ export function switcherChips(usage, remote) {
 
 // Whether to frame the list as Host groups at all. With only the Local Host the switcher stays the
 // flat list it has always been — no group header, so one Account per Host adds no noise (VIN-158 AC).
-export function isGrouped(hosts = []) {
-  return (hosts || []).length > 0;
+export function isGrouped(hosts) {
+  return hosts.length > 0;
 }
