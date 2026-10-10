@@ -13,6 +13,7 @@
 
 const path = require('path');
 const remoteRemoval = require('./remote-removal');
+const remoteMirror = require('./remote-mirror');
 
 // Build the adapter over its injected boundaries. `sessionCache` drops the live mirror Source (and
 // with it the Host's cache + search); the four `delete*` functions are db.js's prefix/account
@@ -36,12 +37,6 @@ function createRemoteRemoval({
   }
   if (!mirrorRoot) throw new Error('createRemoteRemoval: mirrorRoot is required');
 
-  // The session-cache Source a Host's mirror registers (remote-mirror.sourceDescriptorFor). Kept in
-  // step with that one definition so a purge can't drop the wrong Source.
-  function hostSourceId(hostId) { return 'ssh:' + hostId; }
-  // The cache accountId a Host's Account scopes its Sessions under (remote-mirror.sourceDescriptorFor).
-  function accountCacheId(hostId, accountId) { return 'ssh:' + hostId + ':' + accountId; }
-
   function removeDir(dir) {
     try {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -56,7 +51,7 @@ function createRemoteRemoval({
   // the whole mirror directory (all Accounts) go. Nothing here reaches the Host.
   function purgeHost(hostId) {
     const prefix = remoteRemoval.hostKeyPrefix(hostId);        // ssh://<hostId>/
-    try { sessionCache.unregisterSource(hostSourceId(hostId)); } catch (e) {
+    try { sessionCache.unregisterSource(remoteMirror.sourceId(hostId)); } catch (e) {
       log.warn && log.warn(`[remote-removal] unregister source for ${hostId}: ${e.message}`);
     }
     deleteRemoteCacheByFolderPrefix(prefix);
@@ -71,7 +66,7 @@ function createRemoteRemoval({
   // removed (CONTEXT.md), so a 'default' id is a no-op guard.
   function purgeAccount(hostId, accountId) {
     if (!accountId || accountId === 'default') return;
-    deleteCachedSessionsByAccount(accountCacheId(hostId, accountId));
+    deleteCachedSessionsByAccount(remoteMirror.cacheAccountId(hostId, accountId));
     removeDir(path.join(mirrorRoot, hostId, accountId));
   }
 

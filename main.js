@@ -1881,6 +1881,10 @@ ipcMain.handle('remove-host', (_event, hostId) => {
   return hosts;
 });
 ipcMain.handle('remove-remote-account', (_event, hostId, accountId) => {
+  // Detach the removed Account's live Sessions first — exactly as remove-host does for the whole
+  // Host — so their exit short-circuits (`_forgotten`) instead of re-caching a row purgeAccount is
+  // about to delete and resurrecting it (AC1, VIN-161). Then drop the Account and purge its data.
+  remoteReattach.forgetAccountSessions(hostId, accountId);
   const hosts = remoteHostsIpc.removeRemoteAccount(hostId, accountId);
   remoteRemoval.purgeAccount(hostId, accountId);
   // The removed Account may have been the active one; re-point the mirror to the fallback (Default)
@@ -2828,6 +2832,11 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     // Host target (its ssh client dying ends the shell) but carries no Source and no tmux id.
     remote: !!remoteCtx,
     hostId: remoteCtx ? remoteCtx.host.id : null,
+    // The Account this Session was launched under (its CLAUDE_CONFIG_DIR picks it). Removing that
+    // Account must detach and forget exactly its live Sessions before their cache rows are purged, or
+    // an exit after the purge re-caches and resurrects a row (VIN-161); the id is how they are found
+    // (remoteReattach.forgetAccountSessions). A local Session / Plain Terminal carries none.
+    accountId: remoteCtx && !isPlainTerminal ? remoteCtx.account.id : null,
     sshTarget: remoteCtx ? remoteCtx.host.sshTarget : null,
     sourceId: remoteCtx && !isPlainTerminal ? remoteCtx.descriptor.id : null,
     remoteTmuxId: remoteCtx && !isPlainTerminal ? sessionId : null,

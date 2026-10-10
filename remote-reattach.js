@@ -141,6 +141,11 @@ function createRemoteReattach({
       projectFolder: folder, knownJsonlFiles: new Set(), sessionSlug: null,
       isPlainTerminal: false, sessionType: 'session', forkFrom: null,
       mcpServer: null, focusToken: null, _openedAt: Date.now(),
+      // The Account this Session is attributed to — the Host's active Account, the only one mirrored
+      // and cached (remote-mirror.sourceDescriptorFor). Carried so removing that Account can forget
+      // this Session before its cache rows are purged (forgetAccountSessions, VIN-161); a tmux name
+      // carries no Account, so this is the only attribution a fresh re-attach can make.
+      accountId: remoteMirror.activeAccount(host).id,
       remote: true, hostId: host.id, sshTarget: host.sshTarget,
       // remoteTmuxId names the far-side tmux: usually == sessionId, but a cross-restart stale-name
       // resolve keys the Session under its realSessionId while its tmux still answers to the old name
@@ -222,26 +227,45 @@ function createRemoteReattach({
       .catch(() => {});
   }
 
-  // Detach and forget every live/dropped Session of a removed Remote Host (VIN-161). Killing the
-  // local ssh client only detaches tmux — Claude keeps running on the Host, exactly what removal
-  // promises (AC2) — so this never kills a tmux session. Each Session is marked `_forgotten` before
-  // its PTY is dropped, so the exit it triggers short-circuits in handleRemotePtyExit rather than
-  // probing the (now removed) Host or keeping a stale row. Returns the ids forgotten.
+  // Detach and forget every live/dropped Session of a removed Remote Host (VIN-161). The exit each
+  // detach triggers short-circuits in handleRemotePtyExit (on the `_forgotten` mark) rather than
+  // probing the now-removed Host or keeping a stale row. Returns the ids forgotten.
   function forgetHostSessions(hostId) {
+    return forgetSessions(s => s.remote && s.hostId === hostId, `host=${hostId}`);
+  }
+
+  // Detach and forget every live/dropped Session of a removed non-Default Account (VIN-161). Same
+  // contract as forgetHostSessions, scoped to the one Account: removing an Account purges its cached
+  // Sessions (remote-removal-ipc.purgeAccount), so a live Session of it must be detached and
+  // `_forgotten`-marked first, or the exit the detach triggers would finalize and re-cache the row
+  // that was just purged — resurrecting a Session the removal promised to forget (AC1). Sessions are
+  // attributed to an Account by the id they launched / re-attached under (session.accountId).
+  function forgetAccountSessions(hostId, accountId) {
+    return forgetSessions(
+      s => s.remote && s.hostId === hostId && s.accountId === accountId, `host=${hostId} account=${accountId}`);
+  }
+
+  // The detach shared by both: kill each matched Session's local ssh client (which only detaches
+  // tmux — Claude keeps running on the Host, AC2), mark it `_forgotten` so the exit short-circuits,
+  // and drop the row. Never kills a tmux session. Returns the ids forgotten.
+  function forgetSessions(matches, scopeLabel) {
     const forgotten = [];
     for (const [id, s] of [...activeSessions]) {
-      if (!s.remote || s.hostId !== hostId) continue;
+      if (!matches(s)) continue;
       s._forgotten = true;
       if (s.pty) { try { s.pty.kill(); } catch (e) { log.warn(`[remote-forget] kill ${id}: ${e.message}`); } }
       s.pty = null;
       activeSessions.delete(id);
       forgotten.push(id);
     }
-    if (forgotten.length) log.info(`[remote-forget] detached ${forgotten.length} Session(s) of host=${hostId}`);
+    if (forgotten.length) log.info(`[remote-forget] detached ${forgotten.length} Session(s) of ${scopeLabel}`);
     return forgotten;
   }
 
-  return { reattachRemoteSessions, reattachRemoteSession, handleRemotePtyExit, markRemoteDropped, forgetHostSessions };
+  return {
+    reattachRemoteSessions, reattachRemoteSession, handleRemotePtyExit, markRemoteDropped,
+    forgetHostSessions, forgetAccountSessions,
+  };
 }
 
 module.exports = { createRemoteReattach };

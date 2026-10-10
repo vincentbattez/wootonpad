@@ -42,7 +42,22 @@ function partitionHostKeys(arr, hostId, keyOf = x => x) {
 // that removal will not stop them; when the Host is Unreachable (or not yet probed) the count is
 // unknown and the message says so rather than claiming zero. `accountName` set means one Account is
 // being removed rather than the whole Host — the Host keeps its other Accounts and their data.
-function describeRemoval({ hostName, accountName = null, liveCount = null, reachable = undefined }) {
+//
+// `reachable` (true | false | undefined=not-yet-probed) is required, not a defaulted option: the
+// count's whole meaning hinges on it (a missing value would silently pick the "can't tell how many"
+// branch), so a caller that forgets it must fail loudly rather than get a misleading message
+// (CODING_STANDARDS.md). Passing `reachable: undefined` explicitly is the legitimate not-yet-probed
+// state; omitting the key altogether is the programming error that throws.
+//
+// The count is the whole Host's live Session total, never one Account's: Sessions share the Host's
+// single tmux socket and their names carry no Account (remote-launch.js), so an Account's Sessions
+// can't be told apart. The Account-scope wording below is phrased so the number is never read as
+// Account-specific (the Spec's "how many Sessions are live on that … Account").
+function describeRemoval(opts) {
+  if (!opts || !('reachable' in opts)) {
+    throw new Error('describeRemoval: reachable is required (true | false | undefined=not-yet-probed)');
+  }
+  const { hostName, accountName = null, liveCount = null, reachable } = opts;
   const header = accountName
     ? `Remove the Account "${accountName}" from ${hostName}?`
     : `Remove the Remote Host "${hostName}"?`;
@@ -58,7 +73,11 @@ function describeRemoval({ hostName, accountName = null, liveCount = null, reach
     sessions = `No Sessions are running on ${hostName}.`;
   } else {
     const n = liveCount === 1 ? '1 Session is' : `${liveCount} Sessions are`;
-    sessions = `${n} still running on ${hostName} — they will not be stopped.`;
+    sessions = accountName
+      // Host-wide, not Account-scoped (see above): say so, so the user doesn't read the count as this
+      // one Account's. Removal still never stops any of them (AC2).
+      ? `${n} running on ${hostName} (across all its Accounts) — removing this Account will not stop any of them.`
+      : `${n} still running on ${hostName} — they will not be stopped.`;
   }
 
   const forget = accountName

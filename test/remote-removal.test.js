@@ -84,3 +84,19 @@ test('removing an Account names the Account and that the Host keeps its other da
   assert.match(msg, /Remove the Account "Work" from Mini\?/);
   assert.match(msg, /The Account on the Host is untouched/);
 });
+
+test('an Account removal with live Sessions phrases the count as Host-wide, not Account-specific', () => {
+  // Sessions share the Host's one tmux socket and carry no Account, so the live count is the whole
+  // Host's — the Account-scope message must not let the user read it as this one Account's.
+  const msg = describeRemoval({ hostName: 'Mini', accountName: 'Work', liveCount: 3, reachable: true });
+  assert.match(msg, /3 Sessions are running on Mini \(across all its Accounts\)/);
+  assert.match(msg, /removing this Account will not stop any of them/);
+});
+
+test('describeRemoval requires reachable — a caller that omits it fails loudly, not silently', () => {
+  // A defaulted reachable would silently pick the "can't tell how many Sessions" branch for a caller
+  // who simply forgot it (CODING_STANDARDS.md). Omitting the key throws; passing it as undefined
+  // (the legitimate not-yet-probed state) does not.
+  assert.throws(() => describeRemoval({ hostName: 'Mini', liveCount: 2 }), /reachable is required/);
+  assert.doesNotThrow(() => describeRemoval({ hostName: 'Mini', liveCount: null, reachable: undefined }));
+});

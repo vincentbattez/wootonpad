@@ -75,15 +75,22 @@ function hasRsyncChanges(stdout) {
 }
 
 // ── Source descriptors ───────────────────────────────────────────────
+// The two ids a Host's mirror is keyed by, as their own functions so every other module that must
+// address the same Source or cache rows (the removal purge forgets exactly these — remote-removal-
+// ipc.js) shares one definition and can't drift onto the wrong Source. `sourceId` is the session-
+// cache Source id (one per Host); `cacheAccountId` is the accountId its cached Sessions carry,
+// Host-scoped so it can never collide with a Local Account's id.
+function sourceId(hostId) { return 'ssh:' + hostId; }
+function cacheAccountId(hostId, accountId) { return 'ssh:' + hostId + ':' + accountId; }
+
 // The session-cache Source a Host's mirror registers. One per Host (its active Account). The
 // adapter diffs reconcile() against what is currently registered and (un)registers the difference.
 function sourceDescriptorFor(host, mirrorRoot) {
   const account = activeAccount(host);
   return {
-    id: 'ssh:' + host.id,
+    id: sourceId(host.id),
     hostId: host.id,
-    // Host-scoped so the cache accountId can never collide with a Local Account's id.
-    accountId: 'ssh:' + host.id + ':' + account.id,
+    accountId: cacheAccountId(host.id, account.id),
     projectsDir: mirrorDirFor(mirrorRoot, host),
     sshTarget: host.sshTarget,
     remoteProjectsDir: remoteProjectsDir(account),
@@ -118,5 +125,5 @@ function annotateProjects(projects, hosts = [], reachability = {}) {
 module.exports = {
   activeAccount, remoteProjectsDir, mirrorDirFor,
   rsyncSshCommand, rsyncArgs, hasRsyncChanges,
-  sourceDescriptorFor, reconcile, annotateProjects,
+  sourceId, cacheAccountId, sourceDescriptorFor, reconcile, annotateProjects,
 };

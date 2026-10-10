@@ -315,6 +315,41 @@ test('forgetHostSessions detaches only that Host\'s Sessions and leaves the rest
   assert.equal(live._forgotten, true);
 });
 
+test('forgetAccountSessions detaches only the removed Account\'s Sessions, leaving the Host\'s others', () => {
+  const { reattach, activeSessions, killed } = setup();
+  const removed = { remote: true, hostId: 'h1', accountId: 'racc-9', pty: { kill: () => killed.push('removed') } };
+  const removedDropped = { remote: true, hostId: 'h1', accountId: 'racc-9', dropped: true, pty: null };
+  const otherAccount = { remote: true, hostId: 'h1', accountId: 'default', pty: { kill: () => killed.push('default') } };
+  const otherHost = { remote: true, hostId: 'h2', accountId: 'racc-9', pty: { kill: () => killed.push('h2') } };
+  activeSessions.set('removed', removed);
+  activeSessions.set('removedDropped', removedDropped);
+  activeSessions.set('otherAccount', otherAccount);
+  activeSessions.set('otherHost', otherHost);
+
+  const forgotten = reattach.forgetAccountSessions('h1', 'racc-9');
+
+  assert.deepEqual(forgotten.sort(), ['removed', 'removedDropped']);
+  assert.deepEqual([...activeSessions.keys()].sort(), ['otherAccount', 'otherHost'],
+    'the surviving Account and another Host are untouched');
+  assert.deepEqual(killed, ['removed'], 'only the removed Account\'s live ssh client is killed (detach)');
+  assert.equal(removed._forgotten, true, 'marked so its exit short-circuits before re-caching the purged row');
+});
+
+test('a forgotten Account Session\'s PTY exit makes no SSH probe and keeps no stale row (AC1)', async () => {
+  // Same short-circuit as a forgotten Host Session: removing the Account purged its cache rows, so the
+  // exit the detach triggers must neither probe the Account nor finalize (which would re-cache and
+  // resurrect the row). forgetAccountSessions sets `_forgotten`, which handleRemotePtyExit honours.
+  const { reattach, activeSessions, sshCalls, finalized } = setup({ reachability: { h1: true } });
+  const session = { remote: true, hostId: 'h1', accountId: 'racc-9', remoteTmuxId: 'a', pty: { kill() {} } };
+  activeSessions.set('a', session);
+  reattach.forgetAccountSessions('h1', 'racc-9');
+  reattach.handleRemotePtyExit(session, 'a', 0, null);
+  await settle(); await settle();
+  assert.ok(!sshCalls.some(c => c.command.includes('has-session')), 'a forgotten Account Session is never probed');
+  assert.equal(finalized.length, 0, 'no finalize that would re-cache and resurrect the purged row');
+  assert.notEqual(session.dropped, true, 'not kept stale — the Account is gone');
+});
+
 test('a forgotten Session\'s PTY exit makes no SSH probe and keeps no stale row (AC2)', async () => {
   const { reattach, activeSessions, sshCalls, finalized } = setup({ reachability: { h1: true } });
   const session = { remote: true, hostId: 'h1', remoteTmuxId: 'a', pty: { kill() {} } };
