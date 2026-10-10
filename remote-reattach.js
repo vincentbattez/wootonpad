@@ -30,9 +30,13 @@ function createRemoteReattach({
   getCachedFolder, readMirrorLineage, cleanPtyEnv, mirrorRoot, log,
 }) {
   // After a restart `activeSessions` is empty, so a stale pre-re-key tmux name can't be reconciled
-  // from it; the mirror's fork graph is read instead (injected so the adapter stays testable). A Host
-  // with no injected reader (or no mirror yet) yields no lineage — every live id keys as itself.
-  readMirrorLineage = readMirrorLineage || (() => []);
+  // from it; the mirror's fork graph is read instead (injected so the adapter stays testable). The
+  // reader is required like every other boundary — a forgotten wiring must fail loudly here, not
+  // silently disable cross-restart stale-name resolution (CODING_STANDARDS). A Host with no mirror yet
+  // yields an empty lineage, so every live id still keys as itself.
+  if (typeof readMirrorLineage !== 'function') {
+    throw new Error('createRemoteReattach: readMirrorLineage is required (the mirror fork-graph reader).');
+  }
   // List the live tmux sessions on the Host's socket and re-attach each one not already attached.
   function reattachRemoteSessions(host) {
     if (!host || !host.sshTarget) return;
@@ -194,12 +198,14 @@ function createRemoteReattach({
   // side (they diverge after a re-key — see reattachRemoteSession). Fire-and-forget: a failed probe
   // simply leaves the Dot where it was.
   //
-  // KNOWN LIMITATION (VIN-160): this recovers only `working`, never `needs input`. The OSC 0 title is
-  // busy-or-idle; a Session paused at a prompt shows the idle title, indistinguishable from a finished
-  // turn, and Claude's `needs input` signal is OSC 9, emitted live and not re-derivable from tmux
-  // state. So a re-attached Session sitting at a prompt keeps its mirrored `done`/`sleeping` Dot until
-  // the CLI's next OSC 9 repaint flips it to `needs input`. The busy case — the one that matters while
-  // Claude thinks — is seeded here; the prompt case waits for the live stream.
+  // KNOWN LIMITATION (VIN-160, ADR 0018): this recovers only `working`, never `needs input`. The OSC 0
+  // title is busy-or-idle; a Session paused at a prompt shows the idle title, indistinguishable from a
+  // finished turn, and Claude's `needs input` signal is OSC 9, emitted live and not re-derivable from
+  // tmux state. So a re-attached Session sitting at a prompt keeps its mirrored `done`/`sleeping` Dot
+  // until the CLI's next OSC 9 repaint flips it to `needs input`. The busy case — the one that matters
+  // while Claude thinks — is seeded here; the prompt case waits for the live stream. ADR 0018 records
+  // why re-deriving the prompt case from tmux is infeasible, and flags that accepting this gap against
+  // AC #2 is a product sign-off, not something the honest README note itself settles.
   // tmuxId is required: both callers resolve it (remoteTmuxId || sessionId) before calling, and a
   // `= sessionId` default would silently probe the wrong tmux after a re-key (CODING_STANDARDS).
   function seedRemoteDot(host, session, sessionId, tmuxId) {

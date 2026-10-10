@@ -30,6 +30,7 @@ const remoteGit = require('./remote-git');
 const remoteHostsIpcModule = require('./remote-hosts-ipc');
 const remoteLaunch = require('./remote-launch');
 const { createRemoteReattach } = require('./remote-reattach');
+const remoteMirrorLineage = require('./remote-mirror-lineage');
 const { createSource } = require('./session-source');
 const { execFile } = require('child_process');
 
@@ -2358,35 +2359,6 @@ function seedBusyFromTitle(session, sessionId, title) {
   }
 }
 
-// The mirror's fork graph for a Host: one `{ id, forkedFrom }` per mirrored .jsonl, `forkedFrom`
-// being the id it was forked / plan-accepted from (null for an original). The adapter walks this to
-// resolve a stale pre-re-key tmux name forward to its realSessionId across a restart (VIN-160). The
-// mirror lays sessions out as <mirrorDir>/<projectFolder>/<id>.jsonl; the same head-of-file signal
-// read that fork/plan-accept detection uses (session-transitions) yields the parent edge, guarding
-// the self-referential parentSessionId a non-forked file carries.
-function readMirrorLineage(host) {
-  const { readNewSessionSignals } = require('./session-transitions');
-  const dir = remoteMirror.mirrorDirFor(MIRROR_ROOT, host);
-  const out = [];
-  let folders;
-  try { folders = fs.readdirSync(dir, { withFileTypes: true }); } catch { return out; }
-  for (const folder of folders) {
-    if (!folder.isDirectory()) continue;
-    const folderPath = path.join(dir, folder.name);
-    let files;
-    try { files = fs.readdirSync(folderPath); } catch { continue; }
-    for (const file of files) {
-      if (!file.endsWith('.jsonl')) continue;
-      const id = file.slice(0, -'.jsonl'.length);
-      const sig = readNewSessionSignals(path.join(folderPath, file));
-      const parent = sig.forkedFrom ||
-        (sig.parentSessionId && sig.parentSessionId !== id ? sig.parentSessionId : null);
-      out.push({ id, forkedFrom: parent });
-    }
-  }
-  return out;
-}
-
 // Picking remote Sessions back up (VIN-160) lives in its own adapter; main.js only wires its
 // boundaries. wirePtyHandlers/finalizePtyExit (the PTY lifecycle) and seedBusyFromTitle stay here
 // because they are shared with a foreground launch and reach mainWindow directly.
@@ -2396,7 +2368,8 @@ const remoteReattach = createRemoteReattach({
   getReachability: () => remoteHostsIpc.getReachability(),
   getHosts: () => remoteHostsIpc.getHosts(),
   wirePtyHandlers, finalizePtyExit, seedBusyFromTitle,
-  getCachedFolder, readMirrorLineage, cleanPtyEnv, mirrorRoot: MIRROR_ROOT, log,
+  getCachedFolder, readMirrorLineage: (host) => remoteMirrorLineage.readMirrorLineage(MIRROR_ROOT, host),
+  cleanPtyEnv, mirrorRoot: MIRROR_ROOT, log,
 });
 
 // --- IPC: open-terminal ---
