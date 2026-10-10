@@ -241,6 +241,17 @@ async function testConnection({ host, accounts = [] }, run) {
   return { ok: true, message: `${host.sshTarget} is ready.` };
 }
 
+// Reachability alone — the one prerequisite a Plain Terminal shares with a Session. A Plain Terminal
+// over ssh (VIN-156) uses none of the Session prerequisites the full probe checks (tmux, claude, an
+// Account's .oauth-token), so diagnosing a failed Plain-Terminal launch with testConnection would
+// surface an irrelevant fix — "install tmux" for a shell that never runs it. This stops at the reach
+// step, so a failure's diagnostic matches the launch type: an Unreachable / refused / changed-key
+// Host gets its own clear message, and a reachable Host returns { ok:true } (the caller then explains
+// the launch-specific fault). `run(step)` is injected exactly as in testConnection.
+async function testReachability({ host }, run) {
+  return diagnoseReach(await run(reachStep()), { sshTarget: host.sshTarget });
+}
+
 // Validate a hand-typed path for a new Remote Project (VIN-157): reach the Host, then check the
 // path is an existing directory. Reachability is checked first so an Unreachable Host surfaces its
 // own clear message and nothing is added, rather than a confusing path error. `run(step)` is
@@ -303,6 +314,6 @@ module.exports = {
   reachStep, toolStep, accountStep, dirStep, remoteConfigDir,
   diagnoseReach, diagnoseTool, diagnoseAccount, diagnoseDir,
   classifyReachability,
-  testConnection, checkRemoteDir,
+  testConnection, testReachability, checkRemoteDir,
   defaultRemoteAccount, normalizeHost, addHost, addRemoteAccount, removeHost, removeRemoteAccount,
 };

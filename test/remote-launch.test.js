@@ -12,7 +12,9 @@ const assert = require('node:assert/strict');
 const {
   TMUX_SOCKET, tmuxSessionName, assertSafeSessionId, parseRemoteProjectPath,
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
+  buildRemoteTerminalArgs,
   buildStopArgs, buildRenameArgs,
+  remoteExitDiagnostic,
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
   buildAttachArgs, sessionsToReattach, resolveReattachKey, classifyRemotePtyExit, remotePtyEnv,
@@ -262,6 +264,95 @@ test('buildRemoteLaunchArgs — the whole nesting round-trips a hostile append-s
   assert.ok(claudeCommand.includes('CLAUDE_CONFIG_DIR=$HOME/work/.claude'));
   // the Host-side cwd (with an apostrophe) survives to tmux's -c argument intact
   assert.equal(tmuxArgv[tmuxArgv.indexOf('-c') + 1], "/srv/o'brien");
+});
+
+// --- a Plain Terminal on a Remote Host (VIN-156) ----------------------------------------------
+// The Plain Terminal button on a Remote Project opens an interactive login shell on the Host, in
+// the Project's directory. Unlike a Session it uses NO tmux: it is ephemeral (CONTEXT.md), so
+// closing the tab or quitting the app drops the ssh client, the remote shell takes SIGHUP and dies
+// — nothing left behind. These assert that shape away from a PTY and the network.
+
+function terminal(extra = {}) {
+  return buildRemoteTerminalArgs({ sshTarget: 'mac-mini', remotePath: '/srv/proj', ...extra });
+}
+
+test('buildRemoteTerminalArgs — forces a PTY with -tt (an interactive shell needs a terminal)', () => {
+  assert.ok(terminal().includes('-tt'));
+});
+
+test('buildRemoteTerminalArgs — carries BatchMode=yes and never relaxes host-key checking', () => {
+  const args = terminal();
+  assert.ok(args.includes('BatchMode=yes'), 'BatchMode=yes must be present');
+  assert.ok(!args.some(a => /accept-new/.test(a)), 'accept-new must never appear');
+  assert.ok(!args.some(a => /StrictHostKeyChecking=no/.test(a)), 'StrictHostKeyChecking=no must never appear');
+});
+
+test('buildRemoteTerminalArgs — terminates options with -- before the target', () => {
+  const args = terminal();
+  const dd = args.indexOf('--');
+  assert.ok(dd >= 0 && args[dd + 1] === 'mac-mini', 'target must sit right after --');
+});
+
+test("buildRemoteTerminalArgs — a login shell cd's into the Project path then exec's an interactive login shell", () => {
+  const args = terminal();
+  const remoteCmd = args[args.length - 1];
+  // the login shell gives the Host's login PATH; its exec'd child is interactive via the -tt PTY
+  assert.match(remoteCmd, /^\$SHELL -lc '/);
+  const inner = unSingleQuote(remoteCmd.slice('$SHELL -lc '.length));
+  assert.match(inner, /^cd '\/srv\/proj' && exec \$SHELL -l$/);
+});
+
+test('buildRemoteTerminalArgs — uses NO tmux: a Plain Terminal leaves nothing behind on the Host', () => {
+  const remoteCmd = terminal()[terminal().length - 1];
+  assert.ok(!/tmux/.test(remoteCmd), 'a Plain Terminal must not run inside tmux');
+});
+
+test('buildRemoteTerminalArgs — the Host-side path round-trips intact (an apostrophe survives the nesting)', () => {
+  const args = terminal({ remotePath: "/srv/o'brien" });
+  const remoteCmd = args[args.length - 1];
+  const inner = unSingleQuote(remoteCmd.slice('$SHELL -lc '.length));
+  const argv = shellSplit(inner);                       // the login-shell layer: cd <path> && exec $SHELL -l
+  assert.equal(argv[argv.indexOf('cd') + 1], "/srv/o'brien");
+});
+
+test('buildRemoteTerminalArgs — a hostile sshTarget (leading dash) is rejected before it reaches argv', () => {
+  assert.throws(() => terminal({ sshTarget: '-oProxyCommand=evil' }), /SSH target/i);
+});
+
+// --- a failed remote launch's diagnostic (VIN-155/156) ----------------------------------------
+// The adapter runs the Host probe (full prerequisites for a Session, reachability only for a Plain
+// Terminal) and passes its result; remoteExitDiagnostic turns it into the line to write, or null.
+
+test('remoteExitDiagnostic — a reachable Host + a failed Plain Terminal writes the generic fallback', () => {
+  // The reachability probe said ok (d.ok true), yet the launch still failed: a Plain Terminal must
+  // not be left silent, so a generic Host-reachable line is surfaced above the raw ssh error.
+  const diag = remoteExitDiagnostic({ probe: { ok: true, message: 'mac-mini is ready.' }, isPlainTerminal: true });
+  assert.ok(diag, 'a failed Plain Terminal on a reachable Host must surface a message');
+  assert.match(diag.message, /reachable, but the terminal could not be opened/i);
+  assert.equal(diag.command, '', 'the generic fallback carries no fix command');
+});
+
+test('remoteExitDiagnostic — a healthy Host + a remote Session stays silent (prior behaviour)', () => {
+  const diag = remoteExitDiagnostic({ probe: { ok: true, message: 'mac-mini is ready.' }, isPlainTerminal: false });
+  assert.equal(diag, null, 'a remote Session on a healthy Host writes nothing');
+});
+
+test('remoteExitDiagnostic — a failed probe surfaces its own message and fix, for either launch type', () => {
+  const probe = { ok: false, step: 'ssh', message: "Can't reach mac-mini over SSH.", command: 'ssh mac-mini' };
+  for (const isPlainTerminal of [true, false]) {
+    const diag = remoteExitDiagnostic({ probe, isPlainTerminal });
+    assert.equal(diag.message, "Can't reach mac-mini over SSH.");
+    assert.equal(diag.command, 'ssh mac-mini');
+  }
+});
+
+test('remoteExitDiagnostic — a probe with no message falls back to a safe default, with no fix', () => {
+  // The fallback is reached on the Plain-Terminal path too, so it must stay launch-type-neutral: a
+  // failed Plain Terminal is not a Session (CONTEXT.md) and must not be told the "Session" failed.
+  const diag = remoteExitDiagnostic({ probe: { ok: false }, isPlainTerminal: true });
+  assert.match(diag.message, /could not be reached/i);
+  assert.ok(!/Session/i.test(diag.message), 'the neutral fallback must not mention the Session');
+  assert.equal(diag.command, '');
 });
 
 // --- stop (kill the tmux session) -------------------------------------------------------------

@@ -172,6 +172,19 @@ function buildRemoteLaunchArgs({ sshTarget, sessionId, isNew, forkFrom, account,
   return sshInvoke(sshTarget, loginShell(inner), { tty: true });
 }
 
+// ── A Plain Terminal on a Remote Host ────────────────────────────────
+// The Plain Terminal button on a Remote Project opens an interactive login shell on the Host, in the
+// Project's directory (VIN-156). Unlike a Session it uses NO tmux: a Plain Terminal is ephemeral
+// (CONTEXT.md), so closing the tab or quitting WootonPad drops the ssh client, the remote shell takes
+// SIGHUP and dies — nothing is left behind on the Host. `-tt` gives it a real terminal; `$SHELL -lc`
+// supplies the Host's login PATH; inside it `cd`s into the Host-side path and exec's a fresh login
+// shell, which the PTY makes interactive — so the user lands at a normal prompt in the Project
+// directory with the login PATH. The path is single-quoted exactly as the tmux launch quotes its -c.
+function buildRemoteTerminalArgs({ sshTarget, remotePath }) {
+  const inner = `cd ${q(remotePath)} && exec $SHELL -l`;
+  return sshInvoke(sshTarget, loginShell(inner), { tty: true });
+}
+
 // Stop kills the tmux session on the Host (Close tab only detaches). No PTY needed.
 function buildStopArgs({ sshTarget, sessionId }) {
   const name = tmuxSessionName(sessionId);
@@ -318,6 +331,35 @@ function shouldReportRemoteLaunchFailure({ remote, stoppedByUser, exitCode, ever
   return !!remote && !stoppedByUser && exitCode !== 0 && !!everOpened;
 }
 
+// ── A failed remote launch's diagnostic ──────────────────────────────
+// An early non-zero exit of a remote PTY the user did not ask for is a spawn failure, and the user
+// should see why rather than be left with a raw ssh error (VIN-155/156). The adapter (main.js) runs
+// the Host probe — the full Session prerequisite probe for a Session, the reachability-only probe for
+// a Plain Terminal (which uses none of those prerequisites) — and passes its result here. This turns
+// that result into the line to write, or null to stay silent:
+//   • probe failed             → its own message (+ the exact fix command), for either launch type.
+//   • probe ok, Session        → null: every prerequisite is fine, so stay silent as before.
+//   • probe ok, Plain Terminal → a generic "Host reachable, terminal couldn't open" line, since the
+//                                reachability probe has no complaint yet the launch still failed
+//                                (typically a bad Project path whose remote `cd` exits non-zero); the
+//                                raw ssh / shell error is already above it in the terminal.
+function remoteExitDiagnostic({ probe, isPlainTerminal }) {
+  if (probe && probe.ok) {
+    if (!isPlainTerminal) return null;
+    return {
+      message: 'The Remote Host is reachable, but the terminal could not be opened — see the error above (often a missing or wrong Project path).',
+      command: '',
+    };
+  }
+  return {
+    // Launch-type-neutral: this fallback is reached for a Session and a Plain Terminal alike (a
+    // failed probe, isPlainTerminal either way), and a Plain Terminal is not a Session (CONTEXT.md),
+    // so the no-message default must not claim the "Session" could not start.
+    message: (probe && probe.message) || 'The Remote Host could not be reached.',
+    command: (probe && probe.command) || '',
+  };
+}
+
 // ── The re-key decision ──────────────────────────────────────────────
 // After a Host's mirror changes, fork / plan-accept detection may have re-keyed some of its live
 // remote Sessions. These two pure functions are the decision the adapter wires around its I/O: what
@@ -347,7 +389,9 @@ function planRemoteTmuxRenames(sessions) {
 module.exports = {
   TMUX_SOCKET, tmuxSessionName, assertSafeSessionId, parseRemoteProjectPath,
   buildClaudeCommand, buildTmuxCommand, buildRemoteLaunchArgs,
+  buildRemoteTerminalArgs,
   buildStopArgs, buildRenameArgs,
+  remoteExitDiagnostic,
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
   buildAttachArgs, sessionsToReattach, resolveReattachKey, classifyRemotePtyExit, remotePtyEnv,

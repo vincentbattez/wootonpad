@@ -199,12 +199,20 @@ function createRemoteHostsIpc({
     if (!host) return Promise.resolve({ ok: false, step: 'unknown', message: 'Host not found.', command: '' });
     return remoteHosts.testConnection({ host, accounts: host.accounts }, step => run(host, step));
   }
+  // Reachability only, for a failed Plain Terminal (VIN-156): it uses none of the Session
+  // prerequisites testConnection probes, so scoping its diagnosis here keeps the surfaced message
+  // relevant to the launch type instead of advising a tmux/claude/token fix it never needs.
+  function testReachability(hostId) {
+    const host = getHosts().find(h => h.id === hostId);
+    if (!host) return Promise.resolve({ ok: false, step: 'unknown', message: 'Host not found.', command: '' });
+    return remoteHosts.testReachability({ host }, step => run(host, step));
+  }
   function getReachability() { return { ...hostReachability }; }
 
   return {
     getHosts, setHosts,
     probeHostsOnce, startHostProbe, stopHostProbe, getReachability,
-    addHost, addRemoteAccount, removeHost, removeRemoteAccount, testConnection,
+    addHost, addRemoteAccount, removeHost, removeRemoteAccount, testConnection, testReachability,
     addRemoteProject,
   };
 }

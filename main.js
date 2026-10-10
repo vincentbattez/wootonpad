@@ -66,6 +66,25 @@ const cleanPtyEnv = Object.fromEntries(
   )
 );
 
+// The node-pty spawn options shared by every ssh-PTY launch site — a remote Session (Claude in tmux),
+// a remote Plain Terminal (a login shell, no tmux), and the background re-attach. In all the whole
+// terminal is the ssh client's own PTY, so they want an identical terminal shape and env: a real
+// xterm with truecolor, and the ssh askpass guard (SSH_ASKPASS_REQUIRE=never + empty DISPLAY) so a
+// passphrase prompt fails fast instead of popping a GUI. ssh forwards TERM but NOT TERM_PROGRAM (what
+// Claude checks before emitting OSC 9), so a Session injects TERM_PROGRAM into the tmux session env in
+// remote-launch, not here; a Plain Terminal runs no Claude and needs none. The env is remote-launch's
+// remotePtyEnv — the one safe shape, also used by the background re-attach (VIN-160) — so no site can
+// drift; this wraps it with the terminal geometry the launch sites share (VIN-156).
+function remoteSshSpawnOpts() {
+  return {
+    name: 'xterm-256color',
+    cols: 120,
+    rows: 30,
+    cwd: os.homedir(),
+    env: remoteLaunch.remotePtyEnv(cleanPtyEnv),
+  };
+}
+
 // Shell profiles → shell-profiles.js
 const {
   discoverShellProfiles, getShellProfiles, resolveShell, isWindows, isWslShell,
@@ -2082,9 +2101,11 @@ ipcMain.handle('stop-session', (_event, sessionId) => {
   if (!session || session.exited) return { ok: false, error: 'not running' };
   // Marks the exit as deliberate so the renderer doesn't report it as a crash.
   session._stoppedByUser = true;
-  // On a Remote Host, killing the local ssh PTY would only detach — Claude would keep running inside
-  // tmux. Stop means gone: kill the tmux session on the Host first, then drop the ssh client (VIN-155).
-  if (session.remote && session.sshTarget) {
+  // On a Remote Host, killing the local ssh PTY would only detach a Session — Claude would keep
+  // running inside tmux. Stop means gone: kill the tmux session on the Host first, then drop the ssh
+  // client (VIN-155). A remote Plain Terminal runs in no tmux (VIN-156), so dropping its ssh client
+  // already ends the shell on the Host — there is nothing to kill.
+  if (session.remote && session.sshTarget && !session.isPlainTerminal) {
     try {
       const args = remoteLaunch.buildStopArgs({ sshTarget: session.sshTarget, sessionId: session.remoteTmuxId || sessionId });
       runRemoteSsh(args, (err) => {
@@ -2297,21 +2318,29 @@ function finalizePtyExit(session, sessionId, exitCode, signal) {
     );
     // A Remote Session's PTY is the ssh client: an early non-zero exit the user did not ask for is a
     // spawn failure (unreachable Host, missing tmux/claude, an unauthenticated Account). Run the
-    // Host's prerequisite diagnostic and write its clear message into the terminal instead of
-    // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
-    // Only for a Session the user actually opened: a background re-attach the user never saw must not
-    // have a red launch-failure diagnostic written into a terminal nobody opened (VIN-160).
+    // Host probe and write its clear message into the terminal instead of leaving the user with a raw
+    // ssh error (VIN-155). A Session probes its full prerequisites (reachability, tmux, claude, each
+    // Account's token); a Plain Terminal uses none of tmux/claude/token, so it probes reachability
+    // only — otherwise a reachable Host that merely lacks tmux would surface an irrelevant "install
+    // tmux" fix for a shell that never runs it (VIN-156). The pure remoteExitDiagnostic turns the
+    // probe result into the line to write (or null to stay silent for a healthy remote Session).
+    // Fire-and-forget — the exit is reported below. Only for a Session the user actually opened: a
+    // background re-attach the user never saw must not have a red launch-failure diagnostic written
+    // into a terminal nobody opened (VIN-160).
     if (remoteLaunch.shouldReportRemoteLaunchFailure({
       remote: session.remote, stoppedByUser: session._stoppedByUser,
       exitCode, everOpened: session._everOpened,
     })) {
       const reportId = session.realSessionId || sessionId;
-      Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
-        if (d && d.ok) return;
-        const msg = (d && d.message) || 'The Remote Host could not start the Session.';
-        const fix = d && d.command ? `\r\n\x1b[2mTry: ${d.command}\x1b[0m` : '';
+      const probe = session.isPlainTerminal
+        ? remoteHostsIpc.testReachability(session.hostId)
+        : remoteHostsIpc.testConnection(session.hostId);
+      Promise.resolve(probe).then(d => {
+        const diag = remoteLaunch.remoteExitDiagnostic({ probe: d, isPlainTerminal: !!session.isPlainTerminal });
+        if (!diag) return;
+        const fix = diag.command ? `\r\n\x1b[2mTry: ${diag.command}\x1b[0m` : '';
         if (mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${msg}\x1b[0m${fix}\r\n`);
+          mainWindow.webContents.send('terminal-data', reportId, `\r\n\x1b[31m${diag.message}\x1b[0m${fix}\r\n`);
         }
       }).catch(() => {});
     }
@@ -2322,7 +2351,16 @@ function finalizePtyExit(session, sessionId, exitCode, signal) {
     session.mcpServer = null;
 
     const realId = session.realSessionId || sessionId;
-    const exitInfo = { stoppedByUser: !!session._stoppedByUser, signal: signal ?? null };
+    // The renderer's crash-keep policy must treat a remote Plain Terminal like a Session (keep its
+    // tab so the async Host diagnostic can land), but it must NOT re-derive "remote Plain Terminal"
+    // from the (forgeable) Project key in the renderer — ADR 0017 keeps key-scheme reading in named
+    // main-process seams. main owns these facts, so propagate them on the exit event (VIN-156).
+    const exitInfo = {
+      stoppedByUser: !!session._stoppedByUser,
+      signal: signal ?? null,
+      remote: !!session.remote,
+      isPlainTerminal: !!session.isPlainTerminal,
+    };
     if (mainWindow && !mainWindow.isDestroyed()) {
       mainWindow.webContents.send('process-exited', realId, exitCode, exitInfo);
       // If a fork/plan-accept transition re-keyed this session under realId
@@ -2498,7 +2536,20 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
   let mcpServer = null;
   let focusToken = null;
   try {
-    if (isPlainTerminal) {
+    if (remoteCtx && isPlainTerminal) {
+      // A Plain Terminal on a Remote Project: ssh -tt into the Host and open an interactive login
+      // shell in the Project's Host-side path, with the Host's login PATH (VIN-156). No tmux — a
+      // Plain Terminal is ephemeral (CONTEXT.md): when this tab closes or the app quits the ssh
+      // client dies, the remote shell takes SIGHUP and is gone, leaving nothing behind on the Host.
+      // The whole terminal is the ssh client's PTY. remote-launch owns the quoting; a missing Host
+      // was already surfaced by remoteLaunchContext above.
+      const termArgs = remoteLaunch.buildRemoteTerminalArgs({
+        sshTarget: remoteCtx.host.sshTarget,
+        remotePath: remoteCtx.remotePath,
+      });
+      log.info(`[remote-terminal] host=${remoteCtx.host.sshTarget} path=${remoteCtx.remotePath}`);
+      ptyProcess = pty.spawn('ssh', termArgs, remoteSshSpawnOpts());
+    } else if (isPlainTerminal) {
       // Plain terminal: interactive login shell, no claude command
       // Inject a shell function to override `claude` with a helpful message
       const claudeShim = 'claude() { echo "\\033[33mTo start a Claude session, use the + button in the sidebar.\\033[0m"; return 1; }; export -f claude 2>/dev/null;';
@@ -2543,18 +2594,13 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
       // preLaunchCmd content, which has no place in the app log.
       const launchVerb = sessionOptions?.forkFrom ? 'fork' : isNew ? 'new' : 'resume';
       log.info(`[remote-launch] session=${sessionId} host=${remoteCtx.host.sshTarget} verb=${launchVerb}`);
-      // ssh forwards TERM, which gives the far side a real terminal type; TERM_PROGRAM (what Claude
-      // checks before emitting OSC 9) is NOT forwarded, so it is injected into the tmux session env by
-      // remote-launch instead. OSC 0 titles (the working state) cross via tmux set-titles regardless.
-      // The spawn env (colour + non-interactive ssh) is remote-launch.remotePtyEnv, shared with the
-      // background re-attach so the one safe shape lives in one place (VIN-160).
-      ptyProcess = pty.spawn('ssh', launchArgs, {
-        name: 'xterm-256color',
-        cols: 120,
-        rows: 30,
-        cwd: os.homedir(),
-        env: remoteLaunch.remotePtyEnv(cleanPtyEnv),
-      });
+      // Same ssh-PTY spawn options as the remote Plain Terminal and the background re-attach
+      // (remoteSshSpawnOpts, whose env is remote-launch.remotePtyEnv): the terminal is the ssh
+      // client's PTY in every case, so the one safe shape lives in one place (VIN-156 / VIN-160).
+      // TERM_PROGRAM, which Claude checks before emitting OSC 9, is injected into the tmux session env
+      // by remote-launch, not here (ssh does not forward it); OSC 0 titles cross via tmux set-titles
+      // regardless.
+      ptyProcess = pty.spawn('ssh', launchArgs, remoteSshSpawnOpts());
     } else {
       // Build claude command with session options
       let claudeCmd;
@@ -2711,12 +2757,14 @@ ipcMain.handle('open-terminal', async (_event, sessionId, projectPath, isNew, se
     _everOpened: true,
     // Remote Session bookkeeping: the Source it was launched against (so the mirror's fork detection
     // only considers it), the Host target (for a later tmux rename / kill), and the id its tmux
-    // session currently carries, so a re-key can rename the far side from this to the real id.
+    // session currently carries, so a re-key can rename the far side from this to the real id. A
+    // remote Plain Terminal runs in no tmux and backs no Session (VIN-156): it keeps `remote` and the
+    // Host target (its ssh client dying ends the shell) but carries no Source and no tmux id.
     remote: !!remoteCtx,
     hostId: remoteCtx ? remoteCtx.host.id : null,
     sshTarget: remoteCtx ? remoteCtx.host.sshTarget : null,
-    sourceId: remoteCtx ? remoteCtx.descriptor.id : null,
-    remoteTmuxId: remoteCtx ? sessionId : null,
+    sourceId: remoteCtx && !isPlainTerminal ? remoteCtx.descriptor.id : null,
+    remoteTmuxId: remoteCtx && !isPlainTerminal ? sessionId : null,
   };
   activeSessions.set(sessionId, session);
   // Binds this Project to its one Run Terminal, and survives the PTY's exit.
