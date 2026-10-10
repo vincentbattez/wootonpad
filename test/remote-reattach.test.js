@@ -148,6 +148,32 @@ test('reviving a re-keyed dropped Session targets the far-side tmux by remoteTmu
   assert.ok(!paneProbe.command.includes('wp-new'), 'and not the re-keyed map key');
 });
 
+test('discovery revives a re-keyed dropped Session in place, never a duplicate under the old tmux id', async () => {
+  // A fork/plan-accept re-keyed the Session to realSessionId 'new', but the tmux rename was pending
+  // or failed, so its tmux still answers to wp-old — and the Session dropped. On rediscovery the live
+  // list reports 'old' (the tmux name); it must be resolved back to the 'new' map key and revive that
+  // dropped row in place, not create a second, fresh row keyed on 'old' and leave 'new' dropped
+  // forever (VIN-160).
+  const { reattach, activeSessions, spawned, wired } = setup({
+    sshResponder: (command) => command.includes('list-sessions')
+      ? { code: 0, stdout: 'wp-old\n' }
+      : { code: 0, stdout: '' },
+  });
+  const dropped = { remote: true, hostId: 'h1', remoteTmuxId: 'old', realSessionId: 'new',
+    dropped: true, exited: false, outputBuffer: ['old output'], pty: null };
+  activeSessions.set('new', dropped);
+
+  reattach.reattachRemoteSessions(HOST);
+  await settle(); await settle();
+
+  assert.ok(!activeSessions.has('old'), 'no duplicate row is created under the stale tmux id');
+  assert.equal(activeSessions.get('new'), dropped, 'the dropped re-keyed Session is revived in place');
+  assert.equal(dropped.dropped, false, 'it is no longer dropped');
+  assert.equal(spawned.length, 1, 'exactly one PTY — the revive, not a revive plus a fresh attach');
+  assert.equal(wired[0].session, dropped);
+  assert.equal(wired[0].sessionId, 'new', 'wired under its real map key');
+});
+
 test('an already-live Session is left alone when asked to re-attach it', () => {
   const { reattach, activeSessions, spawned } = setup();
   const live = { remote: true, hostId: 'h1', remoteTmuxId: 'a', dropped: false, exited: false };

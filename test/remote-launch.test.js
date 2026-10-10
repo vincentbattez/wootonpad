@@ -16,6 +16,7 @@ const {
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
   buildAttachArgs, sessionsToReattach, classifyRemotePtyExit, remotePtyEnv,
+  isRemoteDropCandidate, shouldReportRemoteLaunchFailure,
 } = require('../remote-launch');
 
 // --- an independent single-quote oracle -------------------------------------------------------
@@ -451,8 +452,51 @@ test('remotePtyEnv layers the colour + non-interactive ssh env over the cleaned 
   assert.equal(env.DISPLAY, '');
 });
 
-test('remotePtyEnv defaults to a bare env when no base is given', () => {
-  const env = remotePtyEnv();
-  assert.equal(env.TERM, 'xterm-256color');
-  assert.equal(env.DISPLAY, '');
+// --- routing a dead remote PTY (VIN-160) ------------------------------------------------------
+// Before classifyRemotePtyExit can run, a dead PTY must first be routed to it. isRemoteDropCandidate
+// is that gate — connected-once or re-attached is a drop candidate worth probing; a never-connected
+// foreground launch, a Stop, or a local Session finalizes straight away.
+
+test('isRemoteDropCandidate — a connected remote Session the user did not Stop is a drop candidate', () => {
+  assert.equal(isRemoteDropCandidate({ remote: true, stoppedByUser: false, everConnected: true, reattached: false }), true);
+});
+
+test('isRemoteDropCandidate — a background re-attach is a drop candidate even before it connects', () => {
+  assert.equal(isRemoteDropCandidate({ remote: true, stoppedByUser: false, everConnected: false, reattached: true }), true);
+});
+
+test('isRemoteDropCandidate — a foreground launch that never connected is a failed launch, not a drop', () => {
+  assert.equal(isRemoteDropCandidate({ remote: true, stoppedByUser: false, everConnected: false, reattached: false }), false);
+});
+
+test('isRemoteDropCandidate — a deliberate Stop finalizes, never a drop', () => {
+  assert.equal(isRemoteDropCandidate({ remote: true, stoppedByUser: true, everConnected: true, reattached: true }), false);
+});
+
+test('isRemoteDropCandidate — a local Session is never a drop candidate', () => {
+  assert.equal(isRemoteDropCandidate({ remote: false, stoppedByUser: false, everConnected: true, reattached: true }), false);
+});
+
+// --- surfacing a launch-failure diagnostic (VIN-160) ------------------------------------------
+// Once a remote PTY exit is finalized, shouldReportRemoteLaunchFailure decides whether to write the
+// Host's red diagnostic — only for a Session the user actually opened.
+
+test('shouldReportRemoteLaunchFailure — an opened remote Session dying non-zero earns the diagnostic', () => {
+  assert.equal(shouldReportRemoteLaunchFailure({ remote: true, stoppedByUser: false, exitCode: 1, everOpened: true }), true);
+});
+
+test('shouldReportRemoteLaunchFailure — a background re-attach the user never opened writes nothing', () => {
+  assert.equal(shouldReportRemoteLaunchFailure({ remote: true, stoppedByUser: false, exitCode: 1, everOpened: false }), false);
+});
+
+test('shouldReportRemoteLaunchFailure — a clean exit (code 0) is no launch failure', () => {
+  assert.equal(shouldReportRemoteLaunchFailure({ remote: true, stoppedByUser: false, exitCode: 0, everOpened: true }), false);
+});
+
+test('shouldReportRemoteLaunchFailure — a Stop is the user\'s doing, not a launch failure', () => {
+  assert.equal(shouldReportRemoteLaunchFailure({ remote: true, stoppedByUser: true, exitCode: 1, everOpened: true }), false);
+});
+
+test('shouldReportRemoteLaunchFailure — a local Session gets no Remote Host diagnostic', () => {
+  assert.equal(shouldReportRemoteLaunchFailure({ remote: false, stoppedByUser: false, exitCode: 1, everOpened: true }), false);
 });

@@ -156,8 +156,9 @@ function sshInvoke(sshTarget, remoteCommand, { tty = false } = {}) {
 // colour terminal; SSH_ASKPASS_REQUIRE=never + empty DISPLAY keep ssh non-interactive so a missing
 // key fails fast instead of popping an askpass GUI (the PTY half of ADR 0016's BatchMode safety).
 // Shared by the foreground launch (main.js) and the background re-attach (remote-reattach.js) so the
-// one safe shape lives in one place (VIN-160).
-function remotePtyEnv(baseEnv = {}) {
+// one safe shape lives in one place (VIN-160). baseEnv is required: every caller has a cleaned env to
+// layer over, and a silent `{}` default would ship a PTY missing the caller's PATH (CODING_STANDARDS).
+function remotePtyEnv(baseEnv) {
   return {
     ...baseEnv,
     TERM: 'xterm-256color', COLORTERM: 'truecolor', FORCE_COLOR: '3',
@@ -267,6 +268,24 @@ function classifyRemotePtyExit({ stoppedByUser, reachable, hasSessionCode }) {
   return 'exited';
 }
 
+// Before classifyRemotePtyExit can run, a dead PTY must first be routed to it at all. A remote
+// Session the user did not Stop is a drop *candidate* — worth the has-session probe — when it either
+// connected once (a live link that just died) or arrived by re-attach (`reattached`: a handshake to a
+// tmux we just listed as live, so a pre-connect death is a dropped handshake, not a failed launch).
+// Everything else finalizes straight away: a local Session, a deliberate Stop, or a *foreground*
+// launch that never connected — a genuinely failed launch, not a drop (VIN-160).
+function isRemoteDropCandidate({ remote, stoppedByUser, everConnected, reattached }) {
+  return !!remote && !stoppedByUser && (!!everConnected || !!reattached);
+}
+
+// Once a remote PTY exit is finalized, whether to surface the Host's launch-failure diagnostic. Only
+// a Session the user actually opened (`everOpened`), did not Stop, and which died non-zero earns the
+// red message: a background re-attach the user never saw must not write a diagnostic into a terminal
+// nobody opened (VIN-160).
+function shouldReportRemoteLaunchFailure({ remote, stoppedByUser, exitCode, everOpened }) {
+  return !!remote && !stoppedByUser && exitCode !== 0 && !!everOpened;
+}
+
 // ── The re-key decision ──────────────────────────────────────────────
 // After a Host's mirror changes, fork / plan-accept detection may have re-keyed some of its live
 // remote Sessions. These two pure functions are the decision the adapter wires around its I/O: what
@@ -300,4 +319,5 @@ module.exports = {
   remoteTransitionFolders, planRemoteTmuxRenames,
   listSessionsCommand, parseTmuxSessionList, hasSessionCommand, paneTitleCommand,
   buildAttachArgs, sessionsToReattach, classifyRemotePtyExit, remotePtyEnv,
+  isRemoteDropCandidate, shouldReportRemoteLaunchFailure,
 };

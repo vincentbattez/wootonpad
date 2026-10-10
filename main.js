@@ -2267,7 +2267,10 @@ function wirePtyHandlers(ptyProcess, session, sessionId) {
     // finalize. A background re-attach, though, attaches to a tmux session just listed as live, so a
     // pre-connect death there is a dropped handshake, never a failed launch: route it through the
     // drop classifier too (`_reattached`), or a slept laptop would wrongly flip the row to exited.
-    if (session.remote && !session._stoppedByUser && (session._everConnected || session._reattached)) {
+    if (remoteLaunch.isRemoteDropCandidate({
+      remote: session.remote, stoppedByUser: session._stoppedByUser,
+      everConnected: session._everConnected, reattached: session._reattached,
+    })) {
       remoteReattach.handleRemotePtyExit(session, sessionId, exitCode, signal);
       return;
     }
@@ -2292,7 +2295,10 @@ function finalizePtyExit(session, sessionId, exitCode, signal) {
     // leaving the user with a raw ssh error (VIN-155). Fire-and-forget — the exit is reported below.
     // Only for a Session the user actually opened: a background re-attach the user never saw must not
     // have a red launch-failure diagnostic written into a terminal nobody opened (VIN-160).
-    if (session.remote && !session._stoppedByUser && exitCode !== 0 && session._everOpened) {
+    if (remoteLaunch.shouldReportRemoteLaunchFailure({
+      remote: session.remote, stoppedByUser: session._stoppedByUser,
+      exitCode, everOpened: session._everOpened,
+    })) {
       const reportId = session.realSessionId || sessionId;
       Promise.resolve(remoteHostsIpc.testConnection(session.hostId)).then(d => {
         if (d && d.ok) return;

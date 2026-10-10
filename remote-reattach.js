@@ -39,15 +39,24 @@ function createRemoteReattach({
         const liveIds = remoteLaunch.parseTmuxSessionList(res.stdout);
         if (!liveIds.length) return;
         // Already-live Sessions of this Host are skipped; a dropped placeholder is eligible for revival.
+        // A dropped, re-keyed Session lives under its realSessionId while its tmux still carries the old
+        // name (the rename was pending or failed), so its live tmux id (the old one) is NOT its map key.
+        // Map every live tmux id back to the map key of the Session that owns it, and revive under that
+        // real key — keying a fresh row on the raw live id would strand the dropped row and duplicate it
+        // under the wrong key, so 'wake → re-attached automatically' would never revive it (VIN-160).
         const attached = [];
+        const keyByTmuxId = new Map();
         for (const [id, s] of activeSessions) {
-          if (!s.remote || s.hostId !== host.id || s.exited || s.dropped) continue;
+          if (!s.remote || s.hostId !== host.id) continue;
+          const tmuxId = s.remoteTmuxId || id;
+          if (!keyByTmuxId.has(tmuxId)) keyByTmuxId.set(tmuxId, id);
+          if (s.exited || s.dropped) continue;
           attached.push(id);
           if (s.remoteTmuxId) attached.push(s.remoteTmuxId);
           if (s.realSessionId) attached.push(s.realSessionId);
         }
-        for (const id of remoteLaunch.sessionsToReattach(liveIds, attached)) {
-          reattachRemoteSession(host, id);
+        for (const liveId of remoteLaunch.sessionsToReattach(liveIds, attached)) {
+          reattachRemoteSession(host, keyByTmuxId.get(liveId) || liveId);
         }
       })
       .catch(e => log.warn(`[remote-reattach] list for ${host.sshTarget} failed: ${e.message}`));
@@ -166,7 +175,9 @@ function createRemoteReattach({
   // state. So a re-attached Session sitting at a prompt keeps its mirrored `done`/`sleeping` Dot until
   // the CLI's next OSC 9 repaint flips it to `needs input`. The busy case — the one that matters while
   // Claude thinks — is seeded here; the prompt case waits for the live stream.
-  function seedRemoteDot(host, session, sessionId, tmuxId = sessionId) {
+  // tmuxId is required: both callers resolve it (remoteTmuxId || sessionId) before calling, and a
+  // `= sessionId` default would silently probe the wrong tmux after a re-key (CODING_STANDARDS).
+  function seedRemoteDot(host, session, sessionId, tmuxId) {
     Promise.resolve(sshRun(host, { command: remoteLaunch.paneTitleCommand(tmuxId) }, { connectTimeout: 10 }))
       .then(res => {
         if (!res || res.code !== 0) return;
