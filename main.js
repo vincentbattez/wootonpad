@@ -139,6 +139,8 @@ const {
   getAreaAvatar, setAreaAvatar,
   getAreas, getAreaAssignments, createArea, renameArea, setAreaCollapsed, deleteArea,
   moveArea, fileProject,
+  deleteRemoteCacheByFolderPrefix, deleteCachedSessionsByAccount,
+  deleteProjectDataByPathPrefix, deleteSettingsByKeyPrefix,
   closeDb,
 } = require('./db');
 
@@ -1866,8 +1868,40 @@ const remoteHostsIpc = remoteHostsIpcModule.createRemoteHostsIpc({
 ipcMain.handle('get-hosts', () => remoteHostsIpc.getHosts());
 ipcMain.handle('add-host', (_event, host) => remoteHostsIpc.addHost(host));
 ipcMain.handle('add-remote-account', (_event, hostId, account) => remoteHostsIpc.addRemoteAccount(hostId, account));
-ipcMain.handle('remove-host', (_event, hostId) => remoteHostsIpc.removeHost(hostId));
-ipcMain.handle('remove-remote-account', (_event, hostId, accountId) => remoteHostsIpc.removeRemoteAccount(hostId, accountId));
+// Removing a Remote Host, or one of its non-Default Accounts, forgets everything about it on the
+// client and never touches the Host — Sessions still running there keep running (VIN-161). The
+// orchestration is: detach the Host's live Sessions (kill the local ssh client, which only detaches
+// tmux), drop the Host/Account from the store, then purge its cache, per-Project rows, settings and
+// mirror files. The confirmation (preview-remote-removal) names how many Sessions are live first.
+ipcMain.handle('remove-host', (_event, hostId) => {
+  remoteReattach.forgetHostSessions(hostId);
+  const hosts = remoteHostsIpc.removeHost(hostId);
+  remoteRemoval.purgeHost(hostId);
+  notifyRendererProjectsChanged();
+  return hosts;
+});
+ipcMain.handle('remove-remote-account', (_event, hostId, accountId) => {
+  const hosts = remoteHostsIpc.removeRemoteAccount(hostId, accountId);
+  remoteRemoval.purgeAccount(hostId, accountId);
+  // The removed Account may have been the active one; re-point the mirror to the fallback (Default)
+  // and re-fetch so the sidebar reflects the surviving Account at once rather than on the next poll.
+  remoteMirrorIpc.syncOnce();
+  notifyRendererProjectsChanged();
+  return hosts;
+});
+// The confirmation shown before a removal (AC3): count the Sessions live on the Host now (unknown
+// when Unreachable), and build the message in the pure core so the renderer only has to show it.
+ipcMain.handle('preview-remote-removal', async (_event, hostId, accountId = null) => {
+  const host = remoteHostsIpc.getHosts().find(h => h.id === hostId);
+  const { reachable, count } = await remoteHostsIpc.countRemoteSessions(hostId);
+  const accountName = accountId && host
+    ? (host.accounts.find(a => a.id === accountId) || {}).name || null
+    : null;
+  const message = remoteRemovalCore.describeRemoval({
+    hostName: (host && host.name) || hostId, accountName, liveCount: count, reachable,
+  });
+  return { reachable, count, message };
+});
 ipcMain.handle('test-host-connection', (_event, hostId) => remoteHostsIpc.testConnection(hostId));
 ipcMain.handle('get-host-reachability', () => remoteHostsIpc.getReachability());
 
@@ -1900,6 +1934,22 @@ const remoteMirrorIpc = remoteMirrorIpcModule.createRemoteMirrorIpc({
   // .jsonl down, re-run transition detection over that Host's live Sessions so the one that re-keyed
   // follows its real id (and its tmux session is renamed to match). VIN-155.
   onIndexed: (descriptor) => runRemoteTransitions(descriptor),
+});
+
+// --- Forgetting a removed Remote Host / Account (VIN-161) ---
+// The pure core (remote-removal.js) decides which ssh://<hostId>/ keys a Host owns and builds the
+// confirmation; this adapter applies the client-side purge over the db, the session cache and the
+// mirror files on disk. It never shells out: the Host is only ever dropped from the local store, so
+// its tmux Sessions survive (AC2). The removal IPC handlers above orchestrate detach → store → purge.
+const remoteRemovalCore = require('./remote-removal');
+const remoteRemoval = require('./remote-removal-ipc').createRemoteRemoval({
+  sessionCache,
+  deleteRemoteCacheByFolderPrefix,
+  deleteCachedSessionsByAccount,
+  deleteProjectDataByPathPrefix,
+  deleteSettingsByKeyPrefix,
+  mirrorRoot: MIRROR_ROOT,
+  log,
 });
 
 // Switch a Host's active Account (VIN-158). The adapter persists the choice on the Host record (so
@@ -2295,6 +2345,10 @@ function wirePtyHandlers(ptyProcess, session, sessionId) {
   });
 
   ptyProcess.onExit(({ exitCode, signal }) => {
+    // The Host was removed and this Session forgotten (VIN-161): forgetHostSessions killed the local
+    // ssh client to detach — Claude keeps running in tmux on the Host (AC2) — and already dropped the
+    // row. Make no drop/exit decision: nothing may probe or finalize against a removed Host.
+    if (session._forgotten) { session.pty = null; return; }
     // A live Remote Session whose ssh PTY dies may just have dropped its link (laptop slept, Wi-Fi
     // cut), not exited: don't finalize it as exited until a probe says Claude really ended (VIN-160).
     // A *foreground launch* that never connected is a failed launch, not a drop — it falls through to

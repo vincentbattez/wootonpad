@@ -29,7 +29,19 @@ async function onAddHost(host, clear) {
   clear?.();
 }
 
+// Removing a Host or Account forgets everything about it on the client and never stops a Session
+// running on the Host (VIN-161). Confirm first, naming how many Sessions are live there — the count
+// and the message come from the main process (unknown when the Host is Unreachable, AC3).
+async function confirmRemoval(hostId, accountId = null) {
+  const preview = await api.previewRemoteRemoval?.(hostId, accountId);
+  const message = preview?.message
+    || (accountId ? 'Remove this Account? Its mirror and cached Sessions will be forgotten.'
+      : 'Remove this Remote Host? Everything WootonPad knows about it will be forgotten.');
+  return window.confirm(message);
+}
+
 async function onRemoveHost(hostId) {
+  if (!await confirmRemoval(hostId)) return;
   hostsStore.hosts = (await api.removeHost?.(hostId)) || [];
 }
 
@@ -39,6 +51,7 @@ async function onAddAccount(hostId, account, clear) {
 }
 
 async function onRemoveAccount(hostId, accountId) {
+  if (!await confirmRemoval(hostId, accountId)) return;
   hostsStore.hosts = (await api.removeRemoteAccount?.(hostId, accountId)) || hostsStore.hosts;
 }
 

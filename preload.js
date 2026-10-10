@@ -61,6 +61,9 @@ contextBridge.exposeInMainWorld('api', {
   addRemoteAccount: (hostId, account) => ipcRenderer.invoke('add-remote-account', hostId, account),
   removeHost: (hostId) => ipcRenderer.invoke('remove-host', hostId),
   removeRemoteAccount: (hostId, accountId) => ipcRenderer.invoke('remove-remote-account', hostId, accountId),
+  // The confirmation shown before removing a Host or Account (VIN-161): how many Sessions are live
+  // (unknown when Unreachable) and the message to show. accountId null means the whole Host.
+  previewRemoteRemoval: (hostId, accountId = null) => ipcRenderer.invoke('preview-remote-removal', hostId, accountId),
   // Switch a Host's active Account (VIN-158): persists the choice on the Host and re-points its
   // mirror so that Host's Remote Projects swap to the new Account.
   setRemoteActiveAccount: (hostId, accountId) => ipcRenderer.invoke('set-remote-active-account', hostId, accountId),
